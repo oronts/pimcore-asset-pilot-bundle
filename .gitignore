@@ -1,0 +1,11 @@
+/vendor/
+/node_modules/
+/.phpunit.result.cache
+/.phpunit.cache/
+/.php-cs-fixer.cache
+/assets/studio/node_modules/
+/assets/studio/dist/
+/public/studio/build/
+*.DS_Store
+.idea/
+.vscode/
