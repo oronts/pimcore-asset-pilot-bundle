@@ -1,0 +1,147 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Condition;
+
+use Oronts\AssetPilotBundle\Model\Rule;
+use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
+
+class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
+{
+    private ?ExpressionLanguage $expressionLanguage = null;
+
+    /** @var array<string, \Symfony\Component\ExpressionLanguage\ParsedExpression> */
+    protected array $compiledCache = [];
+
+    public function __construct(
+        protected readonly LoggerInterface $logger,
+    ) {}
+
+    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
+    {
+        if ($rule->condition === null || $rule->condition === '') {
+            return true;
+        }
+
+        try {
+            $result = (bool) $this->getExpressionLanguage()->evaluate(
+                $this->getCompiledExpression($rule->condition),
+                [
+                    'object' => $object,
+                    'asset' => $asset,
+                    'rule' => $rule,
+                ],
+            );
+
+            $this->logger->debug('Condition "{condition}" evaluated to {result} for rule "{rule}".', [
+                'condition' => $rule->condition,
+                'result' => $result ? 'true' : 'false',
+                'rule' => $rule->name,
+            ]);
+
+            return $result;
+        } catch (\Throwable $e) {
+            $this->logger->warning('Condition evaluation failed for rule "{rule}": {error}', [
+                'rule' => $rule->name,
+                'condition' => $rule->condition,
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            return false;
+        }
+    }
+
+    protected function getCompiledExpression(string $expression): \Symfony\Component\ExpressionLanguage\ParsedExpression
+    {
+        if (!isset($this->compiledCache[$expression])) {
+            $this->compiledCache[$expression] = $this->getExpressionLanguage()->parse(
+                $expression,
+                ['object', 'asset', 'rule'],
+            );
+        }
+
+        return $this->compiledCache[$expression];
+    }
+
+    protected function getExpressionLanguage(): ExpressionLanguage
+    {
+        if ($this->expressionLanguage !== null) {
+            return $this->expressionLanguage;
+        }
+
+        $this->expressionLanguage = new ExpressionLanguage();
+        $this->registerFunctions();
+
+        return $this->expressionLanguage;
+    }
+
+    protected function registerFunctions(): void
+    {
+        $el = $this->expressionLanguage;
+
+        $el->register(
+            'asset_type',
+            static fn (string $asset): string => sprintf('(%s)->getType()', $asset),
+            static fn (array $vars, Asset $asset): string => $asset->getType(),
+        );
+
+        $el->register(
+            'asset_size',
+            static fn (string $asset): string => sprintf('(%s)->getFileSize()', $asset),
+            static fn (array $vars, Asset $asset): int => (int) $asset->getFileSize(),
+        );
+
+        $el->register(
+            'asset_extension',
+            static fn (string $asset): string => sprintf('pathinfo((%s)->getFilename(), PATHINFO_EXTENSION)', $asset),
+            static function (array $vars, Asset $asset): string {
+                return strtolower(pathinfo($asset->getFilename(), PATHINFO_EXTENSION));
+            },
+        );
+
+        $el->register(
+            'object_class',
+            static fn (string $object): string => sprintf('(%s)->getClassName()', $object),
+            static fn (array $vars, AbstractObject $object): string => $object->getClassName(),
+        );
+
+        $el->register(
+            'has_property',
+            static fn (string $element, string $name): string => sprintf('(%s)->getProperty(%s) !== null', $element, $name),
+            static function (array $vars, Asset|AbstractObject $element, string $name): bool {
+                return $element->getProperty($name) !== null;
+            },
+        );
+
+        $el->register(
+            'path_matches',
+            static fn (string $asset, string $pattern): string => sprintf('preg_match(%s, (%s)->getFullPath())', $pattern, $asset),
+            static function (array $vars, Asset $asset, string $pattern): bool {
+                return (bool) preg_match($pattern, $asset->getFullPath());
+            },
+        );
+
+        $el->register(
+            'is_image',
+            static fn (string $asset): string => sprintf('(%s)->getType() === "image"', $asset),
+            static fn (array $vars, Asset $asset): bool => $asset->getType() === 'image',
+        );
+
+        $el->register(
+            'is_video',
+            static fn (string $asset): string => sprintf('(%s)->getType() === "video"', $asset),
+            static fn (array $vars, Asset $asset): bool => $asset->getType() === 'video',
+        );
+
+        $el->register(
+            'is_document',
+            static fn (string $asset): string => sprintf('(%s)->getType() === "document"', $asset),
+            static fn (array $vars, Asset $asset): bool => $asset->getType() === 'document',
+        );
+    }
+}
