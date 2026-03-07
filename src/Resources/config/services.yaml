@@ -1,0 +1,162 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: false
+
+    _instanceof:
+        Oronts\AssetPilotBundle\PathResolver\PathResolverInterface:
+            tags: ['oronts_asset_pilot.path_resolver']
+
+        Oronts\AssetPilotBundle\Filter\AssetFilterInterface:
+            tags: ['oronts_asset_pilot.filter']
+
+        Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface:
+            tags: ['oronts_asset_pilot.strategy']
+
+    # -- Core services ----------------------------------------------------------
+
+    Oronts\AssetPilotBundle\:
+        resource: '../../*'
+        exclude:
+            - '../../DependencyInjection/'
+            - '../../Resources/'
+            - '../../Tests/'
+            - '../../Model/'
+            - '../../Enum/'
+            - '../../Dto/'
+            - '../../Message/'
+            - '../../Event/'
+            - '../../OrontsAssetPilotBundle.php'
+            - '../../Installer.php'
+            - '../../Webpack/'
+
+    # -- Interface aliases (autowiring) ------------------------------------------
+
+    Oronts\AssetPilotBundle\Filter\AssetFilterInterface: '@Oronts\AssetPilotBundle\Filter\CompositeFilter'
+    Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface: '@Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator'
+    Oronts\AssetPilotBundle\PathResolver\PathResolverInterface: '@Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver'
+    Oronts\AssetPilotBundle\Naming\NamingStrategyInterface: '@Oronts\AssetPilotBundle\Naming\SafeNamingStrategy'
+
+    # -- Engine -----------------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Engine\RuleEngine:
+        arguments:
+            $rules: '%oronts_asset_pilot.rules%'
+
+    # -- Path resolvers ---------------------------------------------------------
+
+    Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver:
+        tags:
+            - { name: 'oronts_asset_pilot.path_resolver', priority: 0 }
+
+    # -- Strategies -------------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Strategy\AlwaysMoveStrategy:
+        tags:
+            - { name: 'oronts_asset_pilot.strategy', alias: 'always' }
+
+    Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy:
+        tags:
+            - { name: 'oronts_asset_pilot.strategy', alias: 'first_assignment' }
+
+    Oronts\AssetPilotBundle\Strategy\CallbackStrategy:
+        arguments:
+            $container: '@service_container'
+        tags:
+            - { name: 'oronts_asset_pilot.strategy', alias: 'callback' }
+
+    Oronts\AssetPilotBundle\Strategy\StrategyResolver:
+        arguments:
+            $strategies: !tagged_iterator { tag: 'oronts_asset_pilot.strategy', index_by: 'alias' }
+
+    # -- Filters ----------------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Filter\AssetTypeFilter:
+        tags:
+            - { name: 'oronts_asset_pilot.filter' }
+
+    Oronts\AssetPilotBundle\Filter\AssetSizeFilter:
+        tags:
+            - { name: 'oronts_asset_pilot.filter' }
+
+    Oronts\AssetPilotBundle\Filter\ExtensionFilter:
+        tags:
+            - { name: 'oronts_asset_pilot.filter' }
+
+    Oronts\AssetPilotBundle\Filter\CompositeFilter:
+        arguments:
+            - !tagged_iterator oronts_asset_pilot.filter
+
+    # -- Naming -----------------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Naming\SafeNamingStrategy:
+        arguments:
+            $collisionPattern: '%oronts_asset_pilot.naming.collision_pattern%'
+            $slugify: '%oronts_asset_pilot.naming.slugify%'
+
+    # -- Audit ------------------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Audit\AuditLogger:
+        arguments:
+            $enabled: '%oronts_asset_pilot.audit.enabled%'
+            $retentionDays: '%oronts_asset_pilot.audit.retention_days%'
+
+    # -- Loop guard (Redis-backed for horizontal scaling) ----------------------
+
+    Oronts\AssetPilotBundle\Service\LoopGuard:
+        arguments:
+            $cache: '@cache.app'
+
+    # -- Event listeners --------------------------------------------------------
+
+    Oronts\AssetPilotBundle\EventListener\DataObjectSaveListener:
+        arguments:
+            $enabled: '%oronts_asset_pilot.enabled%'
+            $allowedClasses: []
+            $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
+        tags:
+            - { name: 'kernel.event_listener', event: 'pimcore.dataobject.postUpdate', method: 'onPostUpdate' }
+            - { name: 'kernel.event_listener', event: 'pimcore.dataobject.postAdd', method: 'onPostAdd' }
+
+    Oronts\AssetPilotBundle\EventListener\AssetUploadListener:
+        arguments:
+            $enabled: '%oronts_asset_pilot.enabled%'
+            $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
+        tags:
+            - { name: 'kernel.event_listener', event: 'pimcore.asset.postAdd', method: 'onAssetPostAdd' }
+            - { name: 'kernel.event_listener', event: 'pimcore.asset.postUpdate', method: 'onAssetPostUpdate' }
+
+    # -- Console commands (autoconfigure handles #[AsCommand]) ------------------
+
+    Oronts\AssetPilotBundle\Command\OrganizeCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\StatusCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\AuditCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\CleanupUnusedCommand:
+        tags:
+            - { name: 'console.command' }
+
+    # -- Messenger handlers (autoconfigure handles #[AsMessageHandler]) ---------
+
+    Oronts\AssetPilotBundle\MessageHandler\OrganizeAssetsHandler:
+        tags:
+            - { name: 'messenger.message_handler' }
+
+    Oronts\AssetPilotBundle\MessageHandler\BulkOrganizeHandler:
+        tags:
+            - { name: 'messenger.message_handler' }
+
+    # -- API controllers --------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Controller\Api\:
+        resource: '../../Controller/Api/'
+        tags: ['controller.service_arguments']

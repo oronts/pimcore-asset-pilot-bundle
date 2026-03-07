@@ -1,0 +1,62 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\DependencyInjection;
+
+use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Extension\Extension;
+use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
+use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
+
+class OrontsAssetPilotExtension extends Extension implements PrependExtensionInterface
+{
+    public function prepend(ContainerBuilder $container): void
+    {
+        if ($container->hasExtension('pimcore_studio_ui')) {
+            $loader = new YamlFileLoader(
+                $container,
+                new FileLocator(__DIR__ . '/../../config'),
+            );
+            $loader->load('studio_ui.yaml');
+        }
+    }
+
+    public function load(array $configs, ContainerBuilder $container): void
+    {
+        $configuration = new Configuration();
+        $config = $this->processConfiguration($configuration, $configs);
+
+        $container->setParameter('oronts_asset_pilot.config', $config);
+        $container->setParameter('oronts_asset_pilot.enabled', $config['enabled']);
+        $container->setParameter('oronts_asset_pilot.strategies', $config['strategies']);
+        $container->setParameter('oronts_asset_pilot.logging', $config['logging']);
+
+        // Naming parameters
+        $container->setParameter('oronts_asset_pilot.naming.collision_pattern', $config['naming']['collision_pattern']);
+        $container->setParameter('oronts_asset_pilot.naming.slugify', $config['naming']['slugify']);
+
+        // Async parameters
+        $container->setParameter('oronts_asset_pilot.async.enabled', $config['async']['enabled']);
+        $container->setParameter('oronts_asset_pilot.async.batch_size', $config['async']['batch_size']);
+
+        // Audit parameters
+        $container->setParameter('oronts_asset_pilot.audit.enabled', $config['audit']['enabled']);
+        $container->setParameter('oronts_asset_pilot.audit.retention_days', $config['audit']['retention_days']);
+
+        // Process rules into Rule objects
+        $rules = [];
+        foreach ($config['rules'] as $name => $ruleConfig) {
+            $ruleConfig['name'] = $name;
+            $rules[] = $ruleConfig;
+        }
+        $container->setParameter('oronts_asset_pilot.rules', $rules);
+
+        $loader = new YamlFileLoader(
+            $container,
+            new FileLocator(__DIR__ . '/../Resources/config'),
+        );
+        $loader->load('services.yaml');
+    }
+}

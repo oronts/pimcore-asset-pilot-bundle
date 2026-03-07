@@ -1,0 +1,4 @@
+oronts_asset_pilot_api:
+    resource: "../../src/Controller/Api/"
+    type: attribute
+    prefix: /pimcore-studio/api/asset-pilot
