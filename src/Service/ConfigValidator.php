@@ -1,0 +1,225 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Service;
+
+use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Model\ValidationResult;
+use Pimcore\Model\DataObject\ClassDefinition;
+use Psr\Container\ContainerInterface;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
+use Twig\Environment;
+use Twig\Loader\ArrayLoader;
+
+class ConfigValidator
+{
+    private const array VALID_FILTER_TYPES = ['image', 'video', 'document', 'audio', 'text', 'archive', 'folder', 'unknown'];
+
+    public function __construct(
+        private readonly ContainerInterface $container,
+        private readonly LoggerInterface $logger,
+    ) {}
+
+    /** @return ValidationResult[] */
+    public function validate(array $rules): array
+    {
+        $results = [];
+
+        foreach ($rules as $rule) {
+            $results = [...$results, ...$this->validateRule($rule)];
+        }
+
+        $results = [...$results, ...$this->validateDuplicatePriorities($rules)];
+
+        return $results;
+    }
+
+    /** @return ValidationResult[] */
+    private function validateRule(Rule $rule): array
+    {
+        return [
+            ...$this->validateClassName($rule),
+            ...$this->validateFields($rule),
+            ...$this->validateConditionSyntax($rule),
+            ...$this->validatePathTemplate($rule),
+            ...$this->validateCallbackService($rule),
+            ...$this->validateFilterValues($rule),
+            ...$this->validateStrategyCallback($rule),
+        ];
+    }
+
+    /** @return ValidationResult[] */
+    private function validateClassName(Rule $rule): array
+    {
+        if ($rule->class === '*') {
+            return [new ValidationResult($rule->name, 'class_exists', 'pass', 'Wildcard class (*) matches all objects')];
+        }
+
+        $classDef = ClassDefinition::getByName($rule->class);
+        if ($classDef === null) {
+            return [new ValidationResult($rule->name, 'class_exists', 'fail', "Class \"{$rule->class}\" not found in Pimcore")];
+        }
+
+        return [new ValidationResult($rule->name, 'class_exists', 'pass', "Class \"{$rule->class}\" exists")];
+    }
+
+    /** @return ValidationResult[] */
+    private function validateFields(Rule $rule): array
+    {
+        if ($rule->fields === []) {
+            return [new ValidationResult($rule->name, 'fields_exist', 'pass', 'No field restrictions (all fields)')];
+        }
+
+        if ($rule->class === '*') {
+            return [new ValidationResult($rule->name, 'fields_exist', 'warning', 'Cannot validate fields for wildcard class')];
+        }
+
+        $classDef = ClassDefinition::getByName($rule->class);
+        if ($classDef === null) {
+            return [new ValidationResult($rule->name, 'fields_exist', 'warning', 'Cannot validate fields — class not found')];
+        }
+
+        $results = [];
+        $fieldDefs = $classDef->getFieldDefinitions();
+        $fieldNames = array_keys($fieldDefs);
+
+        // Also collect localized field names
+        $localizedFieldNames = [];
+        $localizedFields = $classDef->getFieldDefinition('localizedfields');
+        if ($localizedFields !== null) {
+            $localizedFieldNames = array_keys($localizedFields->getFieldDefinitions());
+        }
+
+        foreach ($rule->fields as $field) {
+            if (in_array($field, $fieldNames, true)) {
+                $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class}");
+            } elseif (in_array($field, $localizedFieldNames, true)) {
+                $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class} (localized)");
+            } else {
+                $results[] = new ValidationResult($rule->name, 'fields_exist', 'fail', "Field \"{$field}\" not found in {$rule->class}");
+            }
+        }
+
+        return $results;
+    }
+
+    /** @return ValidationResult[] */
+    private function validateConditionSyntax(Rule $rule): array
+    {
+        if ($rule->condition === null || $rule->condition === '') {
+            return [new ValidationResult($rule->name, 'condition_syntax', 'pass', 'No condition defined')];
+        }
+
+        try {
+            $el = new ExpressionLanguage();
+            $el->parse($rule->condition, ['object', 'asset', 'rule']);
+
+            return [new ValidationResult($rule->name, 'condition_syntax', 'pass', "Condition syntax valid: {$rule->condition}")];
+        } catch (\Throwable $e) {
+            return [new ValidationResult($rule->name, 'condition_syntax', 'fail', "Condition syntax error: {$e->getMessage()}")];
+        }
+    }
+
+    /** @return ValidationResult[] */
+    private function validatePathTemplate(Rule $rule): array
+    {
+        try {
+            $loader = new ArrayLoader(['template' => $rule->targetPath]);
+            $twig = new Environment($loader);
+            $twig->parse($twig->tokenize($twig->getLoader()->getSourceContext('template')));
+
+            return [new ValidationResult($rule->name, 'path_template', 'pass', "Path template syntax valid: {$rule->targetPath}")];
+        } catch (\Throwable $e) {
+            return [new ValidationResult($rule->name, 'path_template', 'fail', "Path template syntax error: {$e->getMessage()}")];
+        }
+    }
+
+    /** @return ValidationResult[] */
+    private function validateCallbackService(Rule $rule): array
+    {
+        if ($rule->strategy->value !== 'callback') {
+            return [];
+        }
+
+        if ($rule->callback === null || $rule->callback === '') {
+            return [new ValidationResult($rule->name, 'callback_service', 'fail', 'Callback strategy requires a callback service ID')];
+        }
+
+        if ($this->container->has($rule->callback)) {
+            return [new ValidationResult($rule->name, 'callback_service', 'pass', "Callback service \"{$rule->callback}\" exists")];
+        }
+
+        return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found in container")];
+    }
+
+    /** @return ValidationResult[] */
+    private function validateFilterValues(Rule $rule): array
+    {
+        $results = [];
+        $filters = $rule->filters;
+
+        $types = $filters['types'] ?? [];
+        if ($types !== []) {
+            foreach ($types as $type) {
+                if (!in_array($type, self::VALID_FILTER_TYPES, true)) {
+                    $results[] = new ValidationResult($rule->name, 'filter_types', 'warning', "Unknown filter type \"{$type}\". Valid: " . implode(', ', self::VALID_FILTER_TYPES));
+                }
+            }
+            if ($results === []) {
+                $results[] = new ValidationResult($rule->name, 'filter_types', 'pass', 'Filter types are valid');
+            }
+        }
+
+        $extensions = $filters['extensions'] ?? [];
+        if ($extensions !== []) {
+            foreach ($extensions as $ext) {
+                if (!preg_match('/^[a-z0-9]+$/', $ext)) {
+                    $results[] = new ValidationResult($rule->name, 'filter_extensions', 'warning', "Extension \"{$ext}\" should be lowercase alphanumeric");
+                }
+            }
+            if (!array_filter($results, static fn (ValidationResult $r) => $r->check === 'filter_extensions')) {
+                $results[] = new ValidationResult($rule->name, 'filter_extensions', 'pass', 'Filter extensions are valid');
+            }
+        }
+
+        return $results;
+    }
+
+    /** @return ValidationResult[] */
+    private function validateStrategyCallback(Rule $rule): array
+    {
+        if ($rule->strategy->value !== 'callback' && $rule->callback !== null && $rule->callback !== '') {
+            return [new ValidationResult($rule->name, 'strategy_callback', 'warning', "Callback \"{$rule->callback}\" is set but strategy is \"{$rule->strategy->value}\" (not \"callback\")")];
+        }
+
+        return [];
+    }
+
+    /** @return ValidationResult[] */
+    private function validateDuplicatePriorities(array $rules): array
+    {
+        $results = [];
+        $byClass = [];
+
+        foreach ($rules as $rule) {
+            $key = $rule->class . ':' . $rule->priority;
+            $byClass[$key][] = $rule->name;
+        }
+
+        foreach ($byClass as $key => $ruleNames) {
+            if (count($ruleNames) > 1) {
+                [$class, $priority] = explode(':', $key, 2);
+                $results[] = new ValidationResult(
+                    implode(', ', $ruleNames),
+                    'duplicate_priority',
+                    'warning',
+                    "Rules " . implode(', ', $ruleNames) . " target class \"{$class}\" with same priority {$priority}",
+                );
+            }
+        }
+
+        return $results;
+    }
+}
