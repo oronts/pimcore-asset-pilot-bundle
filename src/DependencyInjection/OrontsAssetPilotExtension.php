@@ -45,6 +45,10 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.audit.enabled', $config['audit']['enabled']);
         $container->setParameter('oronts_asset_pilot.audit.retention_days', $config['audit']['retention_days']);
 
+        // Protection parameters
+        $container->setParameter('oronts_asset_pilot.protection.exclude_folders', $config['protection']['exclude_folders']);
+        $container->setParameter('oronts_asset_pilot.protection.lock_property', $config['protection']['lock_property']);
+
         // Process rules into Rule objects
         $rules = [];
         foreach ($config['rules'] as $name => $ruleConfig) {

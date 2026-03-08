@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Pimcore\Extension\Bundle\Installer\SettingsStoreAwareInstaller;
+use Pimcore\Model\User\Permission\Definition;
 use Symfony\Component\HttpKernel\Bundle\BundleInterface;
 
 class Installer extends SettingsStoreAwareInstaller
@@ -60,6 +62,16 @@ class Installer extends SettingsStoreAwareInstaller
             $this->db->executeStatement($sql);
         }
 
+        // Register Pimcore permissions
+        foreach (AssetPilotPermission::cases() as $permission) {
+            $def = Definition::getByKey($permission->value);
+            if ($def === null) {
+                Definition::create($permission->value)
+                    ->setCategory(AssetPilotPermission::CATEGORY)
+                    ->save();
+            }
+        }
+
         parent::install();
     }
 
@@ -81,6 +93,12 @@ class Installer extends SettingsStoreAwareInstaller
 
         foreach ($sqlStatements as $sql) {
             $this->db->executeStatement($sql);
+        }
+
+        // Remove Pimcore permissions
+        foreach (AssetPilotPermission::cases() as $permission) {
+            $def = Definition::getByKey($permission->value);
+            $def?->delete();
         }
 
         parent::uninstall();

@@ -29,6 +29,7 @@ class Configuration implements ConfigurationInterface
         $this->addAsyncSection($rootNode);
         $this->addAuditSection($rootNode);
         $this->addLoggingSection($rootNode);
+        $this->addProtectionSection($rootNode);
 
         return $treeBuilder;
     }
@@ -208,6 +209,28 @@ class Configuration implements ConfigurationInterface
                             ->defaultValue('asset_pilot')
                             ->cannotBeEmpty()
                             ->info('Pimcore/Monolog log channel name.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addProtectionSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('protection')
+                    ->addDefaultsIfNotSet()
+                    ->info('Asset protection settings to prevent unwanted organization.')
+                    ->children()
+                        ->arrayNode('exclude_folders')
+                            ->scalarPrototype()->end()
+                            ->defaultValue([])
+                            ->info('Asset folders excluded from organization (e.g. ["/Protected/", "/Manual/"]).')
+                        ->end()
+                        ->scalarNode('lock_property')
+                            ->defaultValue('asset_pilot_locked')
+                            ->info('Custom property name that locks an asset from organization.')
                         ->end()
                     ->end()
                 ->end()

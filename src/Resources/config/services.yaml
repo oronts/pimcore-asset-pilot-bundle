@@ -95,12 +95,31 @@ services:
             $collisionPattern: '%oronts_asset_pilot.naming.collision_pattern%'
             $slugify: '%oronts_asset_pilot.naming.slugify%'
 
+    # -- Config validator -------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Service\ConfigValidator:
+        arguments:
+            $container: '@service_container'
+
     # -- Audit ------------------------------------------------------------------
 
     Oronts\AssetPilotBundle\Audit\AuditLogger:
         arguments:
             $enabled: '%oronts_asset_pilot.audit.enabled%'
             $retentionDays: '%oronts_asset_pilot.audit.retention_days%'
+
+    # -- Asset organizer (with protection params) ------------------------------
+
+    Oronts\AssetPilotBundle\Service\AssetOrganizer:
+        arguments:
+            $excludeFolders: '%oronts_asset_pilot.protection.exclude_folders%'
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    # -- Unused asset finder (with lock property) ------------------------------
+
+    Oronts\AssetPilotBundle\Service\UnusedAssetFinder:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
     # -- Loop guard (Redis-backed for horizontal scaling) ----------------------
 
@@ -145,6 +164,14 @@ services:
         tags:
             - { name: 'console.command' }
 
+    Oronts\AssetPilotBundle\Command\ValidateConfigCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\DebugRuleCommand:
+        tags:
+            - { name: 'console.command' }
+
     # -- Messenger handlers (autoconfigure handles #[AsMessageHandler]) ---------
 
     Oronts\AssetPilotBundle\MessageHandler\OrganizeAssetsHandler:
@@ -159,4 +186,20 @@ services:
 
     Oronts\AssetPilotBundle\Controller\Api\:
         resource: '../../Controller/Api/'
+        tags: ['controller.service_arguments']
+
+    Oronts\AssetPilotBundle\Controller\Api\DashboardController:
+        arguments:
+            $securityService: '@Pimcore\Bundle\StudioBackendBundle\Security\Service\SecurityServiceInterface'
+        tags: ['controller.service_arguments']
+
+    Oronts\AssetPilotBundle\Service\AssetSearchService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\AssetPropertyService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Controller\Api\AssetManagementController:
         tags: ['controller.service_arguments']

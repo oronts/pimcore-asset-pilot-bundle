@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Engine;
 use Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\Model\RuleMatch;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use Pimcore\Model\Asset;
@@ -148,6 +149,135 @@ class RuleEngine
         }
 
         return $matches;
+    }
+
+    /**
+     * @return array{matches: RuleMatch[], evaluations: RuleEvaluation[]}
+     */
+    public function explain(AbstractObject $object, Asset $asset, ?string $fieldName = null, ?string $locale = null): array
+    {
+        $matches = [];
+        $evaluations = [];
+
+        foreach ($this->sortedRules as $rule) {
+            if (!$rule->enabled) {
+                $evaluations[] = new RuleEvaluation(
+                    ruleName: $rule->name,
+                    matched: false,
+                    rejectionReason: 'disabled',
+                    conditionExpression: $rule->condition,
+                    conditionResult: null,
+                    conditionError: null,
+                    filterDetails: null,
+                    resolvedPath: null,
+                    priority: $rule->priority,
+                    enabled: false,
+                );
+                continue;
+            }
+
+            if (!$this->matchesClass($rule, $object)) {
+                $evaluations[] = new RuleEvaluation(
+                    ruleName: $rule->name,
+                    matched: false,
+                    rejectionReason: 'class_mismatch',
+                    conditionExpression: $rule->condition,
+                    conditionResult: null,
+                    conditionError: null,
+                    filterDetails: 'expected ' . $rule->class . ', got ' . $object->getClassName(),
+                    resolvedPath: null,
+                    priority: $rule->priority,
+                    enabled: true,
+                );
+                continue;
+            }
+
+            if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
+                $evaluations[] = new RuleEvaluation(
+                    ruleName: $rule->name,
+                    matched: false,
+                    rejectionReason: 'field_mismatch',
+                    conditionExpression: $rule->condition,
+                    conditionResult: null,
+                    conditionError: null,
+                    filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']',
+                    resolvedPath: null,
+                    priority: $rule->priority,
+                    enabled: true,
+                );
+                continue;
+            }
+
+            $conditionResult = null;
+            $conditionError = null;
+            if ($rule->condition !== null && $rule->condition !== '') {
+                try {
+                    $conditionResult = $this->conditionEvaluator->evaluate($object, $asset, $rule);
+                } catch (\Throwable $e) {
+                    $conditionResult = false;
+                    $conditionError = $e->getMessage();
+                }
+            } else {
+                $conditionResult = true;
+            }
+
+            if (!$conditionResult) {
+                $evaluations[] = new RuleEvaluation(
+                    ruleName: $rule->name,
+                    matched: false,
+                    rejectionReason: 'condition_failed',
+                    conditionExpression: $rule->condition,
+                    conditionResult: false,
+                    conditionError: $conditionError,
+                    filterDetails: null,
+                    resolvedPath: null,
+                    priority: $rule->priority,
+                    enabled: true,
+                );
+                continue;
+            }
+
+            if (!$this->filter->accept($asset, $object, $rule)) {
+                $evaluations[] = new RuleEvaluation(
+                    ruleName: $rule->name,
+                    matched: false,
+                    rejectionReason: 'filter_rejected',
+                    conditionExpression: $rule->condition,
+                    conditionResult: true,
+                    conditionError: null,
+                    filterDetails: 'asset rejected by filter',
+                    resolvedPath: null,
+                    priority: $rule->priority,
+                    enabled: true,
+                );
+                continue;
+            }
+
+            $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
+
+            $evaluations[] = new RuleEvaluation(
+                ruleName: $rule->name,
+                matched: true,
+                rejectionReason: null,
+                conditionExpression: $rule->condition,
+                conditionResult: true,
+                conditionError: null,
+                filterDetails: null,
+                resolvedPath: $resolvedPath,
+                priority: $rule->priority,
+                enabled: true,
+            );
+
+            $matches[] = new RuleMatch(
+                rule: $rule,
+                object: $object,
+                asset: $asset,
+                resolvedPath: $resolvedPath,
+                locale: $locale,
+            );
+        }
+
+        return ['matches' => $matches, 'evaluations' => $evaluations];
     }
 
     /** @return Rule[] */
