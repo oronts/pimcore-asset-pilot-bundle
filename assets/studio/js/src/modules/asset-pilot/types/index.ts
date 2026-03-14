@@ -1,0 +1,226 @@
+export interface DashboardData {
+  totalOrganized: number
+  totalPending: number
+  totalFailed: number
+  totalSkipped: number
+  rulesCount: number
+  recentOperations: AuditEntry[]
+  operationsByClass: Record<string, number>
+}
+
+export interface RuleData {
+  name: string
+  class: string
+  fields: string[]
+  condition: string | null
+  targetPath: string
+  strategy: string
+  priority: number
+  enabled: boolean
+  filters: Record<string, unknown>
+}
+
+export interface RuleDetail extends RuleData {
+  stats: Record<string, number>
+}
+
+export interface ClassStat {
+  className: string
+  total: number
+  completed: number
+  failed: number
+  skipped: number
+  ruleCount: number
+}
+
+export interface MoveOperation {
+  assetId: number
+  sourcePath: string
+  targetPath: string
+  ruleName: string
+  objectClass?: string
+}
+
+export interface OrganizeRequest {
+  objectId: number
+  dryRun?: boolean
+  async?: boolean
+}
+
+export interface BulkOrganizeRequest {
+  className?: string
+  objectIds?: number[]
+  async?: boolean
+  batchSize?: number
+}
+
+export interface OrganizeResponse {
+  dryRun?: boolean
+  operations?: MoveOperation[]
+  results?: OperationResult[]
+  message?: string
+  objectCount?: number
+  batchCount?: number
+}
+
+export interface OperationResult {
+  status: string
+  message: string
+  operation: MoveOperation | null
+}
+
+export interface AuditEntry {
+  id: number
+  asset_id: number
+  asset_path_from: string
+  asset_path_to: string
+  object_id: number
+  object_class: string
+  rule_name: string
+  trigger_type: string
+  status: string
+  error_message: string | null
+  duration_ms: number | null
+  created_at: string
+}
+
+export interface PaginatedAuditResponse {
+  items: AuditEntry[]
+  total: number
+  page: number
+  pages: number
+}
+
+export interface AuditFilters {
+  class?: string
+  status?: string
+  ruleName?: string
+  page?: number
+  limit?: number
+  sort?: string
+  order?: 'asc' | 'desc'
+}
+
+export interface PreviewResponse {
+  objectId: number
+  operations: MoveOperation[]
+}
+
+export interface BulkPreviewObject {
+  id: number
+  key: string
+  className: string
+}
+
+export interface BulkPreviewResponse {
+  objects: BulkPreviewObject[]
+  total: number
+  page: number
+  pages: number
+}
+
+// Unused Assets
+export type ConfidenceLevel = 'definitely_unused' | 'probably_unused' | 'recently_uploaded' | 'historically_used' | 'protected'
+
+export interface UnusedAsset {
+  id: number
+  path: string
+  filename: string
+  type: string
+  mimetype: string | null
+  file_size: number
+  created_at: string | null
+  modified_at: string | null
+  full_path: string
+  locked?: boolean
+  confidence: ConfidenceLevel
+}
+
+export interface UnusedAssetFilters {
+  type?: string
+  extension?: string
+  before?: string
+  after?: string
+  folder?: string
+  minSize?: number
+  maxSize?: number
+  confidence?: string
+  page?: number
+  limit?: number
+  sort?: string
+  order?: 'asc' | 'desc'
+}
+
+export interface PaginatedUnusedResponse {
+  items: UnusedAsset[]
+  total: number
+  page: number
+  pages: number
+}
+
+export interface UnusedAssetStats {
+  totalCount: number
+  totalSize: number
+  totalSizeFormatted: string
+  byType: Array<{ type: string; count: number; total_size: number }>
+}
+
+export interface BulkActionResult {
+  deleted?: number
+  moved?: number
+  tagged?: number
+  updated?: number
+  failed: number
+  errors: Record<number | string, string>
+}
+
+// Explain / Rule Evaluation
+export interface RuleEvaluation {
+  assetId: number
+  assetPath: string
+  fieldName: string
+  locale: string | null
+  ruleName: string
+  matched: boolean
+  rejectionReason: string | null
+  conditionExpression: string | null
+  conditionResult: boolean | null
+  conditionError: string | null
+  filterDetails: string | null
+  resolvedPath: string | null
+  priority: number
+  enabled: boolean
+}
+
+export interface ExplainOperation {
+  assetId: number
+  sourcePath: string
+  targetPath: string
+  ruleName: string
+  status: string
+}
+
+export interface ExplainResponse {
+  objectId: number
+  operations: ExplainOperation[]
+  evaluations: RuleEvaluation[]
+}
+
+// Asset Management
+export interface TagItem {
+  id: number
+  name: string
+  parentId: number
+  path: string
+}
+
+export interface AssetSearchFilters {
+  q?: string
+  type?: string
+  folder?: string
+  objectId?: number
+  page?: number
+  limit?: number
+  sort?: string
+  order?: 'asc' | 'desc'
+}

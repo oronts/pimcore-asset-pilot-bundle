@@ -1,0 +1,97 @@
+import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { ToastProvider } from './shared/toast/toast-context'
+import { DashboardTab } from './dashboard/dashboard-tab'
+import { RulesTab } from './rules/rules-tab'
+import { OperationsTab } from './operations/operations-tab'
+import { AuditTab } from './audit/audit-tab'
+import { UnusedAssetsTab } from './unused-assets/unused-assets-tab'
+import { AssetManagementTab } from './asset-management/asset-management-tab'
+import { PermissionContext, usePermissionsFetch } from '../hooks/use-permissions'
+
+const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'management'] as const
+type TabKey = typeof tabKeys[number]
+
+const tabLabelKeys: Record<TabKey, string> = {
+  dashboard: 'asset-pilot.tabs.dashboard',
+  rules: 'asset-pilot.tabs.rules',
+  operations: 'asset-pilot.tabs.operations',
+  audit: 'asset-pilot.tabs.audit',
+  unused: 'asset-pilot.tabs.unused',
+  management: 'asset-pilot.tabs.management',
+}
+
+export const AssetPilotDashboard: React.FC = () => {
+  const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState<TabKey>('dashboard')
+  const perms = usePermissionsFetch()
+
+  if (perms.loading) {
+    return <div style={{ padding: 24, color: '#8c8c8c', fontFamily: 'Inter, -apple-system, sans-serif' }}>{t('asset-pilot.common.loading')}</div>
+  }
+
+  if (!perms.view) {
+    return (
+      <div style={{ padding: 48, textAlign: 'center', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>&#128274;</div>
+        <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.permission.denied')}</h3>
+        <p style={{ margin: 0, fontSize: 13, color: '#8c8c8c' }}>{t('asset-pilot.permission.denied-desc')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <PermissionContext.Provider value={perms}>
+    <ToastProvider>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+      <div style={{ padding: '16px 24px 0', borderBottom: '1px solid #f0f0f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.nav.title')}</h2>
+          <span style={{
+            fontSize: 11,
+            color: '#8c8c8c',
+            background: '#f5f5f5',
+            padding: '2px 8px',
+            borderRadius: 4,
+            fontWeight: 500,
+          }}>
+            {t('asset-pilot.nav.by-oronts')}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 0 }}>
+          {tabKeys.map(key => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                padding: '8px 16px',
+                border: 'none',
+                borderBottom: activeTab === key ? '2px solid #1677ff' : '2px solid transparent',
+                background: 'none',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: activeTab === key ? 600 : 400,
+                color: activeTab === key ? '#1677ff' : '#595959',
+                transition: 'all 0.2s',
+              }}
+            >
+              {t(tabLabelKeys[key])}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+        {activeTab === 'dashboard' && <DashboardTab onNavigateToAudit={() => setActiveTab('audit')} />}
+        {activeTab === 'rules' && <RulesTab />}
+        {activeTab === 'operations' && <OperationsTab />}
+        {activeTab === 'audit' && <AuditTab />}
+        {activeTab === 'unused' && <UnusedAssetsTab />}
+        {activeTab === 'management' && <AssetManagementTab />}
+      </div>
+    </div>
+    </ToastProvider>
+    </PermissionContext.Provider>
+  )
+}
