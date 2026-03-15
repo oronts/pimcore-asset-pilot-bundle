@@ -1,6 +1,7 @@
 {
     "name": "oronts/asset-pilot-bundle",
     "description": "Intelligent rule-based asset organization engine for Pimcore 12 with expression language conditions, pluggable strategies, async processing, and Studio UI integration.",
+    "version": "1.0.0",
     "type": "pimcore-bundle",
     "license": "AGPL-3.0-or-later",
     "keywords": ["pimcore", "assets", "organization", "automation", "pimcore-12", "studio-ui"],
