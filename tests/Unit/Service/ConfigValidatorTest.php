@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
+use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
 use Oronts\AssetPilotBundle\Service\ConfigValidator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -28,7 +30,12 @@ class ConfigValidatorTest extends TestCase
     protected function setUp(): void
     {
         $this->container = $this->createMock(ContainerInterface::class);
-        $this->validator = new ConfigValidator($this->container, new NullLogger());
+        $this->validator = new ConfigValidator(
+            $this->container,
+            new NullLogger(),
+            new ExpressionConditionEvaluator(new NullLogger()),
+            new TemplatePathResolver(new NullLogger()),
+        );
     }
 
     private function createRule(
@@ -80,6 +87,28 @@ class ConfigValidatorTest extends TestCase
         $condResult = array_values($condResults)[0];
 
         self::assertSame('pass', $condResult->status);
+    }
+
+    #[Test]
+    public function validateConditionUsingBundleFunctionsPasses(): void
+    {
+        $rule = $this->createRule(condition: 'is_image(asset) and asset_type(asset) == "image"');
+        $results = $this->validator->validate([$rule]);
+
+        $condResult = array_values(array_filter($results, static fn (ValidationResult $r) => $r->check === 'condition_syntax'))[0];
+
+        self::assertSame('pass', $condResult->status, 'conditions using the bundle\'s own functions must validate');
+    }
+
+    #[Test]
+    public function validatePathTemplateUsingBundleFiltersPasses(): void
+    {
+        $rule = $this->createRule(targetPath: '/Products/{{ object.getKey()|safe_key }}/{{ coalesce(object.getSapId(), "unknown") }}');
+        $results = $this->validator->validate([$rule]);
+
+        $pathResult = array_values(array_filter($results, static fn (ValidationResult $r) => $r->check === 'path_template'))[0];
+
+        self::assertSame('pass', $pathResult->status, 'templates using the bundle\'s own filters/functions must validate');
     }
 
     #[Test]

@@ -11,6 +11,7 @@ use Pimcore\Model\DataObject\ClassDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Pimcore\Model\DataObject\Concrete;
+use Pimcore\Model\DataObject\Data\ElementMetadata;
 use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Pimcore\Model\DataObject\Data\ImageGallery;
 use Pimcore\Tool;
@@ -147,6 +148,11 @@ class AssetFieldExtractor
             }
 
             return $assets;
+        }
+
+        // advancedMany*Relation fields wrap each target in ElementMetadata; unwrap to the element.
+        if ($value instanceof ElementMetadata) {
+            return $this->extractAssetsFromValue($value->getElement());
         }
 
         if (is_array($value)) {

@@ -56,7 +56,7 @@ class OperationsController
         }
 
         $fieldInfos = $this->fieldExtractor->extract($object);
-        $operations = $this->organizer->dryRun($object);
+        $operations = $this->organizer->dryRun($object, TriggerType::Api);
 
         $allEvaluations = [];
         foreach ($fieldInfos as $fieldInfo) {
@@ -127,7 +127,7 @@ class OperationsController
         ]);
 
         if ($dryRun) {
-            $operations = $this->organizer->dryRun($object);
+            $operations = $this->organizer->dryRun($object, TriggerType::Api);
             return new JsonResponse([
                 'dryRun' => true,
                 'operations' => array_map(static fn ($op) => [
@@ -187,7 +187,7 @@ class OperationsController
             return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
         }
 
-        $operations = $this->organizer->dryRun($object);
+        $operations = $this->organizer->dryRun($object, TriggerType::Api);
 
         return new JsonResponse([
             'objectId' => $objectId,
@@ -236,6 +236,32 @@ class OperationsController
         $this->logger->info('Asset Pilot API: bulk organize triggered for {count} objects', [
             'count' => count($objectIds),
         ]);
+
+        if ($data['dryRun'] ?? false) {
+            $operations = [];
+            foreach ($objectIds as $oid) {
+                $object = AbstractObject::getById((int) $oid);
+                if ($object === null) {
+                    continue;
+                }
+                foreach ($this->organizer->dryRun($object, TriggerType::Api) as $op) {
+                    $operations[] = [
+                        'assetId' => $op->assetId,
+                        'sourcePath' => $op->sourcePath,
+                        'targetPath' => $op->targetPath,
+                        'ruleName' => $op->ruleName,
+                        'objectClass' => $op->objectClass,
+                        'status' => $op->status->value,
+                    ];
+                }
+            }
+
+            return new JsonResponse([
+                'dryRun' => true,
+                'objectCount' => count($objectIds),
+                'operations' => $operations,
+            ]);
+        }
 
         if ($async) {
             $batchSize = $data['batchSize'] ?? 50;

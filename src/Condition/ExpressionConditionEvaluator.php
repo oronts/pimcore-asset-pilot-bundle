@@ -56,6 +56,16 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         }
     }
 
+    /**
+     * Parse-only check used by config validation. Uses the same configured ExpressionLanguage as
+     * evaluate(), so a condition calling the bundle's own functions (is_image, asset_type, ...) is
+     * not falsely reported as a syntax error. Throws on invalid syntax.
+     */
+    public function validateSyntax(string $expression): void
+    {
+        $this->getExpressionLanguage()->parse($expression, ['object', 'asset', 'rule']);
+    }
+
     protected function getCompiledExpression(string $expression): \Symfony\Component\ExpressionLanguage\ParsedExpression
     {
         if (!isset($this->compiledCache[$expression])) {

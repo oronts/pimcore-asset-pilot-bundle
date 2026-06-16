@@ -12,6 +12,7 @@ use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Twig\Environment;
 use Twig\Loader\ArrayLoader;
+use Twig\Source;
 use Twig\TwigFilter;
 use Twig\TwigFunction;
 
@@ -147,6 +148,17 @@ class TemplatePathResolver implements PathResolverInterface
         }
 
         return $context;
+    }
+
+    /**
+     * Parse-only check used by config validation. Uses the same configured Twig environment as
+     * render(), so a template using the bundle's own filters/functions (safe_key, pluck, coalesce,
+     * ...) is not falsely reported as a syntax error. Throws on invalid syntax.
+     */
+    public function validateTemplate(string $template): void
+    {
+        $twig = $this->getTwig();
+        $twig->parse($twig->tokenize(new Source($template, 'path')));
     }
 
     protected function render(string $template, array $context): string

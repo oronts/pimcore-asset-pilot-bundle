@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
+use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
 use Pimcore\Model\DataObject\ClassDefinition;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
-use Twig\Environment;
-use Twig\Loader\ArrayLoader;
 
 class ConfigValidator
 {
@@ -20,6 +19,8 @@ class ConfigValidator
     public function __construct(
         private readonly ContainerInterface $container,
         private readonly LoggerInterface $logger,
+        private readonly ExpressionConditionEvaluator $conditionEvaluator,
+        private readonly TemplatePathResolver $pathResolver,
     ) {}
 
     /** @return ValidationResult[] */
@@ -113,8 +114,7 @@ class ConfigValidator
         }
 
         try {
-            $el = new ExpressionLanguage();
-            $el->parse($rule->condition, ['object', 'asset', 'rule']);
+            $this->conditionEvaluator->validateSyntax($rule->condition);
 
             return [new ValidationResult($rule->name, 'condition_syntax', 'pass', "Condition syntax valid: {$rule->condition}")];
         } catch (\Throwable $e) {
@@ -126,9 +126,7 @@ class ConfigValidator
     private function validatePathTemplate(Rule $rule): array
     {
         try {
-            $loader = new ArrayLoader(['template' => $rule->targetPath]);
-            $twig = new Environment($loader);
-            $twig->parse($twig->tokenize($twig->getLoader()->getSourceContext('template')));
+            $this->pathResolver->validateTemplate($rule->targetPath);
 
             return [new ValidationResult($rule->name, 'path_template', 'pass', "Path template syntax valid: {$rule->targetPath}")];
         } catch (\Throwable $e) {

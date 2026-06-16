@@ -125,10 +125,12 @@ class AssetOrganizer
     }
 
     /** @return MoveOperation[] */
-    public function dryRun(AbstractObject $object): array
+    public function dryRun(AbstractObject $object, TriggerType $triggerType = TriggerType::Manual): array
     {
         $operations = [];
         $processedAssetIds = [];
+        $objectId = (int) $object->getId();
+        $objectClass = $object instanceof Concrete ? $object->getClassName() : 'Folder';
         $fieldInfos = $this->fieldExtractor->extract($object);
 
         foreach ($fieldInfos as $fieldInfo) {
@@ -147,59 +149,22 @@ class AssetOrganizer
 
                 $match = $matches[0];
                 $processedAssetIds[$assetId] = true;
-
-                // Check lock/exclude in dry-run too
                 $assetPath = $asset->getRealFullPath();
 
-                if ($asset->hasProperty($this->lockProperty) && $asset->getProperty($this->lockProperty)) {
-                    $operations[] = new MoveOperation(
-                        assetId: $assetId,
-                        sourcePath: $assetPath,
-                        targetPath: $match->resolvedPath,
-                        objectId: (int) $object->getId(),
-                        objectClass: $object instanceof Concrete ? $object->getClassName() : 'Folder',
-                        ruleName: $match->rule->name,
-                        status: OperationStatus::Skipped,
-                        triggerType: TriggerType::Manual,
-                        errorMessage: 'Asset is locked',
-                    );
-                    continue;
-                }
-
-                $isExcluded = false;
-                foreach ($this->excludeFolders as $excludedFolder) {
-                    if (str_starts_with($assetPath, rtrim($excludedFolder, '/') . '/')) {
-                        $operations[] = new MoveOperation(
-                            assetId: $assetId,
-                            sourcePath: $assetPath,
-                            targetPath: $match->resolvedPath,
-                            objectId: (int) $object->getId(),
-                            objectClass: $object instanceof Concrete ? $object->getClassName() : 'Folder',
-                            ruleName: $match->rule->name,
-                            status: OperationStatus::Skipped,
-                            triggerType: TriggerType::Manual,
-                            errorMessage: 'Asset is in excluded folder: ' . $excludedFolder,
-                        );
-                        $isExcluded = true;
-                        break;
-                    }
-                }
-                if ($isExcluded) {
-                    continue;
-                }
-
-                // Check strategy in dry-run too
+                // Apply the same gates in the same order as the real pipeline (strategy in organize(),
+                // then moveAsset's already-at-target -> PRE_MOVE -> lock -> exclude) so the preview's
+                // skip reason matches what the move would actually report.
                 $strategy = $this->strategyResolver->resolve($match->rule);
                 if (!$strategy->resolve($asset, $object, $match->rule)) {
                     $operations[] = new MoveOperation(
                         assetId: $assetId,
                         sourcePath: $assetPath,
                         targetPath: $match->resolvedPath,
-                        objectId: (int) $object->getId(),
-                        objectClass: $object instanceof Concrete ? $object->getClassName() : 'Folder',
+                        objectId: $objectId,
+                        objectClass: $objectClass,
                         ruleName: $match->rule->name,
                         status: OperationStatus::Skipped,
-                        triggerType: TriggerType::Manual,
+                        triggerType: $triggerType,
                         errorMessage: 'Strategy rejected move',
                     );
                     continue;
@@ -209,18 +174,77 @@ class AssetOrganizer
                 $fullTargetPath = rtrim($match->resolvedPath, '/') . '/' . $targetFilename;
 
                 if ($assetPath === $fullTargetPath) {
+                    $operations[] = new MoveOperation(
+                        assetId: $assetId,
+                        sourcePath: $assetPath,
+                        targetPath: $fullTargetPath,
+                        objectId: $objectId,
+                        objectClass: $objectClass,
+                        ruleName: $match->rule->name,
+                        status: OperationStatus::Skipped,
+                        triggerType: $triggerType,
+                        errorMessage: 'Asset already at target path',
+                    );
+                    continue;
+                }
+
+                $preMoveEvent = new AssetMoveEvent($asset, $assetPath, $fullTargetPath, $object, $match->rule, $triggerType, dryRun: true);
+                $this->eventDispatcher->dispatch($preMoveEvent, AssetPilotEvents::PRE_MOVE);
+                if ($preMoveEvent->isCancelled()) {
+                    $operations[] = new MoveOperation(
+                        assetId: $assetId,
+                        sourcePath: $assetPath,
+                        targetPath: $fullTargetPath,
+                        objectId: $objectId,
+                        objectClass: $objectClass,
+                        ruleName: $match->rule->name,
+                        status: OperationStatus::Skipped,
+                        triggerType: $triggerType,
+                        errorMessage: 'Cancelled by event listener',
+                    );
+                    continue;
+                }
+
+                if ($asset->hasProperty($this->lockProperty) && $asset->getProperty($this->lockProperty)) {
+                    $operations[] = new MoveOperation(
+                        assetId: $assetId,
+                        sourcePath: $assetPath,
+                        targetPath: $fullTargetPath,
+                        objectId: $objectId,
+                        objectClass: $objectClass,
+                        ruleName: $match->rule->name,
+                        status: OperationStatus::Skipped,
+                        triggerType: $triggerType,
+                        errorMessage: 'Asset is locked',
+                    );
+                    continue;
+                }
+
+                $excludedFolder = $this->matchingExcludeFolder($assetPath);
+                if ($excludedFolder !== null) {
+                    $operations[] = new MoveOperation(
+                        assetId: $assetId,
+                        sourcePath: $assetPath,
+                        targetPath: $fullTargetPath,
+                        objectId: $objectId,
+                        objectClass: $objectClass,
+                        ruleName: $match->rule->name,
+                        status: OperationStatus::Skipped,
+                        triggerType: $triggerType,
+                        errorMessage: 'Asset is in excluded folder: ' . $excludedFolder,
+                    );
                     continue;
                 }
 
                 $operations[] = new MoveOperation(
                     assetId: $assetId,
-                    sourcePath: $asset->getRealFullPath(),
+                    sourcePath: $assetPath,
                     targetPath: $fullTargetPath,
-                    objectId: (int) $object->getId(),
-                    objectClass: $object instanceof Concrete ? $object->getClassName() : 'Folder',
+                    objectId: $objectId,
+                    objectClass: $objectClass,
                     ruleName: $match->rule->name,
                     status: OperationStatus::Pending,
-                    triggerType: TriggerType::Manual,
+                    triggerType: $triggerType,
                 );
             }
         }
@@ -366,31 +390,30 @@ class AssetOrganizer
         }
 
         // Check if asset is in an excluded folder
-        foreach ($this->excludeFolders as $excludedFolder) {
-            if (str_starts_with($sourcePath, rtrim($excludedFolder, '/') . '/')) {
-                $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
-                $this->logger->info('Asset Pilot: asset {id} is in excluded folder "{folder}", skipping move', [
-                    'id' => $assetId,
-                    'folder' => $excludedFolder,
-                ]);
+        $excludedFolder = $this->matchingExcludeFolder($sourcePath);
+        if ($excludedFolder !== null) {
+            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
+            $this->logger->info('Asset Pilot: asset {id} is in excluded folder "{folder}", skipping move', [
+                'id' => $assetId,
+                'folder' => $excludedFolder,
+            ]);
 
-                $operation = new MoveOperation(
-                    assetId: $assetId,
-                    sourcePath: $sourcePath,
-                    targetPath: $fullTargetPath,
-                    objectId: $objectId,
-                    objectClass: $objectClass,
-                    ruleName: $rule->name,
-                    status: OperationStatus::Skipped,
-                    triggerType: $triggerType,
-                    errorMessage: 'Asset is in excluded folder: ' . $excludedFolder,
-                    durationMs: $durationMs,
-                );
+            $operation = new MoveOperation(
+                assetId: $assetId,
+                sourcePath: $sourcePath,
+                targetPath: $fullTargetPath,
+                objectId: $objectId,
+                objectClass: $objectClass,
+                ruleName: $rule->name,
+                status: OperationStatus::Skipped,
+                triggerType: $triggerType,
+                errorMessage: 'Asset is in excluded folder: ' . $excludedFolder,
+                durationMs: $durationMs,
+            );
 
-                $this->auditLogger->log($operation);
+            $this->auditLogger->log($operation);
 
-                return OperationResult::skipped('Asset is in excluded folder: ' . $excludedFolder, $operation);
-            }
+            return OperationResult::skipped('Asset is in excluded folder: ' . $excludedFolder, $operation);
         }
 
         try {
@@ -472,6 +495,17 @@ class AssetOrganizer
 
             return OperationResult::failed($e->getMessage(), $operation);
         }
+    }
+
+    private function matchingExcludeFolder(string $path): ?string
+    {
+        foreach ($this->excludeFolders as $excludedFolder) {
+            if (str_starts_with($path, rtrim($excludedFolder, '/') . '/')) {
+                return $excludedFolder;
+            }
+        }
+
+        return null;
     }
 
     protected function createFolderIfNeeded(string $path): Asset\Folder
