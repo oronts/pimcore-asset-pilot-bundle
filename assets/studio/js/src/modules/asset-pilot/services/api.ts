@@ -120,8 +120,6 @@ export const assetPilotApi = {
         before: filters.before,
         after: filters.after,
         folder: filters.folder,
-        minSize: filters.minSize,
-        maxSize: filters.maxSize,
         confidence: filters.confidence,
         sort: filters.sort,
         order: filters.order,

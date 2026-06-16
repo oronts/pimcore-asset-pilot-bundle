@@ -27,12 +27,13 @@ class UnusedAssetFinder
      *     before?: string,
      *     after?: string,
      *     folder?: string,
-     *     minSize?: int,
-     *     maxSize?: int,
+     *     confidence?: string,
      * } $filters
      */
     public function findUnused(array $filters = [], int $page = 1, int $limit = 50): array
     {
+        $this->rejectUnsupportedSizeFilters($filters);
+
         $offset = ($page - 1) * $limit;
 
         try {
@@ -100,6 +101,8 @@ class UnusedAssetFinder
 
     public function countUnused(array $filters = []): int
     {
+        $this->rejectUnsupportedSizeFilters($filters);
+
         try {
             $qb = $this->connection->createQueryBuilder()
                 ->select('COUNT(*) as total')
@@ -265,6 +268,22 @@ class UnusedAssetFinder
             ->fetchOne();
 
         return $count > 0;
+    }
+
+    /**
+     * Size filtering cannot be expressed in SQL: the Pimcore `assets` table has no size column
+     * (file size is read from storage via Asset::getFileSize()). Post-filtering after LIMIT would
+     * corrupt pagination and the unused count, so on a delete path silently ignoring the filter is
+     * a data-loss risk. Reject it loudly instead of pretending it was applied.
+     */
+    private function rejectUnsupportedSizeFilters(array $filters): void
+    {
+        if (isset($filters['minSize']) || isset($filters['maxSize'])) {
+            throw new \InvalidArgumentException(
+                'Asset Pilot: size filtering (minSize/maxSize) is not supported because the Pimcore '
+                . 'assets table has no size column. Filter by type, extension, folder, or date instead.',
+            );
+        }
     }
 
     private function applyFilters($qb, array $filters): void

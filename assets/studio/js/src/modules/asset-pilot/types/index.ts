@@ -142,8 +142,6 @@ export interface UnusedAssetFilters {
   before?: string
   after?: string
   folder?: string
-  minSize?: number
-  maxSize?: number
   confidence?: string
   page?: number
   limit?: number

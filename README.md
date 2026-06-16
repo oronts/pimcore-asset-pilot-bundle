@@ -298,6 +298,12 @@ framework:
     lock: 'redis://%env(REDIS_HOST)%'
 ```
 
+Enabling `framework.lock` is what makes the async deduplication work: Symfony registers the
+Messenger `DeduplicateMiddleware` on the default bus automatically once lock is enabled, and that
+middleware is what gives the `DeduplicateStamp` (used by the save listeners) its effect. Without a
+lock configured the stamp is inert and duplicate organize messages are not collapsed. This requires
+`symfony/messenger` and `symfony/lock` `^7.3` (both are declared by the bundle).
+
 ### 6. Build the Studio UI assets
 
 ```bash
@@ -891,9 +897,15 @@ bin/console asset-pilot:cleanup-unused --type=image --before="-90 days" --action
 # Move unused assets to archive folder
 bin/console asset-pilot:cleanup-unused --action=move --move-to="/Archive/Unused"
 
-# Filter by size and extension
-bin/console asset-pilot:cleanup-unused --min-size=1048576 --extension=jpg,png --dry-run
+# Filter by extension and folder
+bin/console asset-pilot:cleanup-unused --extension=jpg,png --folder=/uploads/temp --dry-run
 ```
+
+> Note: the unused-asset cleanup cannot filter by file size. The Pimcore `assets` table has no
+> size column, and post-filtering after pagination would corrupt the count on a delete path, so
+> `minSize`/`maxSize` are rejected rather than silently ignored. Rule-level `filters.min_size` /
+> `filters.max_size` (see the rule reference) still work, because the asset is in memory during
+> organization.
 
 ### Scheduled Jobs (Cron)
 
@@ -1125,8 +1137,6 @@ Supported types: `text`, `bool`, `select`.
 | `before` | `string` | Modified before date (ISO format) |
 | `after` | `string` | Modified after date (ISO format) |
 | `folder` | `string` | Filter by folder path |
-| `minSize` | `int` | Minimum file size in bytes |
-| `maxSize` | `int` | Maximum file size in bytes |
 | `confidence` | `string` | Filter by confidence: `definitely_unused`, `probably_unused`, `recently_uploaded`, `historically_used`, `protected` |
 | `page` | `int` | Page number (default: 1) |
 | `limit` | `int` | Items per page (default: 50, max: 200) |

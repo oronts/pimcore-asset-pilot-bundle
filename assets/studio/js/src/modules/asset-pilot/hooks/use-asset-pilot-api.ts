@@ -57,7 +57,7 @@ export function useClassStats(): AsyncState<ClassStat[]> {
 export function useUnusedAssets(filters: UnusedAssetFilters): AsyncState<PaginatedUnusedResponse> {
   return useAsyncData(
     () => assetPilotApi.getUnusedAssets(filters),
-    [filters.page, filters.limit, filters.type, filters.extension, filters.before, filters.after, filters.folder, filters.minSize, filters.maxSize, filters.confidence, filters.sort, filters.order],
+    [filters.page, filters.limit, filters.type, filters.extension, filters.before, filters.after, filters.folder, filters.confidence, filters.sort, filters.order],
   )
 }
 

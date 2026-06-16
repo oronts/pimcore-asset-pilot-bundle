@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -23,6 +24,7 @@ class AuditController
     public function __construct(
         protected readonly AuditLogger $auditLogger,
         protected readonly LoggerInterface $logger,
+        protected readonly LoopGuard $loopGuard,
     ) {}
 
     #[Route('/audit', name: 'oronts_asset_pilot_audit', methods: ['GET'])]
@@ -151,7 +153,7 @@ class AuditController
             $folder = Asset\Service::createFolderByPath($sourceDir);
             $asset->setParent($folder);
             $asset->setFilename($sourceFilename);
-            $asset->save();
+            $this->saveReverted($asset, $assetId);
 
             // Log the revert as a new audit entry
             $revertOperation = new MoveOperation(
@@ -180,6 +182,23 @@ class AuditController
             ]);
 
             return new JsonResponse(['error' => 'Failed to revert: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Persist a reverted asset without re-triggering the organize pipeline. The save fires
+     * pimcore.asset.postUpdate, which AssetUploadListener would otherwise pick up and move the
+     * asset back to the rule target. Mark recently-moved before releasing the processing guard so
+     * the listener stays guarded across the whole window. (P0-3, P2-21)
+     */
+    protected function saveReverted(Asset $asset, int $assetId): void
+    {
+        $this->loopGuard->markAssetProcessing($assetId);
+        try {
+            $asset->save();
+            $this->loopGuard->markAssetRecentlyMoved($assetId);
+        } finally {
+            $this->loopGuard->unmarkAssetProcessing($assetId);
         }
     }
 }

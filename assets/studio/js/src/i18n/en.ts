@@ -158,8 +158,6 @@ export const en: Record<string, string> = {
   'asset-pilot.unused.modified-after': 'Modified After',
   'asset-pilot.unused.folder': 'Folder',
   'asset-pilot.unused.folder-placeholder': '/path/to/folder',
-  'asset-pilot.unused.min-size': 'Min Size (bytes)',
-  'asset-pilot.unused.max-size': 'Max Size (bytes)',
   'asset-pilot.unused.deleted-result': 'Deleted: {{deleted}}, Failed: {{failed}}',
   'asset-pilot.unused.moved-result': 'Moved: {{moved}}, Failed: {{failed}}',
 

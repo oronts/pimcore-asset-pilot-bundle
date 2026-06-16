@@ -34,8 +34,6 @@ class CleanupUnusedCommand extends Command
             ->addOption('type', null, InputOption::VALUE_REQUIRED, 'Filter by asset type, comma-separated (e.g. "image,document")')
             ->addOption('extension', null, InputOption::VALUE_REQUIRED, 'Filter by file extension, comma-separated (e.g. "pdf,png,jpg")')
             ->addOption('folder', null, InputOption::VALUE_REQUIRED, 'Limit to assets in this folder path (e.g. "/uploads/temp")')
-            ->addOption('min-size', null, InputOption::VALUE_REQUIRED, 'Minimum file size in bytes')
-            ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Maximum file size in bytes')
             ->addOption('action', null, InputOption::VALUE_REQUIRED, 'Action to perform: "delete" or "move" (default: delete)', 'delete')
             ->addOption('move-to', null, InputOption::VALUE_REQUIRED, 'Target folder when action=move (e.g. "/archive/unused")')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Preview only — do not delete or move anything')
@@ -53,9 +51,6 @@ Find and clean up assets that are not referenced by any Pimcore data object or d
 
   Move unused assets from /uploads/temp to /archive:
     <comment>bin/console asset-pilot:cleanup-unused --folder=/uploads/temp --action=move --move-to=/archive/unused</comment>
-
-  Delete unused assets larger than 10MB:
-    <comment>bin/console asset-pilot:cleanup-unused --min-size=10485760</comment>
 
   Cronjob: clean up unused images older than 90 days (nightly):
     <comment>0 2 * * * bin/console asset-pilot:cleanup-unused --before="-90 days" --type=image --batch-size=200</comment>
@@ -227,16 +222,6 @@ HELP
         $folder = $input->getOption('folder');
         if ($folder !== null) {
             $filters['folder'] = $folder;
-        }
-
-        $minSize = $input->getOption('min-size');
-        if ($minSize !== null) {
-            $filters['minSize'] = (int) $minSize;
-        }
-
-        $maxSize = $input->getOption('max-size');
-        if ($maxSize !== null) {
-            $filters['maxSize'] = (int) $maxSize;
         }
 
         return $filters;

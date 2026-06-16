@@ -27,14 +27,19 @@ class UnusedAssetsController
         $page = max(1, (int) $request->query->get('page', 1));
         $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
 
+        if ($request->query->has('minSize') || $request->query->has('maxSize')) {
+            return new JsonResponse([
+                'error' => 'Size filtering (minSize/maxSize) is not supported: the Pimcore assets '
+                    . 'table has no size column. Filter by type, extension, folder, or date instead.',
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
         $filters = array_filter([
             'type' => $request->query->get('type'),
             'extension' => $request->query->get('extension'),
             'before' => $request->query->get('before'),
             'after' => $request->query->get('after'),
             'folder' => $request->query->get('folder'),
-            'minSize' => $request->query->get('minSize') ? (int) $request->query->get('minSize') : null,
-            'maxSize' => $request->query->get('maxSize') ? (int) $request->query->get('maxSize') : null,
             'confidence' => $request->query->get('confidence'),
         ], static fn ($v) => $v !== null && $v !== '');
 
