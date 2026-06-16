@@ -41,7 +41,15 @@ class AssetOrganizer
     {
         $objectId = (int) $object->getId();
 
-        // Mark this object as being processed via Redis to prevent re-triggering across workers
+        if (!$this->loopGuard->acquireObject($objectId)) {
+            $this->logger->debug('Asset Pilot: object {id} is already being organized by another job, skipping', [
+                'id' => $objectId,
+            ]);
+
+            return [];
+        }
+
+        // Cache flag the save listeners read to skip the postUpdate this organize run triggers.
         $this->loopGuard->markObjectProcessing($objectId);
 
         try {
@@ -58,6 +66,8 @@ class AssetOrganizer
             foreach ($fieldInfos as $fieldInfo) {
                 foreach ($fieldInfo->assets as $asset) {
                     $assetId = (int) $asset->getId();
+
+                    $this->loopGuard->refreshObject($objectId);
 
                     // Skip if this asset was already processed by a higher-priority rule
                     // (same asset can appear in multiple fields)
@@ -121,6 +131,7 @@ class AssetOrganizer
             return $results;
         } finally {
             $this->loopGuard->unmarkObjectProcessing($objectId);
+            $this->loopGuard->releaseObject($objectId);
         }
     }
 
@@ -416,6 +427,31 @@ class AssetOrganizer
             return OperationResult::skipped('Asset is in excluded folder: ' . $excludedFolder, $operation);
         }
 
+        // Serialize the actual move: a second job sharing this asset must not mutate it concurrently.
+        if (!$this->loopGuard->acquireAsset($assetId)) {
+            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
+            $this->logger->info('Asset Pilot: asset {id} is being moved by another job, skipping', [
+                'id' => $assetId,
+            ]);
+
+            $operation = new MoveOperation(
+                assetId: $assetId,
+                sourcePath: $sourcePath,
+                targetPath: $fullTargetPath,
+                objectId: $objectId,
+                objectClass: $objectClass,
+                ruleName: $rule->name,
+                status: OperationStatus::Skipped,
+                triggerType: $triggerType,
+                errorMessage: 'Asset is being processed by another job',
+                durationMs: $durationMs,
+            );
+
+            $this->auditLogger->log($operation);
+
+            return OperationResult::skipped('Asset is being processed by another job', $operation);
+        }
+
         try {
             // Create folder if needed
             $folder = $this->createFolderIfNeeded($targetPath);
@@ -494,6 +530,8 @@ class AssetOrganizer
             ]);
 
             return OperationResult::failed($e->getMessage(), $operation);
+        } finally {
+            $this->loopGuard->releaseAsset($assetId);
         }
     }
 

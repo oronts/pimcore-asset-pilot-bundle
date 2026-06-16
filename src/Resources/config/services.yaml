@@ -126,6 +126,7 @@ services:
     Oronts\AssetPilotBundle\Service\LoopGuard:
         arguments:
             $cache: '@cache.app'
+            $lockFactory: '@lock.factory'
 
     # -- Event listeners --------------------------------------------------------
 

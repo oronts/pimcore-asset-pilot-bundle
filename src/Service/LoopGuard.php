@@ -5,16 +5,19 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\LockInterface;
 
 /**
- * Redis-backed loop prevention for bidirectional event handling.
+ * Loop prevention and idempotency for the bidirectional event pipeline.
  *
- * Prevents infinite recursion when:
- * - Asset move → asset postUpdate → AssetUploadListener → organize → asset move ...
- * - Object organize → DataObjectSaveListener → organize ...
+ * Two layers, each with a distinct job:
+ * - Symfony Lock (acquire-or-skip, owner-token release): real mutual exclusion so two concurrent or
+ *   redelivered jobs cannot both organize the same object or both move the same asset.
+ * - PSR-6 cache flags (Redis): cross-process *signals* the listeners read to short-circuit the
+ *   postUpdate that the organizer's own save triggers (processing flag, recently-moved, dispatch dedup).
  *
- * Uses cache (Redis) so it works across PHP-FPM workers, Messenger workers,
- * and horizontally scaled pods.
+ * Both stores must be shared across workers/pods (Redis) for the guarantees to hold cluster-wide.
  */
 class LoopGuard
 {
@@ -22,9 +25,75 @@ class LoopGuard
     private const int RECENTLY_MOVED_TTL = 300; // 5 minutes — prevents async ping-pong
     private const int DISPATCH_DEDUP_TTL = 10; // seconds — prevents duplicate message dispatches
 
+    /** @var array<string, LockInterface> locks held by this process, keyed by resource */
+    private array $heldLocks = [];
+
     public function __construct(
         private readonly CacheItemPoolInterface $cache,
+        private readonly LockFactory $lockFactory,
     ) {}
+
+    public function acquireObject(int $objectId): bool
+    {
+        return $this->acquire('asset_pilot_lock_object_' . $objectId);
+    }
+
+    public function releaseObject(int $objectId): void
+    {
+        $this->release('asset_pilot_lock_object_' . $objectId);
+    }
+
+    /**
+     * Extend the object lock's lease so a long organize run does not let the 60s lease expire while
+     * still working. Throws if the lock was already lost (TTL expired and another job took it), which
+     * correctly aborts the now-unsafe run rather than risk a double-move.
+     */
+    public function refreshObject(int $objectId): void
+    {
+        ($this->heldLocks['asset_pilot_lock_object_' . $objectId] ?? null)?->refresh();
+    }
+
+    public function acquireAsset(int $assetId): bool
+    {
+        return $this->acquire('asset_pilot_lock_asset_' . $assetId);
+    }
+
+    public function releaseAsset(int $assetId): void
+    {
+        $this->release('asset_pilot_lock_asset_' . $assetId);
+    }
+
+    private function acquire(string $resource): bool
+    {
+        if (isset($this->heldLocks[$resource])) {
+            return true;
+        }
+
+        $lock = $this->lockFactory->createLock($resource, (float) self::DEFAULT_TTL);
+        if (!$lock->acquire()) {
+            return false;
+        }
+
+        $this->heldLocks[$resource] = $lock;
+
+        return true;
+    }
+
+    private function release(string $resource): void
+    {
+        $lock = $this->heldLocks[$resource] ?? null;
+        if ($lock === null) {
+            return;
+        }
+
+        unset($this->heldLocks[$resource]);
+
+        // Best-effort: a failed release (lock already lost/expired) self-heals via the TTL.
+        try {
+            $lock->release();
+        } catch (\Throwable) {
+        }
+    }
 
     public function isProcessingAsset(int $assetId): bool
     {
