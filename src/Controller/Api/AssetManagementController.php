@@ -72,7 +72,14 @@ class AssetManagementController
         $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
         $type = $request->query->get('type');
 
-        return new JsonResponse($this->searchService->findByObject($objectId, $page, $limit, $type));
+        return new JsonResponse($this->searchService->findByObject(
+            $objectId,
+            $page,
+            $limit,
+            $type,
+            $request->query->get('sort'),
+            $request->query->get('order'),
+        ));
     }
 
     #[Route('/assets/search', name: 'oronts_asset_pilot_assets_search', methods: ['GET'])]
@@ -89,7 +96,13 @@ class AssetManagementController
             'objectId' => $request->query->getInt('objectId'),
         ];
 
-        return new JsonResponse($this->searchService->search($filters, $page, $limit));
+        return new JsonResponse($this->searchService->search(
+            $filters,
+            $page,
+            $limit,
+            $request->query->get('sort'),
+            $request->query->get('order'),
+        ));
     }
 
     #[Route('/assets/tags', name: 'oronts_asset_pilot_available_tags', methods: ['GET'])]

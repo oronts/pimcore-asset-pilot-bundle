@@ -6,6 +6,12 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
+use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
+use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
@@ -30,11 +36,12 @@ class UnusedAssetFinder
      *     confidence?: string,
      * } $filters
      */
-    public function findUnused(array $filters = [], int $page = 1, int $limit = 50): array
+    public function findUnused(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array
     {
         $this->rejectUnsupportedSizeFilters($filters);
 
         $offset = ($page - 1) * $limit;
+        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
             $qb = $this->connection->createQueryBuilder()
@@ -48,7 +55,7 @@ class UnusedAssetFinder
                 ->setParameter('lock_prop', $this->lockProperty)
                 ->andWhere('a.id NOT IN (SELECT d.targetid FROM dependencies d WHERE d.targettype = :assetType)')
                 ->setParameter('assetType', 'asset')
-                ->orderBy('a.modificationDate', 'DESC')
+                ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
 
@@ -270,12 +277,8 @@ class UnusedAssetFinder
         return $count > 0;
     }
 
-    /**
-     * Size filtering cannot be expressed in SQL: the Pimcore `assets` table has no size column
-     * (file size is read from storage via Asset::getFileSize()). Post-filtering after LIMIT would
-     * corrupt pagination and the unused count, so on a delete path silently ignoring the filter is
-     * a data-loss risk. Reject it loudly instead of pretending it was applied.
-     */
+    // The assets table has no size column; post-filtering would corrupt the count on a delete path,
+    // so reject size filters loudly rather than silently ignore them (data-loss risk).
     private function rejectUnsupportedSizeFilters(array $filters): void
     {
         if (isset($filters['minSize']) || isset($filters['maxSize'])) {
@@ -326,22 +329,28 @@ class UnusedAssetFinder
                 ->setParameter('folder', rtrim($filters['folder'], '/') . '/%');
         }
 
-        if (!empty($filters['confidence'])) {
-            $now = time();
-            $thirtyDaysAgo = $now - (30 * 86400);
-            $ninetyDaysAgo = $now - (90 * 86400);
+        $confidence = ConfidenceLevel::tryFrom((string) ($filters['confidence'] ?? ''));
+        if ($confidence !== null) {
+            $this->applyConfidenceFilter($qb, $confidence);
+        }
+    }
 
-            match ($filters['confidence']) {
-                'definitely_unused' => $qb->andWhere('a.modificationDate < :conf_cutoff')
-                    ->setParameter('conf_cutoff', $ninetyDaysAgo),
-                'probably_unused' => $qb->andWhere('a.modificationDate >= :conf_start AND a.modificationDate < :conf_end')
-                    ->setParameter('conf_start', $ninetyDaysAgo)
-                    ->setParameter('conf_end', $thirtyDaysAgo),
-                'recently_uploaded' => $qb->andWhere('a.modificationDate >= :conf_cutoff')
-                    ->setParameter('conf_cutoff', $thirtyDaysAgo),
-                'historically_used' => $qb->andWhere('a.id IN (SELECT DISTINCT pal.asset_id FROM asset_pilot_audit_log pal)'),
-                default => null,
-            };
+    private function applyConfidenceFilter(QueryBuilder $qb, ConfidenceLevel $level): void
+    {
+        $spec = ConfidenceFilter::build(
+            $level,
+            $this->lockProperty,
+            AuditLogger::TABLE_NAME,
+            time(),
+            ConfidenceScorer::RECENTLY_UPLOADED_DAYS,
+            ConfidenceScorer::PROBABLY_UNUSED_DAYS,
+        );
+
+        foreach ($spec['conditions'] as $condition) {
+            $qb->andWhere($condition);
+        }
+        foreach ($spec['params'] as $key => $value) {
+            $qb->setParameter($key, $value);
         }
     }
 

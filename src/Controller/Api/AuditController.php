@@ -46,7 +46,13 @@ class AuditController
             'filters' => $filters,
         ]);
 
-        $result = $this->auditLogger->getPaginated($page, $limit, $filters);
+        $result = $this->auditLogger->getPaginated(
+            $page,
+            $limit,
+            $filters,
+            $request->query->get('sort'),
+            $request->query->get('order'),
+        );
 
         return new JsonResponse($result);
     }
@@ -185,12 +191,8 @@ class AuditController
         }
     }
 
-    /**
-     * Persist a reverted asset without re-triggering the organize pipeline. The save fires
-     * pimcore.asset.postUpdate, which AssetUploadListener would otherwise pick up and move the
-     * asset back to the rule target. Mark recently-moved before releasing the processing guard so
-     * the listener stays guarded across the whole window. (P0-3, P2-21)
-     */
+    // The save fires asset.postUpdate -> AssetUploadListener, which would re-organize the asset back.
+    // Mark recently-moved before releasing the processing guard so the listener stays guarded throughout.
     protected function saveReverted(Asset $asset, int $assetId): void
     {
         $this->loopGuard->markAssetProcessing($assetId);

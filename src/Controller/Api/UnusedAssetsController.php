@@ -43,7 +43,13 @@ class UnusedAssetsController
             'confidence' => $request->query->get('confidence'),
         ], static fn ($v) => $v !== null && $v !== '');
 
-        $result = $this->unusedAssetFinder->findUnused($filters, $page, $limit);
+        $result = $this->unusedAssetFinder->findUnused(
+            $filters,
+            $page,
+            $limit,
+            $request->query->get('sort'),
+            $request->query->get('order'),
+        );
 
         return new JsonResponse($result);
     }

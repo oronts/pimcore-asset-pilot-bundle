@@ -6,6 +6,8 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
+use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
@@ -18,16 +20,17 @@ class AssetSearchService
     ) {}
 
     /**
-     * @param array{q?: string, type?: string, folder?: string, objectId?: int, sort?: string, order?: string} $filters
+     * @param array{q?: string, type?: string, folder?: string, objectId?: int} $filters
      * @return array{items: array, total: int, page: int, pages: int}
      */
-    public function search(array $filters = [], int $page = 1, int $limit = 50): array
+    public function search(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array
     {
         $offset = ($page - 1) * $limit;
+        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
             $qb = $this->createBaseQuery()
-                ->orderBy('a.modificationDate', 'DESC')
+                ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
 
@@ -50,9 +53,10 @@ class AssetSearchService
     /**
      * @return array{items: array, total: int, page: int, pages: int}
      */
-    public function findByObject(int $objectId, int $page = 1, int $limit = 50, ?string $type = null): array
+    public function findByObject(int $objectId, int $page = 1, int $limit = 50, ?string $type = null, ?string $sort = null, ?string $order = null): array
     {
         $offset = ($page - 1) * $limit;
+        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
             $depFilter = 'a.id IN (SELECT d.targetid FROM dependencies d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)';
@@ -62,7 +66,7 @@ class AssetSearchService
                 ->setParameter('objId', $objectId)
                 ->setParameter('srcType', 'object')
                 ->setParameter('tgtType', 'asset')
-                ->orderBy('a.modificationDate', 'DESC')
+                ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
 

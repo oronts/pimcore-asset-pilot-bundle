@@ -6,11 +6,12 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 
 class ConfidenceScorer
 {
-    private const int RECENTLY_UPLOADED_DAYS = 30;
-    private const int PROBABLY_UNUSED_DAYS = 90;
+    public const int RECENTLY_UPLOADED_DAYS = 30;
+    public const int PROBABLY_UNUSED_DAYS = 90;
 
     public function __construct(
         private readonly Connection $connection,
@@ -43,30 +44,30 @@ class ConfidenceScorer
     private function classify(array $item, array $historicalIds, \DateTimeImmutable $now): string
     {
         if (!empty($item['locked'])) {
-            return 'protected';
+            return ConfidenceLevel::Protected->value;
         }
 
         if (in_array((int) $item['id'], $historicalIds, true)) {
-            return 'historically_used';
+            return ConfidenceLevel::HistoricallyUsed->value;
         }
 
         $modified = !empty($item['modified_at']) ? new \DateTimeImmutable($item['modified_at']) : null;
 
         if ($modified === null) {
-            return 'probably_unused';
+            return ConfidenceLevel::ProbablyUnused->value;
         }
 
         $daysAgo = (int) $now->diff($modified)->days;
 
         if ($daysAgo < self::RECENTLY_UPLOADED_DAYS) {
-            return 'recently_uploaded';
+            return ConfidenceLevel::RecentlyUploaded->value;
         }
 
         if ($daysAgo < self::PROBABLY_UNUSED_DAYS) {
-            return 'probably_unused';
+            return ConfidenceLevel::ProbablyUnused->value;
         }
 
-        return 'definitely_unused';
+        return ConfidenceLevel::DefinitelyUnused->value;
     }
 
     /**

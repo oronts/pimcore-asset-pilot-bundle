@@ -50,7 +50,7 @@ class AuditCommand extends Command
 
         $filters = [];
         if ($class = $input->getOption('class')) {
-            $filters['class'] = $class;
+            $filters['object_class'] = $class;
         }
         if ($status = $input->getOption('status')) {
             $filters['status'] = $status;

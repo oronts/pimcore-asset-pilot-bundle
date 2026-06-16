@@ -6,11 +6,25 @@ namespace Oronts\AssetPilotBundle\Audit;
 
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
 
 class AuditLogger
 {
     public const string TABLE_NAME = 'asset_pilot_audit_log';
+
+    private const array FILTERABLE = ['object_class', 'status', 'rule_name'];
+
+    private const array SORTABLE = [
+        'id' => 'id',
+        'asset_id' => 'asset_id',
+        'object_id' => 'object_id',
+        'object_class' => 'object_class',
+        'rule_name' => 'rule_name',
+        'status' => 'status',
+        'duration_ms' => 'duration_ms',
+        'created_at' => 'created_at',
+    ];
 
     public function __construct(
         protected readonly Connection $connection,
@@ -72,8 +86,8 @@ class AuditLogger
                 ->orderBy('created_at', 'DESC')
                 ->setMaxResults($limit);
 
-            if (!empty($filters['class'])) {
-                $qb->andWhere('object_class = :class')->setParameter('class', $filters['class']);
+            if (!empty($filters['object_class'])) {
+                $qb->andWhere('object_class = :class')->setParameter('class', $filters['object_class']);
             }
             if (!empty($filters['status'])) {
                 $qb->andWhere('status = :status')->setParameter('status', $filters['status']);
@@ -135,9 +149,10 @@ class AuditLogger
         }
     }
 
-    public function getPaginated(int $page = 1, int $limit = 20, array $filters = []): array
+    public function getPaginated(int $page = 1, int $limit = 20, array $filters = [], ?string $sort = null, ?string $order = null): array
     {
         $offset = ($page - 1) * $limit;
+        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, self::SORTABLE, 'created_at');
 
         $this->logger->debug('Asset Pilot: fetching paginated audit entries (page: {page}, limit: {limit})', [
             'page' => $page,
@@ -148,7 +163,7 @@ class AuditLogger
             $qb = $this->connection->createQueryBuilder()
                 ->select('*')
                 ->from(self::TABLE_NAME)
-                ->orderBy('created_at', 'DESC')
+                ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
 
@@ -157,10 +172,11 @@ class AuditLogger
                 ->from(self::TABLE_NAME);
 
             foreach ($filters as $key => $value) {
-                if ($value !== null && $value !== '') {
-                    $qb->andWhere("$key = :$key")->setParameter($key, $value);
-                    $countQb->andWhere("$key = :$key")->setParameter($key, $value);
+                if (!in_array($key, self::FILTERABLE, true) || $value === null || $value === '') {
+                    continue;
                 }
+                $qb->andWhere("$key = :$key")->setParameter($key, $value);
+                $countQb->andWhere("$key = :$key")->setParameter($key, $value);
             }
 
             $total = (int) $countQb->executeQuery()->fetchOne();
