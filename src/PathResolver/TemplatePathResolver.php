@@ -61,35 +61,7 @@ class TemplatePathResolver implements PathResolverInterface
             $resolved = '/Assets/' . ($object->getKey() ?? 'unknown');
         }
 
-        // Remove empty segments caused by null/empty resolves
-        $segments = array_filter(
-            explode('/', $resolved),
-            static fn (string $s): bool => $s !== '' && $s !== 'unknown',
-        );
-
-        // If we removed all segments, use fallback
-        if (empty($segments)) {
-            $segments = ['Assets', $object->getKey() ?? 'unknown'];
-        }
-
-        // Re-add 'unknown' segments that were intentionally placed
-        $rawSegments = array_filter(explode('/', $resolved), static fn (string $s): bool => $s !== '');
-
-        $sanitized = array_map(
-            static fn (string $segment): string => AssetService::getValidKey($segment, 'asset'),
-            $rawSegments,
-        );
-
-        // Remove consecutive duplicate "unknown" segments
-        $deduped = [];
-        foreach ($sanitized as $seg) {
-            if ($seg === 'unknown' && !empty($deduped) && end($deduped) === 'unknown') {
-                continue;
-            }
-            $deduped[] = $seg;
-        }
-
-        $path = '/' . implode('/', $deduped);
+        $path = $this->normalizePath($resolved, $object->getKey());
 
         $this->logger->debug('Asset Pilot: resolved "{template}" → "{path}" (rule: {rule})', [
             'template' => $rule->targetPath,
@@ -98,6 +70,37 @@ class TemplatePathResolver implements PathResolverInterface
         ]);
 
         return $path;
+    }
+
+    /**
+     * Turn a rendered template into a sanitized asset path, collapsing consecutive "unknown"
+     * segments. Falls back to /Assets/<key> when the template produced nothing usable, so an
+     * empty or all-"unknown" template can never move assets to the asset root.
+     */
+    protected function normalizePath(string $resolved, ?string $fallbackKey): string
+    {
+        $segments = [];
+        foreach (explode('/', $resolved) as $raw) {
+            if ($raw === '') {
+                continue;
+            }
+            $segment = $this->sanitizeSegment($raw);
+            if ($segment === 'unknown' && $segments !== [] && end($segments) === 'unknown') {
+                continue;
+            }
+            $segments[] = $segment;
+        }
+
+        if (array_filter($segments, static fn (string $s): bool => $s !== 'unknown') === []) {
+            $segments = ['Assets', $this->sanitizeSegment($fallbackKey ?? 'unknown')];
+        }
+
+        return '/' . implode('/', $segments);
+    }
+
+    protected function sanitizeSegment(string $segment): string
+    {
+        return AssetService::getValidKey($segment, 'asset');
     }
 
     protected function buildContext(AbstractObject $object, Asset $asset, ?string $locale = null): array

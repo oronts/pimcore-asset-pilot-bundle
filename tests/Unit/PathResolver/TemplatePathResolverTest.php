@@ -110,6 +110,57 @@ class TemplatePathResolverTest extends TestCase
         self::assertSame('Folder', $context['className']);
     }
 
+    #[Test]
+    public function normalizePathKeepsAMeaningfulPath(): void
+    {
+        self::assertSame('/Products/SKU-1/Images', $this->pathNormalizer()->normalize('Products/SKU-1/Images', 'obj'));
+    }
+
+    #[Test]
+    public function normalizePathStripsEmptySegments(): void
+    {
+        self::assertSame('/Products/x', $this->pathNormalizer()->normalize('//Products//x/', 'obj'));
+    }
+
+    #[Test]
+    public function normalizePathCollapsesConsecutiveUnknownSegments(): void
+    {
+        self::assertSame('/a/unknown/b', $this->pathNormalizer()->normalize('a/unknown/unknown/b', 'obj'));
+    }
+
+    #[Test]
+    public function normalizePathFallsBackWhenEmpty(): void
+    {
+        self::assertSame('/Assets/my-key', $this->pathNormalizer()->normalize('/', 'my-key'));
+    }
+
+    #[Test]
+    public function normalizePathFallsBackWhenAllSegmentsAreUnknown(): void
+    {
+        self::assertSame('/Assets/my-key', $this->pathNormalizer()->normalize('unknown/unknown', 'my-key'));
+    }
+
+    #[Test]
+    public function normalizePathFallsBackToUnknownWhenKeyIsNull(): void
+    {
+        self::assertSame('/Assets/unknown', $this->pathNormalizer()->normalize('', null));
+    }
+
+    private function pathNormalizer(): object
+    {
+        return new class(new \Psr\Log\NullLogger()) extends TemplatePathResolver {
+            protected function sanitizeSegment(string $segment): string
+            {
+                return $segment;
+            }
+
+            public function normalize(string $resolved, ?string $fallbackKey): string
+            {
+                return $this->normalizePath($resolved, $fallbackKey);
+            }
+        };
+    }
+
     private function contextResolver(): object
     {
         return new class(new \Psr\Log\NullLogger()) extends TemplatePathResolver {
