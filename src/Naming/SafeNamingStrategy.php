@@ -11,6 +11,8 @@ use Psr\Log\LoggerInterface;
 
 class SafeNamingStrategy implements NamingStrategyInterface
 {
+    private const int MAX_ATTEMPTS = 1000;
+
     public function __construct(
         protected readonly LoggerInterface $logger,
         protected readonly string $collisionPattern = 'counter',
@@ -30,7 +32,7 @@ class SafeNamingStrategy implements NamingStrategyInterface
 
         $fullPath = rtrim($targetPath, '/') . '/' . $filename;
 
-        if (!AssetService::pathExists($fullPath)) {
+        if (!$this->pathExists($fullPath)) {
             return $filename;
         }
 
@@ -42,8 +44,8 @@ class SafeNamingStrategy implements NamingStrategyInterface
 
         $safeName = match ($this->collisionPattern) {
             CollisionPattern::Counter->value => $this->resolveWithCounter($basename, $extension, $targetPath),
-            CollisionPattern::Timestamp->value => $this->resolveWithTimestamp($basename, $extension),
-            CollisionPattern::Uuid->value => $this->resolveWithUuid($basename, $extension),
+            CollisionPattern::Timestamp->value => $this->resolveWithTimestamp($basename, $extension, $targetPath),
+            CollisionPattern::Uuid->value => $this->resolveWithUuid($basename, $extension, $targetPath),
             default => throw new \InvalidArgumentException(sprintf(
                 'Unknown collision pattern "%s". Supported: %s.',
                 $this->collisionPattern,
@@ -62,30 +64,53 @@ class SafeNamingStrategy implements NamingStrategyInterface
 
     protected function resolveWithCounter(string $basename, string $extension, string $targetPath): string
     {
-        $counter = 1;
         $suffix = $extension !== '' ? '.' . $extension : '';
 
-        do {
+        for ($counter = 1; $counter <= self::MAX_ATTEMPTS; $counter++) {
             $candidate = sprintf('%s_%d%s', $basename, $counter, $suffix);
-            $fullPath = rtrim($targetPath, '/') . '/' . $candidate;
-            $counter++;
-        } while (AssetService::pathExists($fullPath));
+            if (!$this->pathExists(rtrim($targetPath, '/') . '/' . $candidate)) {
+                return $candidate;
+            }
+        }
+
+        // Too many same-named files to count past; fall back to a collision-resistant uuid name.
+        return $this->resolveWithUuid($basename, $extension, $targetPath);
+    }
+
+    protected function resolveWithTimestamp(string $basename, string $extension, string $targetPath): string
+    {
+        $suffix = $extension !== '' ? '.' . $extension : '';
+
+        for ($attempt = 0; $attempt < self::MAX_ATTEMPTS; $attempt++) {
+            // Same-second timestamps collide, so add random entropy after the first attempt.
+            $candidate = $attempt === 0
+                ? sprintf('%s_%d%s', $basename, time(), $suffix)
+                : sprintf('%s_%d_%s%s', $basename, time(), bin2hex(random_bytes(2)), $suffix);
+            if (!$this->pathExists(rtrim($targetPath, '/') . '/' . $candidate)) {
+                return $candidate;
+            }
+        }
+
+        return $this->resolveWithUuid($basename, $extension, $targetPath);
+    }
+
+    protected function resolveWithUuid(string $basename, string $extension, string $targetPath): string
+    {
+        $suffix = $extension !== '' ? '.' . $extension : '';
+        $candidate = '';
+
+        for ($attempt = 0; $attempt < self::MAX_ATTEMPTS; $attempt++) {
+            $candidate = sprintf('%s_%s%s', $basename, bin2hex(random_bytes(8)), $suffix);
+            if (!$this->pathExists(rtrim($targetPath, '/') . '/' . $candidate)) {
+                return $candidate;
+            }
+        }
 
         return $candidate;
     }
 
-    protected function resolveWithTimestamp(string $basename, string $extension): string
+    protected function pathExists(string $fullPath): bool
     {
-        $suffix = $extension !== '' ? '.' . $extension : '';
-
-        return sprintf('%s_%d%s', $basename, time(), $suffix);
-    }
-
-    protected function resolveWithUuid(string $basename, string $extension): string
-    {
-        $suffix = $extension !== '' ? '.' . $extension : '';
-        $shortUuid = substr(bin2hex(random_bytes(4)), 0, 8);
-
-        return sprintf('%s_%s%s', $basename, $shortUuid, $suffix);
+        return AssetService::pathExists($fullPath);
     }
 }
