@@ -60,6 +60,7 @@ class ConfigurationTest extends TestCase
         $config = (new Processor())->processConfiguration(new Configuration(), [[]]);
 
         self::assertSame([], $config['allowed_classes']);
+        self::assertSame([], $config['locales']);
         self::assertSame(50, $config['async']['batch_size']);
     }
 

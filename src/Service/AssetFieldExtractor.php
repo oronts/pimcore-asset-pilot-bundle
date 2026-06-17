@@ -33,8 +33,10 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         'manyToManyObjectRelation',
     ];
 
+    /** @param string[] $locales locales to scan for localized fields; empty means all valid languages */
     public function __construct(
         protected readonly LoggerInterface $logger,
+        protected readonly array $locales = [],
     ) {}
 
     /** @return AssetFieldInfo[] */
@@ -76,10 +78,11 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         }
 
         $localizedFields = $object->getLocalizedFields();
+        $locales = $this->resolveLocales();
         foreach ($this->getLocalizedAssetFields($classDef) as $fieldDef) {
             $fieldName = $fieldDef->getName();
 
-            foreach (Tool::getValidLanguages() as $locale) {
+            foreach ($locales as $locale) {
                 try {
                     // Use ignoreFallbackLanguage=true to only get explicitly set values,
                     // not inherited from parent locales (prevents duplicate moves)
@@ -222,6 +225,23 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         }
 
         return $result;
+    }
+
+    /** @return string[] */
+    protected function resolveLocales(): array
+    {
+        $valid = $this->validLanguages();
+        if ($this->locales === []) {
+            return $valid;
+        }
+
+        return array_values(array_intersect($this->locales, $valid));
+    }
+
+    /** @return string[] */
+    protected function validLanguages(): array
+    {
+        return Tool::getValidLanguages();
     }
 
     protected function isAssetField(Data $fieldDef): bool

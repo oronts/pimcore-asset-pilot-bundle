@@ -71,4 +71,45 @@ class AssetFieldExtractorTest extends TestCase
     {
         self::assertSame([], $this->extractor->extractFrom(null));
     }
+
+    #[Test]
+    public function emptyConfiguredLocalesScansAllValidLanguages(): void
+    {
+        self::assertSame(['en', 'de'], $this->localeResolver([], ['en', 'de'])->locales());
+    }
+
+    #[Test]
+    public function configuredLocalesAreIntersectedWithValidLanguages(): void
+    {
+        self::assertSame(['de', 'fr'], $this->localeResolver(['de', 'fr', 'xx'], ['en', 'de', 'fr'])->locales());
+    }
+
+    /**
+     * @param string[] $configured
+     * @param string[] $valid
+     */
+    private function localeResolver(array $configured, array $valid): object
+    {
+        return new class(new NullLogger(), $configured, $valid) extends AssetFieldExtractor {
+            /**
+             * @param string[] $configured
+             * @param string[] $valid
+             */
+            public function __construct(NullLogger $logger, array $configured, private readonly array $valid)
+            {
+                parent::__construct($logger, $configured);
+            }
+
+            protected function validLanguages(): array
+            {
+                return $this->valid;
+            }
+
+            /** @return string[] */
+            public function locales(): array
+            {
+                return $this->resolveLocales();
+            }
+        };
+    }
 }

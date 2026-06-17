@@ -19,6 +19,8 @@ use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 class AssetUploadListener
 {
+    private const int DEPENDENCY_PAGE_SIZE = 100;
+
     public function __construct(
         protected readonly AssetOrganizer $organizer,
         protected readonly MessageBusInterface $messageBus,
@@ -73,82 +75,112 @@ class AssetUploadListener
             return;
         }
 
-        // Find all objects that reference this asset via Pimcore's dependency system
+        // Find all objects that reference this asset via Pimcore's dependency system.
         $dependency = Dependency::getBySourceId($assetId, 'asset');
-        $requiredBy = $dependency->getRequiredBy();
+        $processed = $this->dispatchForDependents($dependency);
 
-        if (empty($requiredBy)) {
-            $this->logger->debug('AssetUploadListener: no objects reference asset {id}', [
-                'id' => $assetId,
-            ]);
+        if ($processed === 0) {
+            $this->logger->debug('AssetUploadListener: no objects reference asset {id}', ['id' => $assetId]);
+
             return;
         }
 
         $this->logger->info('AssetUploadListener: asset {id} referenced by {count} dependencies', [
             'id' => $assetId,
-            'count' => count($requiredBy),
+            'count' => $processed,
         ]);
+    }
 
-        foreach ($requiredBy as $dep) {
-            if (($dep['type'] ?? '') !== 'object') {
-                continue;
+    /**
+     * Page the reverse dependencies so a widely-shared asset never loads every referrer into memory.
+     *
+     * @return int the number of dependency rows processed
+     */
+    protected function dispatchForDependents(Dependency $dependency): int
+    {
+        $offset = 0;
+        $processed = 0;
+        do {
+            $chunk = $this->fetchDependents($dependency, $offset, self::DEPENDENCY_PAGE_SIZE);
+            foreach ($chunk as $dep) {
+                $this->processDependent($dep);
             }
+            $processed += count($chunk);
+            $offset += self::DEPENDENCY_PAGE_SIZE;
+        } while (count($chunk) === self::DEPENDENCY_PAGE_SIZE);
 
-            $objectId = (int) ($dep['id'] ?? 0);
-            if ($objectId <= 0) {
-                continue;
-            }
+        return $processed;
+    }
 
-            // Check if the object is already being processed (loop prevention)
-            if ($this->loopGuard->isProcessingObject($objectId)) {
-                $this->logger->debug('AssetUploadListener: object {id} already being processed, skipping', [
+    /** @return array<int, array{type?: string, id?: int|string}> */
+    protected function fetchDependents(Dependency $dependency, int $offset, int $limit): array
+    {
+        return $dependency->getRequiredBy($offset, $limit);
+    }
+
+    /** @param array{type?: string, id?: int|string} $dep a Pimcore reverse-dependency row */
+    protected function processDependent(array $dep): void
+    {
+        if (($dep['type'] ?? '') !== 'object') {
+            return;
+        }
+
+        $objectId = (int) ($dep['id'] ?? 0);
+        if ($objectId <= 0) {
+            return;
+        }
+
+        // Check if the object is already being processed (loop prevention)
+        if ($this->loopGuard->isProcessingObject($objectId)) {
+            $this->logger->debug('AssetUploadListener: object {id} already being processed, skipping', [
+                'id' => $objectId,
+            ]);
+            return;
+        }
+
+        if ($this->asyncEnabled) {
+            // Dispatch deduplication: skip if a message was recently dispatched for this object
+            if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
+                $this->logger->debug('AssetUploadListener: message recently dispatched for object {id}, skipping duplicate', [
                     'id' => $objectId,
                 ]);
-                continue;
+                return;
             }
 
-            if ($this->asyncEnabled) {
-                // Dispatch deduplication: skip if a message was recently dispatched for this object
-                if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
-                    $this->logger->debug('AssetUploadListener: message recently dispatched for object {id}, skipping duplicate', [
-                        'id' => $objectId,
-                    ]);
-                    continue;
-                }
+            $this->messageBus->dispatch(Envelope::wrap(
+                new OrganizeAssetsMessage(
+                    objectId: $objectId,
+                    triggerType: TriggerType::AssetUpload,
+                    dispatchedAt: time(),
+                ),
+                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)]
+            ));
+            $this->loopGuard->markObjectDispatched($objectId);
 
-                $this->messageBus->dispatch(Envelope::wrap(
-                    new OrganizeAssetsMessage(
-                        objectId: $objectId,
-                        triggerType: TriggerType::AssetUpload,
-                        dispatchedAt: time(),
-                    ),
-                    [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)]
-                ));
-                $this->loopGuard->markObjectDispatched($objectId);
+            $this->logger->debug('AssetUploadListener: dispatched async organize for object {id}', [
+                'id' => $objectId,
+            ]);
 
-                $this->logger->debug('AssetUploadListener: dispatched async organize for object {id}', [
-                    'id' => $objectId,
-                ]);
-            } else {
-                try {
-                    $object = Concrete::getById($objectId);
-                    if ($object === null) {
-                        continue;
-                    }
+            return;
+        }
 
-                    $this->organizer->organize($object, TriggerType::AssetUpload);
-
-                    $this->logger->debug('AssetUploadListener: sync organize complete for object {id}', [
-                        'id' => $objectId,
-                    ]);
-                } catch (\Throwable $e) {
-                    $this->logger->error('AssetUploadListener: failed to organize object {id}: {error}', [
-                        'id' => $objectId,
-                        'error' => $e->getMessage(),
-                        'exception' => $e,
-                    ]);
-                }
+        try {
+            $object = Concrete::getById($objectId);
+            if ($object === null) {
+                return;
             }
+
+            $this->organizer->organize($object, TriggerType::AssetUpload);
+
+            $this->logger->debug('AssetUploadListener: sync organize complete for object {id}', [
+                'id' => $objectId,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('AssetUploadListener: failed to organize object {id}: {error}', [
+                'id' => $objectId,
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
         }
     }
 }

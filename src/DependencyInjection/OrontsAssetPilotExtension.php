@@ -31,6 +31,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.config', $config);
         $container->setParameter('oronts_asset_pilot.enabled', $config['enabled']);
         $container->setParameter('oronts_asset_pilot.allowed_classes', $config['allowed_classes']);
+        $container->setParameter('oronts_asset_pilot.locales', $config['locales']);
 
         // Naming parameters
         $container->setParameter('oronts_asset_pilot.naming.collision_pattern', $config['naming']['collision_pattern']);

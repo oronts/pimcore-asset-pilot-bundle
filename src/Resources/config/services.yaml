@@ -57,6 +57,10 @@ services:
             $rules: '%oronts_asset_pilot.rules%'
             $ruleProviders: !tagged_iterator { tag: 'oronts_asset_pilot.rule_provider' }
 
+    Oronts\AssetPilotBundle\Service\AssetFieldExtractor:
+        arguments:
+            $locales: '%oronts_asset_pilot.locales%'
+
     # -- Path resolvers ---------------------------------------------------------
 
     Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver:

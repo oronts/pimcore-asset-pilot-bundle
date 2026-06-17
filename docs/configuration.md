@@ -11,6 +11,9 @@ oronts_asset_pilot:
     # Optional global allowlist. Empty means the save listener reacts to every class.
     allowed_classes: []
 
+    # Optional: restrict localized-field scanning to these locales. Empty means all valid languages.
+    locales: []
+
     rules:
         product_images:
             class: Product
@@ -55,6 +58,7 @@ oronts_asset_pilot:
 |-----|------|---------|-------------|
 | `enabled` | `bool` | `true` | Global on/off switch |
 | `allowed_classes` | `string[]` | `[]` | Global allowlist of DataObject classes the save listener reacts to. Empty means all classes |
+| `locales` | `string[]` | `[]` | Restrict localized-field scanning to these locales. Empty means all valid Pimcore languages |
 | `rules` | `map` | `[]` | Named rule definitions (see below) |
 | `naming.collision_pattern` | `enum` | `counter` | Filename collision resolution: `counter`, `timestamp`, `uuid` |
 | `naming.slugify` | `bool` | `true` | Slugify filenames during organization |

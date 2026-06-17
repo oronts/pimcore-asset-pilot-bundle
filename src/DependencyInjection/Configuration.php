@@ -27,6 +27,11 @@ class Configuration implements ConfigurationInterface
                     ->defaultValue([])
                     ->info('Global allowlist of DataObject class names the save listener reacts to. Empty means all classes; rules still gate per class.')
                 ->end()
+                ->arrayNode('locales')
+                    ->scalarPrototype()->end()
+                    ->defaultValue([])
+                    ->info('Restrict localized-field scanning to these locales. Empty means all valid Pimcore languages.')
+                ->end()
             ->end();
 
         $this->addRulesSection($rootNode);
