@@ -155,7 +155,7 @@ export const UnusedAssetsTab: React.FC = () => {
                     {visible.has('path') && <th style={thStyle}>{t('asset-pilot.columns.path')}</th>}
                     {visible.has('type') && <SortableHeader label={t('asset-pilot.columns.type')} field="type" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
                     {visible.has('confidence') && <th style={thStyle}>{t('asset-pilot.confidence.label')}</th>}
-                    {visible.has('size') && <SortableHeader label={t('asset-pilot.columns.size')} field="file_size" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
+                    {visible.has('size') && <th style={thStyle}>{t('asset-pilot.columns.size')}</th>}
                     {visible.has('modified') && <SortableHeader label={t('asset-pilot.columns.modified')} field="modified_at" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
                   </tr>
                 </thead>

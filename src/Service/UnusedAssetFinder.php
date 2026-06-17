@@ -283,6 +283,14 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                     continue;
                 }
 
+                // Re-verify it is still unused (it may have been referenced since the listing),
+                // mirroring deleteAssets — both are destructive paths and must recheck state.
+                if ($this->isReferenced($id)) {
+                    $errors[$id] = 'Asset is now referenced by an object';
+                    $failed++;
+                    continue;
+                }
+
                 $asset->setParent($folder);
                 $asset->save();
                 $movedIds[] = $id;

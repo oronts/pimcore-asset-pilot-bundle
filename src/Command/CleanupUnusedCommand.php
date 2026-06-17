@@ -136,39 +136,30 @@ HELP
         $progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%');
         $progressBar->start();
 
-        $totalProcessed = 0;
         $totalSucceeded = 0;
         $totalFailed = 0;
         $allErrors = [];
 
-        $page = 1;
-        while ($totalProcessed < $totalCount) {
-            // Always fetch page 1 because items get deleted/moved from previous pages
-            $result = $this->unusedAssetFinder->findUnused($filters, 1, $batchSize);
-            $items = $result['items'];
+        // Snapshot the candidate ids first: deleting shrinks the listing and moving leaves the asset
+        // unused (just relocated), so re-querying mid-run would reprocess the same first page and skip
+        // later assets. A fixed id list chunked into batches is correct for both actions.
+        $ids = $this->collectUnusedIds($filters, $batchSize, $totalCount);
 
-            if (empty($items)) {
-                break;
-            }
-
-            $ids = array_map(static fn (array $item): int => (int) $item['id'], $items);
-
+        foreach (array_chunk($ids, $batchSize) as $batch) {
             if ($action === 'delete') {
-                $batchResult = $this->unusedAssetFinder->deleteAssets($ids);
+                $batchResult = $this->unusedAssetFinder->deleteAssets($batch);
                 $totalSucceeded += $batchResult['deleted'];
-                $totalFailed += $batchResult['failed'];
-                $allErrors += $batchResult['errors'];
             } else {
-                $batchResult = $this->unusedAssetFinder->moveAssets($ids, $moveTo);
+                $batchResult = $this->unusedAssetFinder->moveAssets($batch, $moveTo);
                 $totalSucceeded += $batchResult['moved'];
-                $totalFailed += $batchResult['failed'];
-                $allErrors += $batchResult['errors'];
             }
 
-            $totalProcessed += count($ids);
-            $progressBar->advance(count($ids));
+            $totalFailed += $batchResult['failed'];
+            $allErrors += $batchResult['errors'];
+            $progressBar->advance(count($batch));
         }
 
+        $totalProcessed = count($ids);
         $progressBar->finish();
         $io->newLine(2);
 
@@ -193,6 +184,28 @@ HELP
         }
 
         return $totalFailed > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * Page through the unused listing once and collect the ids, before any mutation shifts the pages.
+     *
+     * @param array<string, mixed> $filters
+     * @return list<int>
+     */
+    private function collectUnusedIds(array $filters, int $batchSize, int $totalCount): array
+    {
+        $ids = [];
+        $page = 1;
+
+        do {
+            $items = $this->unusedAssetFinder->findUnused($filters, $page, $batchSize)['items'];
+            foreach ($items as $item) {
+                $ids[] = (int) $item['id'];
+            }
+            ++$page;
+        } while (count($items) === $batchSize && count($ids) < $totalCount);
+
+        return $ids;
     }
 
     private function buildFilters(InputInterface $input): array
