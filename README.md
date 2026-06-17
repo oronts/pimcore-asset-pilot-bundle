@@ -1322,6 +1322,66 @@ oronts_asset_pilot:
 > accepted by the rule `strategy` option. Custom logic plugs in through `callback`, as above; there
 > is no separate custom strategy name to register.
 
+### Add Twig Filters/Functions to Path Templates
+
+To add filters or functions usable in `target_path` templates without replacing the resolver, tag a
+Twig extension with `oronts_asset_pilot.twig_extension`:
+
+```php
+class AssetPilotTwigExtension extends \Twig\Extension\AbstractExtension
+{
+    public function getFilters(): array
+    {
+        return [new \Twig\TwigFilter('region_code', fn (string $v): string => substr($v, 0, 2))];
+    }
+}
+```
+
+```yaml
+services:
+    App\AssetPilot\Twig\AssetPilotTwigExtension:
+        tags: ['oronts_asset_pilot.twig_extension']
+```
+
+Now `target_path: '/Regions/{{ object.getCountry()|region_code }}'` works.
+
+### Add Functions to Rule Conditions
+
+To add functions usable in rule `condition` expressions, tag a Symfony
+`ExpressionFunctionProviderInterface` with `oronts_asset_pilot.expression_function_provider`:
+
+```php
+use Symfony\Component\ExpressionLanguage\ExpressionFunction;
+use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
+
+class AssetPilotExpressionProvider implements ExpressionFunctionProviderInterface
+{
+    public function getFunctions(): array
+    {
+        return [
+            new ExpressionFunction(
+                'in_business_hours',
+                static fn (): string => '((int) date("H") >= 9 && (int) date("H") < 17)', // compiler
+                static fn (array $vars): bool => (int) date('H') >= 9 && (int) date('H') < 17, // evaluator
+            ),
+        ];
+    }
+}
+```
+
+```yaml
+services:
+    App\AssetPilot\Expression\AssetPilotExpressionProvider:
+        tags: ['oronts_asset_pilot.expression_function_provider']
+```
+
+Now `condition: 'in_business_hours() and is_image(asset)'` works.
+
+> Use names that do not clash with the built-ins. The bundle's own Twig filters/functions
+> (`safe_key`, `pluck`, `coalesce`, ...) and condition functions (`is_image`, `asset_type`, ...) are
+> registered first; reuse a built-in name and a consumer expression function will override it, while a
+> Twig filter of the same name is shadowed by the built-in.
+
 ### Custom Path Resolver
 
 Replace the Twig-based path resolution entirely. Implement `PathResolverInterface` and override the service alias.

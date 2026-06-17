@@ -8,6 +8,7 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
 
 class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
@@ -17,8 +18,12 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
     /** @var array<string, \Symfony\Component\ExpressionLanguage\ParsedExpression> */
     protected array $compiledCache = [];
 
+    /**
+     * @param iterable<ExpressionFunctionProviderInterface> $functionProviders consumer-tagged providers
+     */
     public function __construct(
         protected readonly LoggerInterface $logger,
+        protected readonly iterable $functionProviders = [],
     ) {}
 
     public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
@@ -86,6 +91,10 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
 
         $this->expressionLanguage = new ExpressionLanguage();
         $this->registerFunctions();
+
+        foreach ($this->functionProviders as $provider) {
+            $this->expressionLanguage->registerProvider($provider);
+        }
 
         return $this->expressionLanguage;
     }

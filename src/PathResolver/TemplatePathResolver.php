@@ -11,6 +11,7 @@ use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Twig\Environment;
+use Twig\Extension\ExtensionInterface;
 use Twig\Loader\ArrayLoader;
 use Twig\Source;
 use Twig\TwigFilter;
@@ -47,8 +48,12 @@ class TemplatePathResolver implements PathResolverInterface
 {
     protected ?Environment $twig = null;
 
+    /**
+     * @param iterable<ExtensionInterface> $twigExtensions consumer-tagged Twig extensions
+     */
     public function __construct(
         protected readonly LoggerInterface $logger,
+        protected readonly iterable $twigExtensions = [],
     ) {}
 
     public function resolve(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): string
@@ -187,6 +192,10 @@ class TemplatePathResolver implements PathResolverInterface
 
         $this->registerFilters($this->twig);
         $this->registerFunctions($this->twig);
+
+        foreach ($this->twigExtensions as $extension) {
+            $this->twig->addExtension($extension);
+        }
 
         return $this->twig;
     }

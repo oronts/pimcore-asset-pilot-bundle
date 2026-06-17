@@ -47,8 +47,14 @@ services:
     # -- Path resolvers ---------------------------------------------------------
 
     Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver:
+        arguments:
+            $twigExtensions: !tagged_iterator oronts_asset_pilot.twig_extension
         tags:
             - { name: 'oronts_asset_pilot.path_resolver', priority: 0 }
+
+    Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator:
+        arguments:
+            $functionProviders: !tagged_iterator oronts_asset_pilot.expression_function_provider
 
     # -- Strategies -------------------------------------------------------------
 
