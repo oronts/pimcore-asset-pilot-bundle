@@ -112,6 +112,36 @@ class ConfigValidatorTest extends TestCase
     }
 
     #[Test]
+    public function validateRejectsInvertedSizeRange(): void
+    {
+        $rule = $this->createRule(filters: ['min_size' => 5000, 'max_size' => 100]);
+        $results = $this->validator->validate([$rule]);
+
+        $sizeResults = array_values(array_filter($results, static fn (ValidationResult $r) => $r->check === 'filter_size'));
+        self::assertNotEmpty($sizeResults);
+        self::assertSame('fail', $sizeResults[0]->status);
+    }
+
+    #[Test]
+    public function validateRejectsNegativeSize(): void
+    {
+        foreach ([['min_size' => -1], ['max_size' => -5]] as $filters) {
+            $results = $this->validator->validate([$this->createRule(filters: $filters)]);
+            $sizeResults = array_values(array_filter($results, static fn (ValidationResult $r) => $r->check === 'filter_size'));
+            self::assertNotEmpty($sizeResults, json_encode($filters));
+            self::assertSame('fail', $sizeResults[0]->status);
+        }
+    }
+
+    #[Test]
+    public function validateAcceptsEqualSizeBounds(): void
+    {
+        $results = $this->validator->validate([$this->createRule(filters: ['min_size' => 100, 'max_size' => 100])]);
+
+        self::assertEmpty(array_filter($results, static fn (ValidationResult $r) => $r->check === 'filter_size'));
+    }
+
+    #[Test]
     public function validateInvalidConditionFails(): void
     {
         $rule = $this->createRule(condition: 'object.getId(( > 0');

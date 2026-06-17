@@ -182,6 +182,18 @@ class ConfigValidator
             }
         }
 
+        $minSize = $filters['min_size'] ?? null;
+        $maxSize = $filters['max_size'] ?? null;
+        if ($minSize !== null && $minSize < 0) {
+            $results[] = new ValidationResult($rule->name, 'filter_size', 'fail', 'filters.min_size cannot be negative');
+        }
+        if ($maxSize !== null && $maxSize < 0) {
+            $results[] = new ValidationResult($rule->name, 'filter_size', 'fail', 'filters.max_size cannot be negative');
+        }
+        if ($minSize !== null && $maxSize !== null && $minSize > $maxSize) {
+            $results[] = new ValidationResult($rule->name, 'filter_size', 'fail', "filters.min_size ({$minSize}) is greater than filters.max_size ({$maxSize})");
+        }
+
         return $results;
     }
 

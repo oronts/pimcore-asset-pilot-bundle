@@ -194,9 +194,10 @@ class AuditController
             $this->logger->error('Asset Pilot: failed to revert audit entry {id}: {error}', [
                 'id' => $id,
                 'error' => $e->getMessage(),
+                'exception' => $e,
             ]);
 
-            return new JsonResponse(['error' => 'Failed to revert: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+            return new JsonResponse(['error' => 'Failed to revert the operation.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 

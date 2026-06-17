@@ -42,7 +42,7 @@ class AuditCommand extends Command
         $io = new SymfonyStyle($input, $output);
 
         if ($input->getOption('cleanup')) {
-            $days = 90; // Could come from config
+            $days = $this->auditLogger->getRetentionDays();
             $deleted = $this->auditLogger->cleanup($days);
             $io->success("Cleaned up {$deleted} audit entries older than {$days} days.");
             return Command::SUCCESS;
