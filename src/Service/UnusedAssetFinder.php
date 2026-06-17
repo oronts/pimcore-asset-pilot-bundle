@@ -139,36 +139,65 @@ class UnusedAssetFinder
     public function getUnusedStats(): array
     {
         try {
-            $byType = $this->connection->createQueryBuilder()
-                ->select('a.type, COUNT(*) as count')
+            // The assets table has no size column, so real byte totals require loading each unused
+            // asset and reading its storage size. This is an on-demand panel, not a hot path.
+            $rows = $this->connection->createQueryBuilder()
+                ->select('a.id', 'a.type')
                 ->from('assets', 'a')
                 ->where('a.type != :folder')
                 ->setParameter('folder', 'folder')
                 ->andWhere('a.id NOT IN (SELECT d.targetid FROM dependencies d WHERE d.targettype = :assetType)')
                 ->setParameter('assetType', 'asset')
-                ->groupBy('a.type')
-                ->orderBy('count', 'DESC')
                 ->executeQuery()
                 ->fetchAllAssociative();
 
-            $totalCount = 0;
-            foreach ($byType as $row) {
-                $totalCount += (int) $row['count'];
-            }
-
-            return [
-                'totalCount' => $totalCount,
-                'totalSize' => 0,
-                'totalSizeFormatted' => $this->formatBytes(0),
-                'byType' => $byType,
-            ];
+            return $this->aggregateStats($rows);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to get unused asset stats: {error}', [
                 'error' => $e->getMessage(),
             ]);
 
-            return ['totalCount' => 0, 'totalSize' => 0, 'totalSizeFormatted' => '0 B', 'byType' => []];
+            return ['totalCount' => 0, 'totalSize' => 0, 'totalSizeFormatted' => $this->formatBytes(0), 'byType' => []];
         }
+    }
+
+    /**
+     * @param list<array{id: mixed, type: mixed}> $rows
+     * @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: list<array{type: string, count: int, total_size: int}>}
+     */
+    protected function aggregateStats(array $rows): array
+    {
+        $totalSize = 0;
+        $byType = [];
+        foreach ($rows as $row) {
+            $type = (string) $row['type'];
+            $size = $this->fileSize((int) $row['id']);
+            $byType[$type] ??= ['count' => 0, 'total_size' => 0];
+            $byType[$type]['count']++;
+            $byType[$type]['total_size'] += $size;
+            $totalSize += $size;
+        }
+
+        uasort($byType, static fn (array $a, array $b): int => $b['count'] <=> $a['count']);
+
+        $byTypeList = [];
+        foreach ($byType as $type => $agg) {
+            $byTypeList[] = ['type' => $type, 'count' => $agg['count'], 'total_size' => $agg['total_size']];
+        }
+
+        return [
+            'totalCount' => count($rows),
+            'totalSize' => $totalSize,
+            'totalSizeFormatted' => $this->formatBytes($totalSize),
+            'byType' => $byTypeList,
+        ];
+    }
+
+    protected function fileSize(int $assetId): int
+    {
+        $asset = Asset::getById($assetId);
+
+        return $asset !== null ? (int) $asset->getFileSize() : 0;
     }
 
     /**
