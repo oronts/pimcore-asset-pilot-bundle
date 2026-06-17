@@ -92,7 +92,7 @@ class DataObjectSaveListener
                     triggerType: $triggerType,
                     dispatchedAt: time(),
                 ),
-                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)]
+                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)],
             ));
             $this->loopGuard->markObjectDispatched($objectId);
 

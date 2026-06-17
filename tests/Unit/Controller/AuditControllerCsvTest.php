@@ -19,7 +19,7 @@ class AuditControllerCsvTest extends TestCase
 {
     private function controller(): object
     {
-        return new class($this->createMock(AuditLogger::class), new NullLogger(), $this->createMock(LoopGuard::class), new EventDispatcher()) extends AuditController {
+        return new class ($this->createMock(AuditLogger::class), new NullLogger(), $this->createMock(LoopGuard::class), new EventDispatcher()) extends AuditController {
             public function sanitize(mixed $v): string
             {
                 return $this->sanitizeCsvCell($v);

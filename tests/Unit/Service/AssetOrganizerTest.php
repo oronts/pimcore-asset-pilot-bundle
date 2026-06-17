@@ -44,11 +44,15 @@ class AssetOrganizerTest extends TestCase
         $seen = [];
         $dispatcher->addListener(
             AssetPilotEvents::BULK_STARTED,
-            static function (BulkOrganizeEvent $e) use (&$seen): void { $seen[] = ['started', $e->objectIds, $e->triggerType]; },
+            static function (BulkOrganizeEvent $e) use (&$seen): void {
+                $seen[] = ['started', $e->objectIds, $e->triggerType];
+            },
         );
         $dispatcher->addListener(
             AssetPilotEvents::BULK_COMPLETED,
-            static function (BulkOrganizeEvent $e) use (&$seen): void { $seen[] = ['completed', $e->objectIds, $e->results]; },
+            static function (BulkOrganizeEvent $e) use (&$seen): void {
+                $seen[] = ['completed', $e->objectIds, $e->results];
+            },
         );
 
         $this->organizer($dispatcher)->organizeBulk([], TriggerType::Api);

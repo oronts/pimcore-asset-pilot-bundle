@@ -84,7 +84,7 @@ class UnusedAssetFinderTest extends TestCase
     /** @param array<string, int> $sizes keyed by full path */
     private function finderWithSizes(array $sizes): object
     {
-        return new class($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), $sizes) extends UnusedAssetFinder {
+        return new class ($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), $sizes) extends UnusedAssetFinder {
             /** @param array<string, int> $sizes */
             public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, private array $sizes)
             {

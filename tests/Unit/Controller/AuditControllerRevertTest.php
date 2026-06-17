@@ -30,17 +30,26 @@ class AuditControllerRevertTest extends TestCase
 
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('markAssetProcessing')
-            ->willReturnCallback(function (int $id) use (&$calls): void { $calls[] = "markProcessing:$id"; });
+            ->willReturnCallback(function (int $id) use (&$calls): void {
+                $calls[] = "markProcessing:$id";
+            });
         $loopGuard->method('markAssetRecentlyMoved')
-            ->willReturnCallback(function (int $id) use (&$calls): void { $calls[] = "markRecentlyMoved:$id"; });
+            ->willReturnCallback(function (int $id) use (&$calls): void {
+                $calls[] = "markRecentlyMoved:$id";
+            });
         $loopGuard->method('unmarkAssetProcessing')
-            ->willReturnCallback(function (int $id) use (&$calls): void { $calls[] = "unmarkProcessing:$id"; });
+            ->willReturnCallback(function (int $id) use (&$calls): void {
+                $calls[] = "unmarkProcessing:$id";
+            });
 
         $asset = $this->createMock(Asset::class);
         $asset->expects(self::once())->method('save')
-            ->willReturnCallback(function () use (&$calls): Asset { $calls[] = 'save'; return $this->createMock(Asset::class); });
+            ->willReturnCallback(function () use (&$calls): Asset {
+                $calls[] = 'save';
+                return $this->createMock(Asset::class);
+            });
 
-        $controller = new class($this->createMock(AuditLogger::class), new NullLogger(), $loopGuard, new EventDispatcher()) extends AuditController {
+        $controller = new class ($this->createMock(AuditLogger::class), new NullLogger(), $loopGuard, new EventDispatcher()) extends AuditController {
             public function exposedSaveReverted(Asset $asset, int $assetId): void
             {
                 $this->saveReverted($asset, $assetId);

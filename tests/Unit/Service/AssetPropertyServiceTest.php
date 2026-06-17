@@ -22,7 +22,9 @@ class AssetPropertyServiceTest extends TestCase
     {
         $dispatcher = new EventDispatcher();
         $captured = null;
-        $dispatcher->addListener(AssetPilotEvents::ASSET_LOCKED, static function (AssetMutationEvent $e) use (&$captured): void { $captured = $e; });
+        $dispatcher->addListener(AssetPilotEvents::ASSET_LOCKED, static function (AssetMutationEvent $e) use (&$captured): void {
+            $captured = $e;
+        });
 
         $service = new AssetPropertyService($this->createMock(Connection::class), new NullLogger(), $dispatcher);
         $service->lockAsset(5, '/Products/a.jpg');
@@ -37,7 +39,9 @@ class AssetPropertyServiceTest extends TestCase
     {
         $dispatcher = new EventDispatcher();
         $captured = null;
-        $dispatcher->addListener(AssetPilotEvents::ASSET_UNLOCKED, static function (AssetMutationEvent $e) use (&$captured): void { $captured = $e; });
+        $dispatcher->addListener(AssetPilotEvents::ASSET_UNLOCKED, static function (AssetMutationEvent $e) use (&$captured): void {
+            $captured = $e;
+        });
 
         $service = new AssetPropertyService($this->createMock(Connection::class), new NullLogger(), $dispatcher);
         $service->unlockAsset(5);

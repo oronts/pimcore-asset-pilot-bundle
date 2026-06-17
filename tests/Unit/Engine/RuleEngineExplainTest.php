@@ -9,7 +9,6 @@ use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
 use Oronts\AssetPilotBundle\Model\Rule;
-use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;

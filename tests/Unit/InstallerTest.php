@@ -15,7 +15,7 @@ class InstallerTest extends TestCase
     /** Exposes the protected static schema definitions without constructing the real installer. */
     private function schema(): Installer
     {
-        return new class extends Installer {
+        return new class () extends Installer {
             public function __construct() {}
 
             /** @return list<array{0: string, 1: string, 2: array<string, mixed>}> */

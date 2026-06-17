@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Engine;
 
 use Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface;
+use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -72,7 +72,7 @@ class RuleEngineTest extends TestCase
         $configRule = $this->createRule('config', 'Product', 50);
         $providedRule = $this->createRule('provided', 'Product', 90);
 
-        $provider = new class($providedRule) implements \Oronts\AssetPilotBundle\Engine\RuleProviderInterface {
+        $provider = new class ($providedRule) implements \Oronts\AssetPilotBundle\Engine\RuleProviderInterface {
             public function __construct(private readonly Rule $rule) {}
 
             public function getRules(): iterable

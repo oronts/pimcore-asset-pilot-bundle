@@ -38,7 +38,7 @@ class TemplatePathResolverTest extends TestCase
     #[Test]
     public function aTaggedTwigExtensionAddsUsableFilters(): void
     {
-        $extension = new class extends AbstractExtension {
+        $extension = new class () extends AbstractExtension {
             public function getFilters(): array
             {
                 return [new TwigFilter('shout', static fn (string $v): string => strtoupper($v))];
@@ -66,14 +66,14 @@ class TemplatePathResolverTest extends TestCase
     #[Test]
     public function taggedContextProvidersAddVariables(): void
     {
-        $provider = new class implements ContextProviderInterface {
+        $provider = new class () implements ContextProviderInterface {
             public function getContext(AbstractObject $object, Asset $asset, ?string $locale): array
             {
                 return ['sapId' => 'SAP1', 'region' => 'EU'];
             }
         };
 
-        $resolver = new class(new \Psr\Log\NullLogger(), [], [$provider]) extends TemplatePathResolver {
+        $resolver = new class (new \Psr\Log\NullLogger(), [], [$provider]) extends TemplatePathResolver {
             public function context(AbstractObject $object, Asset $asset): array
             {
                 return $this->buildContext($object, $asset);
@@ -89,14 +89,14 @@ class TemplatePathResolverTest extends TestCase
     #[Test]
     public function coreContextKeysCannotBeOverriddenByAProvider(): void
     {
-        $provider = new class implements ContextProviderInterface {
+        $provider = new class () implements ContextProviderInterface {
             public function getContext(AbstractObject $object, Asset $asset, ?string $locale): array
             {
                 return ['object' => 'hijacked', 'className' => 'Hijacked'];
             }
         };
 
-        $resolver = new class(new \Psr\Log\NullLogger(), [], [$provider]) extends TemplatePathResolver {
+        $resolver = new class (new \Psr\Log\NullLogger(), [], [$provider]) extends TemplatePathResolver {
             public function context(AbstractObject $object, Asset $asset): array
             {
                 return $this->buildContext($object, $asset);
@@ -148,7 +148,7 @@ class TemplatePathResolverTest extends TestCase
 
     private function pathNormalizer(): object
     {
-        return new class(new \Psr\Log\NullLogger()) extends TemplatePathResolver {
+        return new class (new \Psr\Log\NullLogger()) extends TemplatePathResolver {
             protected function sanitizeSegment(string $segment): string
             {
                 return $segment;
@@ -163,7 +163,7 @@ class TemplatePathResolverTest extends TestCase
 
     private function contextResolver(): object
     {
-        return new class(new \Psr\Log\NullLogger()) extends TemplatePathResolver {
+        return new class (new \Psr\Log\NullLogger()) extends TemplatePathResolver {
             public function context(AbstractObject $object, Asset $asset): array
             {
                 return $this->buildContext($object, $asset);

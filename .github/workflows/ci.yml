@@ -26,7 +26,10 @@ jobs:
           coverage: none
 
       - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-progress --no-suggest
+        run: composer install --prefer-dist --no-progress
+
+      - name: Coding standards (php-cs-fixer)
+        run: vendor/bin/php-cs-fixer fix --dry-run --diff
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit

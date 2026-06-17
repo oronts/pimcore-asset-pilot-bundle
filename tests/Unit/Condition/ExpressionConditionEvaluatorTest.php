@@ -39,7 +39,7 @@ class ExpressionConditionEvaluatorTest extends TestCase
     #[Test]
     public function aTaggedFunctionProviderExtendsTheConditionLanguage(): void
     {
-        $provider = new class implements ExpressionFunctionProviderInterface {
+        $provider = new class () implements ExpressionFunctionProviderInterface {
             public function getFunctions(): array
             {
                 return [ExpressionFunction::fromPhp('strtoupper', 'is_weekend')];

@@ -185,7 +185,9 @@ class OrganizeCommand extends Command
             $previewIds = array_slice($objectIds, 0, 5);
             foreach ($previewIds as $id) {
                 $obj = AbstractObject::getById($id);
-                if ($obj === null) continue;
+                if ($obj === null) {
+                    continue;
+                }
                 $ops = $this->organizer->dryRun($obj);
                 foreach ($ops as $op) {
                     $io->writeln("  Asset #{$op->assetId}: {$op->sourcePath} -> {$op->targetPath} ({$op->ruleName})");
@@ -204,7 +206,7 @@ class OrganizeCommand extends Command
                         objectIds: $batch,
                         triggerType: TriggerType::BulkOperation,
                     ),
-                    [new DeduplicateStamp($key, 60.0)]
+                    [new DeduplicateStamp($key, 60.0)],
                 ));
             }
             $io->success(sprintf('Dispatched %d batch(es) to messenger queue.', count($batches)));

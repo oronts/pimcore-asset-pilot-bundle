@@ -20,7 +20,7 @@ class AssetFieldExtractorTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->extractor = new class(new NullLogger()) extends AssetFieldExtractor {
+        $this->extractor = new class (new NullLogger()) extends AssetFieldExtractor {
             public function extractFrom(mixed $value): array
             {
                 return $this->extractAssetsFromValue($value);
@@ -90,7 +90,7 @@ class AssetFieldExtractorTest extends TestCase
      */
     private function localeResolver(array $configured, array $valid): object
     {
-        return new class(new NullLogger(), $configured, $valid) extends AssetFieldExtractor {
+        return new class (new NullLogger(), $configured, $valid) extends AssetFieldExtractor {
             /**
              * @param string[] $configured
              * @param string[] $valid

@@ -229,7 +229,7 @@ class ConfigValidator
                     implode(', ', $ruleNames),
                     'duplicate_priority',
                     'warning',
-                    "Rules " . implode(', ', $ruleNames) . " target class \"{$class}\" with same priority {$priority}",
+                    'Rules ' . implode(', ', $ruleNames) . " target class \"{$class}\" with same priority {$priority}",
                 );
             }
         }

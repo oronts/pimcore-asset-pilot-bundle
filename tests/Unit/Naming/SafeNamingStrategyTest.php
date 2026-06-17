@@ -17,7 +17,7 @@ class SafeNamingStrategyTest extends TestCase
     /** @param callable(string): bool $exists */
     private function strategy(callable $exists): object
     {
-        $strategy = new class(new NullLogger()) extends SafeNamingStrategy {
+        $strategy = new class (new NullLogger()) extends SafeNamingStrategy {
             /** @var callable(string): bool */
             public $exists;
 

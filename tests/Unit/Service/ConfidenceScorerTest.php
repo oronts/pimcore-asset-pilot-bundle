@@ -19,7 +19,7 @@ class ConfidenceScorerTest extends TestCase
 
     private function scorer(): object
     {
-        return new class($this->createMock(Connection::class), new NullLogger()) extends ConfidenceScorer {
+        return new class ($this->createMock(Connection::class), new NullLogger()) extends ConfidenceScorer {
             public bool $historyThrows = false;
             /** @var int[] */
             public array $history = [];

@@ -20,7 +20,7 @@ class AssetUploadListenerPagingTest extends TestCase
     /** @param list<list<array<string, mixed>>> $pages */
     private function listener(array $pages): object
     {
-        return new class(
+        return new class (
             $this->createMock(AssetOrganizer::class),
             $this->createMock(MessageBusInterface::class),
             $this->createMock(LoopGuard::class),

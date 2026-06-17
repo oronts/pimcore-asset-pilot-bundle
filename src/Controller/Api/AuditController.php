@@ -14,13 +14,13 @@ use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
-use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AuditController
 {

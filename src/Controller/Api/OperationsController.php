@@ -128,7 +128,7 @@ class OperationsController
                     triggerType: TriggerType::Api,
                     dispatchedAt: time(),
                 ),
-                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)]
+                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)],
             ));
             return new JsonResponse(['message' => 'Organization queued'], Response::HTTP_ACCEPTED);
         }
@@ -246,7 +246,7 @@ class OperationsController
                         triggerType: TriggerType::Api,
                         dispatchedAt: time(),
                     ),
-                    [new DeduplicateStamp($key, 60.0)]
+                    [new DeduplicateStamp($key, 60.0)],
                 ));
             }
             return new JsonResponse([

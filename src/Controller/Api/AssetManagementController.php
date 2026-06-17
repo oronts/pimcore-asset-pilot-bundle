@@ -13,12 +13,12 @@ use Oronts\AssetPilotBundle\Service\AssetSearchService;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\LoggerInterface;
-use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AssetManagementController
 {

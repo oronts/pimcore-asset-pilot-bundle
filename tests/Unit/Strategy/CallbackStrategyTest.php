@@ -150,7 +150,7 @@ class CallbackStrategyTest extends TestCase
     #[Test]
     public function delegatesToAConflictStrategyInterfaceService(): void
     {
-        $custom = new class implements ConflictStrategyInterface {
+        $custom = new class () implements ConflictStrategyInterface {
             public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
             {
                 return true;

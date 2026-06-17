@@ -9,10 +9,10 @@ use Oronts\AssetPilotBundle\Controller\Api\OperationsController;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
-use Pimcore\Model\DataObject\AbstractObject;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,7 +24,7 @@ class OperationsControllerResolveTest extends TestCase
 {
     private function controller(?AbstractObject $object): object
     {
-        $c = new class(
+        $c = new class (
             $this->createMock(AssetOrganizer::class),
             $this->createMock(MessageBusInterface::class),
             $this->createMock(AuditLogger::class),
