@@ -13,8 +13,12 @@ use Psr\Log\LoggerInterface;
 
 class CallbackStrategy implements ConflictStrategyInterface
 {
+    /**
+     * @param ContainerInterface $callbacks service locator scoped to services tagged
+     *                                      `oronts_asset_pilot.callback`, keyed by service id
+     */
     public function __construct(
-        protected readonly ContainerInterface $container,
+        protected readonly ContainerInterface $callbacks,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -27,15 +31,15 @@ class CallbackStrategy implements ConflictStrategyInterface
             return false;
         }
 
-        if (!$this->container->has($rule->callback)) {
-            $this->logger->error('CallbackStrategy: service "{service}" not found for rule "{rule}"', [
+        if (!$this->callbacks->has($rule->callback)) {
+            $this->logger->error('CallbackStrategy: callback service "{service}" not found for rule "{rule}". Tag it with "oronts_asset_pilot.callback".', [
                 'service' => $rule->callback,
                 'rule' => $rule->name,
             ]);
             return false;
         }
 
-        $callback = $this->container->get($rule->callback);
+        $callback = $this->callbacks->get($rule->callback);
 
         // A custom strategy is a ConflictStrategyInterface service (resolve()); a plain callable is
         // also accepted. The documented examples implement the interface, which is_callable() rejects.

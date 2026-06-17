@@ -16,8 +16,12 @@ class ConfigValidator
 {
     private const array VALID_FILTER_TYPES = ['image', 'video', 'document', 'audio', 'text', 'archive', 'folder', 'unknown'];
 
+    /**
+     * @param ContainerInterface $callbacks service locator of services tagged
+     *                                      `oronts_asset_pilot.callback`, matching CallbackStrategy
+     */
     public function __construct(
-        private readonly ContainerInterface $container,
+        private readonly ContainerInterface $callbacks,
         private readonly LoggerInterface $logger,
         private readonly ExpressionConditionEvaluator $conditionEvaluator,
         private readonly TemplatePathResolver $pathResolver,
@@ -145,11 +149,11 @@ class ConfigValidator
             return [new ValidationResult($rule->name, 'callback_service', 'fail', 'Callback strategy requires a callback service ID')];
         }
 
-        if ($this->container->has($rule->callback)) {
+        if ($this->callbacks->has($rule->callback)) {
             return [new ValidationResult($rule->name, 'callback_service', 'pass', "Callback service \"{$rule->callback}\" exists")];
         }
 
-        return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found in container")];
+        return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found. Tag it with \"oronts_asset_pilot.callback\".")];
     }
 
     /** @return ValidationResult[] */

@@ -206,12 +206,12 @@ class ApprovalStrategy implements ConflictStrategyInterface
 }
 ```
 
-Register the service as public so `CallbackStrategy` can resolve it by id:
+Tag the service so `CallbackStrategy` can resolve it from its scoped locator by id:
 
 ```yaml
 services:
     App\AssetPilot\Strategy\ApprovalStrategy:
-        public: true
+        tags: ['oronts_asset_pilot.callback']
 ```
 
 ### Sync Mode (No Messenger Queue)

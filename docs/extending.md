@@ -37,9 +37,11 @@ services:
 
 ### Custom Strategy
 
-Control when assets should be moved. Implement `ConflictStrategyInterface` and reference your service
-through the built-in `callback` strategy: the rule sets `strategy: callback` and `callback: <your service id>`,
-and `CallbackStrategy` delegates the decision to your `resolve()`.
+Control when assets should be moved. Implement `ConflictStrategyInterface` (or provide a plain
+invokable service), tag it with `oronts_asset_pilot.callback`, and reference it through the built-in
+`callback` strategy: the rule sets `strategy: callback` and `callback: <your service id>`, and
+`CallbackStrategy` resolves it from a service locator scoped to the tagged callbacks (not the full
+container) and delegates the decision to your `resolve()`.
 
 ```php
 namespace App\AssetPilot\Strategy;
@@ -70,7 +72,7 @@ class BusinessHoursStrategy implements ConflictStrategyInterface
 ```yaml
 services:
     App\AssetPilot\Strategy\BusinessHoursStrategy:
-        public: true   # CallbackStrategy resolves it from the container by service id
+        tags: ['oronts_asset_pilot.callback']   # exposed to CallbackStrategy's locator by service id
 ```
 
 Reference it in a rule config:

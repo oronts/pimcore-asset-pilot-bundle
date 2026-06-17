@@ -82,7 +82,7 @@ services:
 
     Oronts\AssetPilotBundle\Strategy\CallbackStrategy:
         arguments:
-            $container: '@service_container'
+            $callbacks: !tagged_locator { tag: 'oronts_asset_pilot.callback' }
         tags:
             - { name: 'oronts_asset_pilot.strategy', alias: 'callback' }
 
@@ -119,7 +119,7 @@ services:
 
     Oronts\AssetPilotBundle\Service\ConfigValidator:
         arguments:
-            $container: '@service_container'
+            $callbacks: !tagged_locator { tag: 'oronts_asset_pilot.callback' }
 
     # -- Audit ------------------------------------------------------------------
 
