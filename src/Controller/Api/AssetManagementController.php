@@ -115,17 +115,7 @@ class AssetManagementController
     public function availableTags(): JsonResponse
     {
         try {
-            $listing = new Tag\Listing();
-            $tags = [];
-
-            foreach ($listing->getTags() as $tag) {
-                $tags[] = [
-                    'id' => $tag->getId(),
-                    'name' => $tag->getName(),
-                    'parentId' => $tag->getParentId(),
-                    'path' => $tag->getFullIdPath(),
-                ];
-            }
+            $tags = array_map($this->serializeTag(...), (new Tag\Listing())->getTags());
 
             return new JsonResponse($tags);
         } catch (\Throwable $e) {
@@ -140,24 +130,27 @@ class AssetManagementController
     public function assetTags(int $id): JsonResponse
     {
         try {
-            $tags = Tag::getTagsForElement('asset', $id);
-            $result = [];
+            $tags = array_map($this->serializeTag(...), Tag::getTagsForElement('asset', $id));
 
-            foreach ($tags as $tag) {
-                $result[] = [
-                    'id' => $tag->getId(),
-                    'name' => $tag->getName(),
-                    'parentId' => $tag->getParentId(),
-                    'path' => $tag->getFullIdPath(),
-                ];
-            }
-
-            return new JsonResponse($result);
+            return new JsonResponse($tags);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to get asset tags: {error}', ['error' => $e->getMessage()]);
 
             return new JsonResponse([]);
         }
+    }
+
+    /**
+     * @return array{id: int|null, name: string, parentId: int|null, path: string}
+     */
+    private function serializeTag(Tag $tag): array
+    {
+        return [
+            'id' => $tag->getId(),
+            'name' => $tag->getName(),
+            'parentId' => $tag->getParentId(),
+            'path' => $tag->getFullIdPath(),
+        ];
     }
 
     #[Route('/assets/bulk-tag', name: 'oronts_asset_pilot_bulk_tag', methods: ['POST'])]

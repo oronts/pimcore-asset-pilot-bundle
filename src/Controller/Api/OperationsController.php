@@ -39,21 +39,11 @@ class OperationsController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function explain(Request $request): JsonResponse
     {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $resolved = $this->resolveObjectFromBody($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
-
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $object = AbstractObject::getById((int) $objectId);
-        if ($object === null) {
-            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
-        }
+        [$object] = $resolved;
 
         $fieldInfos = $this->fieldExtractor->extract($object);
         $operations = $this->organizer->dryRun($object, TriggerType::Api);
@@ -85,7 +75,7 @@ class OperationsController
         }
 
         return new JsonResponse([
-            'objectId' => $objectId,
+            'objectId' => $object->getId(),
             'operations' => array_map(static fn ($op) => [
                 'assetId' => $op->assetId,
                 'sourcePath' => $op->sourcePath,
@@ -101,22 +91,13 @@ class OperationsController
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function organize(Request $request): JsonResponse
     {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $resolved = $this->resolveObjectFromBody($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
+        [$object, $data] = $resolved;
 
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $object = AbstractObject::getById((int) $objectId);
-        if ($object === null) {
-            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
-        }
-
+        $objectId = $object->getId();
         $dryRun = $data['dryRun'] ?? false;
         $async = $data['async'] ?? false;
 
@@ -171,26 +152,16 @@ class OperationsController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function preview(Request $request): JsonResponse
     {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $resolved = $this->resolveObjectFromBody($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
-
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $object = AbstractObject::getById((int) $objectId);
-        if ($object === null) {
-            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
-        }
+        [$object] = $resolved;
 
         $operations = $this->organizer->dryRun($object, TriggerType::Api);
 
         return new JsonResponse([
-            'objectId' => $objectId,
+            'objectId' => $object->getId(),
             'operations' => array_map(static fn ($op) => [
                 'assetId' => $op->assetId,
                 'sourcePath' => $op->sourcePath,
@@ -350,5 +321,41 @@ class OperationsController
             'stats' => $stats,
             'recentOperations' => $recent,
         ]);
+    }
+
+    /**
+     * Decode the JSON body and resolve the required `objectId` to a loaded object.
+     *
+     * @return array{0: AbstractObject, 1: array<string, mixed>}|JsonResponse the loaded object plus
+     *                                                                         the decoded body, or the error response to return
+     */
+    protected function resolveObjectFromBody(Request $request): array|JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $objectId = $data['objectId'] ?? null;
+        if ($objectId === null) {
+            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $object = $this->loadObject((int) $objectId);
+        if ($object === null) {
+            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
+        }
+
+        return [$object, $data];
+    }
+
+    protected function loadObject(int $id): ?AbstractObject
+    {
+        return AbstractObject::getById($id);
     }
 }
