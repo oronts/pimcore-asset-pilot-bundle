@@ -22,38 +22,4 @@ readonly class MoveOperation
         public ?int $durationMs = null,
         public \DateTimeImmutable $createdAt = new \DateTimeImmutable(),
     ) {}
-
-    public function withStatus(OperationStatus $status, ?string $error = null): self
-    {
-        return new self(
-            assetId: $this->assetId,
-            sourcePath: $this->sourcePath,
-            targetPath: $this->targetPath,
-            objectId: $this->objectId,
-            objectClass: $this->objectClass,
-            ruleName: $this->ruleName,
-            status: $status,
-            triggerType: $this->triggerType,
-            errorMessage: $error ?? $this->errorMessage,
-            durationMs: $this->durationMs,
-            createdAt: $this->createdAt,
-        );
-    }
-
-    public function withDuration(int $durationMs): self
-    {
-        return new self(
-            assetId: $this->assetId,
-            sourcePath: $this->sourcePath,
-            targetPath: $this->targetPath,
-            objectId: $this->objectId,
-            objectClass: $this->objectClass,
-            ruleName: $this->ruleName,
-            status: $this->status,
-            triggerType: $this->triggerType,
-            errorMessage: $this->errorMessage,
-            durationMs: $durationMs,
-            createdAt: $this->createdAt,
-        );
-    }
 }

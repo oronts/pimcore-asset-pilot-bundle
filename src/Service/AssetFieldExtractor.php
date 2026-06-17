@@ -226,23 +226,8 @@ class AssetFieldExtractor
 
     protected function isAssetField(Data $fieldDef): bool
     {
-        $fieldType = $fieldDef->getFieldType();
-
-        if (in_array($fieldType, self::ASSET_FIELD_TYPES, true)) {
-            // For relation fields, check if they allow Asset types
-            if (str_contains($fieldType, 'Relation') || str_contains($fieldType, 'relation')) {
-                if (method_exists($fieldDef, 'getAssetTypes')) {
-                    return true;
-                }
-
-                if (method_exists($fieldDef, 'getDocumentTypes')) {
-                    return true;
-                }
-            }
-
-            return true;
-        }
-
-        return false;
+        // Relation field types are included because they may carry assets; extract() filters the
+        // actual referenced assets at runtime, so object-only relations simply yield none.
+        return in_array($fieldDef->getFieldType(), self::ASSET_FIELD_TYPES, true);
     }
 }

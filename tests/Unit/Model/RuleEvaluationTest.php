@@ -102,4 +102,70 @@ class RuleEvaluationTest extends TestCase
         self::assertFalse($eval->conditionResult);
         self::assertSame('Method "isActive" not found', $eval->conditionError);
     }
+
+    #[Test]
+    public function describeMatchedShowsResolvedPath(): void
+    {
+        $eval = $this->evaluation(matched: true, resolvedPath: '/Products/SKU-1/Images');
+
+        self::assertSame('-> /Products/SKU-1/Images', $eval->describe());
+    }
+
+    #[Test]
+    public function describeMatchedWithoutPathFallsBack(): void
+    {
+        $eval = $this->evaluation(matched: true, resolvedPath: null);
+
+        self::assertSame('-> (unknown path)', $eval->describe());
+    }
+
+    #[Test]
+    public function describeClassMismatchIncludesFilterDetails(): void
+    {
+        $eval = $this->evaluation(rejectionReason: 'class_mismatch', filterDetails: 'got Product');
+
+        self::assertSame('class_mismatch: got Product', $eval->describe());
+    }
+
+    #[Test]
+    public function describeConditionFailedIncludesExpressionAndError(): void
+    {
+        $eval = $this->evaluation(
+            rejectionReason: 'condition_failed',
+            conditionExpression: 'object.isActive()',
+            conditionError: 'boom',
+        );
+
+        self::assertSame('condition_failed: object.isActive() (error: boom)', $eval->describe());
+    }
+
+    #[Test]
+    public function describeUnknownReasonFallsBackToTheReason(): void
+    {
+        $eval = $this->evaluation(rejectionReason: 'something_new');
+
+        self::assertSame('something_new', $eval->describe());
+    }
+
+    private function evaluation(
+        bool $matched = false,
+        ?string $rejectionReason = null,
+        ?string $conditionExpression = null,
+        ?string $conditionError = null,
+        ?string $filterDetails = null,
+        ?string $resolvedPath = null,
+    ): RuleEvaluation {
+        return new RuleEvaluation(
+            ruleName: 'r',
+            matched: $matched,
+            rejectionReason: $rejectionReason,
+            conditionExpression: $conditionExpression,
+            conditionResult: null,
+            conditionError: $conditionError,
+            filterDetails: $filterDetails,
+            resolvedPath: $resolvedPath,
+            priority: 10,
+            enabled: true,
+        );
+    }
 }

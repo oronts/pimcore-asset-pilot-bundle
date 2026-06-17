@@ -8,7 +8,6 @@ use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
-use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
@@ -140,8 +139,7 @@ class OrganizeCommand extends Command
                 $rows = [];
                 foreach ($evaluations as $eval) {
                     $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-                    $detail = $this->formatEvaluationDetail($eval);
-                    $rows[] = [$eval->ruleName, $resultLabel, $detail];
+                    $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
                 }
 
                 $io->table(['Rule', 'Result', 'Detail'], $rows);
@@ -160,23 +158,6 @@ class OrganizeCommand extends Command
         }
 
         return Command::SUCCESS;
-    }
-
-    private function formatEvaluationDetail(RuleEvaluation $eval): string
-    {
-        if ($eval->matched) {
-            return '-> ' . ($eval->resolvedPath ?? '(unknown path)');
-        }
-
-        return match ($eval->rejectionReason) {
-            'disabled' => 'disabled',
-            'class_mismatch' => 'class_mismatch: ' . ($eval->filterDetails ?? ''),
-            'field_mismatch' => 'field_mismatch: ' . ($eval->filterDetails ?? ''),
-            'condition_failed' => 'condition_failed: ' . ($eval->conditionExpression ?? '') .
-                ($eval->conditionError !== null ? ' (error: ' . $eval->conditionError . ')' : ''),
-            'filter_rejected' => 'filter_rejected: ' . ($eval->filterDetails ?? ''),
-            default => $eval->rejectionReason ?? 'unknown',
-        };
     }
 
     protected function organizeBulk(SymfonyStyle $io, string $className, bool $dryRun, bool $async, int $batchSize): int

@@ -129,8 +129,7 @@ class DebugRuleCommand extends Command
         $rows = [];
         foreach ($evaluations as $eval) {
             $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-            $detail = $this->formatDetail($eval);
-            $rows[] = [$eval->ruleName, $resultLabel, $detail];
+            $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
         }
 
         $io->table(['Rule', 'Result', 'Detail'], $rows);
@@ -145,22 +144,5 @@ class DebugRuleCommand extends Command
         }
 
         $io->newLine();
-    }
-
-    private function formatDetail(RuleEvaluation $eval): string
-    {
-        if ($eval->matched) {
-            return '-> ' . ($eval->resolvedPath ?? '(unknown path)');
-        }
-
-        return match ($eval->rejectionReason) {
-            'disabled' => 'disabled',
-            'class_mismatch' => 'class_mismatch: ' . ($eval->filterDetails ?? ''),
-            'field_mismatch' => 'field_mismatch: ' . ($eval->filterDetails ?? ''),
-            'condition_failed' => 'condition_failed: ' . ($eval->conditionExpression ?? '') .
-                ($eval->conditionError !== null ? ' (error: ' . $eval->conditionError . ')' : ''),
-            'filter_rejected' => 'filter_rejected: ' . ($eval->filterDetails ?? ''),
-            default => $eval->rejectionReason ?? 'unknown',
-        };
     }
 }
