@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Psr\Log\LoggerInterface;
 
 class ConfidenceScorer
 {
@@ -14,7 +15,8 @@ class ConfidenceScorer
     public const int PROBABLY_UNUSED_DAYS = 90;
 
     public function __construct(
-        private readonly Connection $connection,
+        protected readonly Connection $connection,
+        protected readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -30,7 +32,23 @@ class ConfidenceScorer
         }
 
         $assetIds = array_column($items, 'id');
-        $historicalIds = $this->getAssetsWithAuditHistory($assetIds);
+
+        try {
+            $historicalIds = $this->getAssetsWithAuditHistory($assetIds);
+        } catch (\Throwable $e) {
+            // Fail closed: if audit history is unreadable, never classify anything definitely_unused
+            // (a delete-risk false negative). Mark everything historically_used until it can be scored.
+            $this->logger->error('Asset Pilot: confidence scoring could not read audit history, failing closed: {error}', [
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            foreach ($items as &$item) {
+                $item['confidence'] = ConfidenceLevel::HistoricallyUsed->value;
+            }
+
+            return $items;
+        }
 
         $now = new \DateTimeImmutable();
 
@@ -41,7 +59,7 @@ class ConfidenceScorer
         return $items;
     }
 
-    private function classify(array $item, array $historicalIds, \DateTimeImmutable $now): string
+    protected function classify(array $item, array $historicalIds, \DateTimeImmutable $now): string
     {
         if (!empty($item['locked'])) {
             return ConfidenceLevel::Protected->value;
@@ -55,6 +73,11 @@ class ConfidenceScorer
 
         if ($modified === null) {
             return ConfidenceLevel::ProbablyUnused->value;
+        }
+
+        // A future modification date (clock skew or import) is not aged; treat it as recent.
+        if ($modified > $now) {
+            return ConfidenceLevel::RecentlyUploaded->value;
         }
 
         $daysAgo = (int) $now->diff($modified)->days;
@@ -74,24 +97,20 @@ class ConfidenceScorer
      * @param int[] $assetIds
      * @return int[] Asset IDs that have at least one audit log entry
      */
-    private function getAssetsWithAuditHistory(array $assetIds): array
+    protected function getAssetsWithAuditHistory(array $assetIds): array
     {
         if (empty($assetIds)) {
             return [];
         }
 
-        try {
-            $rows = $this->connection->createQueryBuilder()
-                ->select('DISTINCT asset_id')
-                ->from(AuditLogger::TABLE_NAME)
-                ->where('asset_id IN (:ids)')
-                ->setParameter('ids', $assetIds, Connection::PARAM_INT_ARRAY)
-                ->executeQuery()
-                ->fetchFirstColumn();
+        $rows = $this->connection->createQueryBuilder()
+            ->select('DISTINCT asset_id')
+            ->from(AuditLogger::TABLE_NAME)
+            ->where('asset_id IN (:ids)')
+            ->setParameter('ids', $assetIds, Connection::PARAM_INT_ARRAY)
+            ->executeQuery()
+            ->fetchFirstColumn();
 
-            return array_map('intval', $rows);
-        } catch (\Throwable) {
-            return [];
-        }
+        return array_map('intval', $rows);
     }
 }

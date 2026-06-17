@@ -270,7 +270,7 @@ class AssetOrganizer
     }
 
     /** @return OperationResult[] */
-    public function organizeBulk(array $objectIds, TriggerType $triggerType, ?callable $progressCallback = null): array
+    public function organizeBulk(array $objectIds, TriggerType $triggerType, ?callable $progressCallback = null, ?int $dispatchedAt = null): array
     {
         $allResults = [];
         $total = count($objectIds);
@@ -282,6 +282,13 @@ class AssetOrganizer
             $object = AbstractObject::getById($objectId);
             if ($object === null) {
                 $this->logger->warning('Asset Pilot: object {id} not found, skipping', ['id' => $objectId]);
+                continue;
+            }
+
+            // Stale-job detection per object: skip if it changed after this batch was dispatched.
+            // A missing/zero dispatch time means "no stale check" (matches OrganizeAssetsHandler).
+            if (($dispatchedAt ?? 0) > 0 && $object instanceof Concrete && $object->getModificationDate() > $dispatchedAt) {
+                $this->logger->info('Asset Pilot: skipping stale object {id} in bulk run (modified after dispatch)', ['id' => $objectId]);
                 continue;
             }
 

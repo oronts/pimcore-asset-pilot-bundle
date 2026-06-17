@@ -25,7 +25,7 @@ class BulkOrganizeHandler
         ]);
 
         try {
-            $results = $this->organizer->organizeBulk($message->objectIds, $message->triggerType);
+            $results = $this->organizer->organizeBulk($message->objectIds, $message->triggerType, null, $message->dispatchedAt);
 
             $this->logger->info('Asset Pilot: bulk organization complete - {count} operations', [
                 'count' => count($results),
