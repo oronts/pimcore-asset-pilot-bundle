@@ -53,12 +53,12 @@ class UnusedAssetFinderTest extends TestCase
     #[Test]
     public function aggregateStatsSumsRealSizesPerTypeAndTotal(): void
     {
-        $finder = $this->finderWithSizes([1 => 100, 2 => 50, 3 => 800]);
+        $finder = $this->finderWithSizes(['/p/a.jpg' => 100, '/p/b.jpg' => 50, '/p/c.mp4' => 800]);
 
         $stats = $finder->aggregate([
-            ['id' => 1, 'type' => 'image'],
-            ['id' => 2, 'type' => 'image'],
-            ['id' => 3, 'type' => 'video'],
+            ['id' => 1, 'type' => 'image', 'path' => '/p/', 'filename' => 'a.jpg'],
+            ['id' => 2, 'type' => 'image', 'path' => '/p/', 'filename' => 'b.jpg'],
+            ['id' => 3, 'type' => 'video', 'path' => '/p/', 'filename' => 'c.mp4'],
         ]);
 
         self::assertSame(3, $stats['totalCount']);
@@ -81,22 +81,22 @@ class UnusedAssetFinderTest extends TestCase
         self::assertSame([], $stats['byType']);
     }
 
-    /** @param array<int, int> $sizes */
+    /** @param array<string, int> $sizes keyed by full path */
     private function finderWithSizes(array $sizes): object
     {
         return new class($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), $sizes) extends UnusedAssetFinder {
-            /** @param array<int, int> $sizes */
+            /** @param array<string, int> $sizes */
             public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, private array $sizes)
             {
                 parent::__construct($c, $l, $s, $d);
             }
 
-            protected function fileSize(int $assetId): int
+            protected function fileSize(string $fullPath): int
             {
-                return $this->sizes[$assetId] ?? 0;
+                return $this->sizes[$fullPath] ?? 0;
             }
 
-            /** @param list<array{id: mixed, type: mixed}> $rows */
+            /** @param list<array{id: mixed, type: mixed, path: mixed, filename: mixed}> $rows */
             public function aggregate(array $rows): array
             {
                 return $this->aggregateStats($rows);

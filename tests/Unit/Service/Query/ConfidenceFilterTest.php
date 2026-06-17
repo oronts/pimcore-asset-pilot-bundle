@@ -37,7 +37,7 @@ class ConfidenceFilterTest extends TestCase
         $spec = $this->build(ConfidenceLevel::HistoricallyUsed);
 
         self::assertStringStartsWith('NOT EXISTS', $spec['conditions'][0]);
-        self::assertStringContainsString('IN (SELECT DISTINCT pal.asset_id FROM asset_pilot_audit_log', $spec['conditions'][1]);
+        self::assertStringContainsString('EXISTS (SELECT 1 FROM asset_pilot_audit_log pal WHERE pal.asset_id = a.id', $spec['conditions'][1]);
     }
 
     #[Test]
@@ -46,7 +46,8 @@ class ConfidenceFilterTest extends TestCase
         foreach ([ConfidenceLevel::RecentlyUploaded, ConfidenceLevel::ProbablyUnused, ConfidenceLevel::DefinitelyUnused] as $level) {
             $spec = $this->build($level);
             self::assertStringStartsWith('NOT EXISTS', $spec['conditions'][0], $level->value);
-            self::assertStringStartsWith('NOT a.id IN', $spec['conditions'][1], $level->value);
+            self::assertStringStartsWith('NOT EXISTS', $spec['conditions'][1], $level->value);
+            self::assertStringContainsString('asset_pilot_audit_log', $spec['conditions'][1], $level->value);
         }
     }
 

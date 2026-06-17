@@ -7,10 +7,10 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
+use Oronts\AssetPilotBundle\Service\Query\AssetStorageSize;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
-use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
 class AssetSearchService implements AssetSearchServiceInterface
@@ -157,16 +157,15 @@ class AssetSearchService implements AssetSearchServiceInterface
             $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
             $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
             $item['locked'] = (bool) ($item['locked'] ?? false);
-
-            try {
-                $asset = Asset::getById((int) $item['id']);
-                $item['file_size'] = $asset !== null ? (int) $asset->getFileSize() : 0;
-            } catch (\Throwable) {
-                $item['file_size'] = 0;
-            }
+            $item['file_size'] = $this->fileSize($item['full_path']);
         }
 
         return $items;
+    }
+
+    protected function fileSize(string $fullPath): int
+    {
+        return AssetStorageSize::bytes($fullPath);
     }
 
     private function paginatedResponse(array $items, int $total, int $page, int $limit): array

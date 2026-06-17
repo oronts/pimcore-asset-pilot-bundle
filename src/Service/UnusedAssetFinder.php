@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
+use Oronts\AssetPilotBundle\Service\Query\AssetStorageSize;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -79,13 +80,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
                 $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
                 $item['locked'] = (bool) ($item['locked'] ?? false);
-
-                try {
-                    $asset = \Pimcore\Model\Asset::getById((int) $item['id']);
-                    $item['file_size'] = $asset !== null ? (int) $asset->getFileSize() : 0;
-                } catch (\Throwable) {
-                    $item['file_size'] = 0;
-                }
+                $item['file_size'] = $this->fileSize($item['full_path']);
             }
 
             $items = $this->scorer->score($items);
@@ -131,10 +126,10 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
     public function getUnusedStats(): array
     {
         try {
-            // The assets table has no size column, so real byte totals require loading each unused
-            // asset and reading its storage size. This is an on-demand panel, not a hot path.
+            // The assets table has no size column, so real byte totals require reading each unused
+            // asset's size from storage by path. This is an on-demand panel, not a hot path.
             $qb = $this->connection->createQueryBuilder()
-                ->select('a.id', 'a.type')
+                ->select('a.id', 'a.type', 'a.path', 'a.filename')
                 ->from(PimcoreSchema::TABLE_ASSETS, 'a');
             $this->applyUnusedPredicate($qb);
 
@@ -149,7 +144,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
     }
 
     /**
-     * @param list<array{id: mixed, type: mixed}> $rows
+     * @param list<array{id: mixed, type: mixed, path: mixed, filename: mixed}> $rows
      * @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: list<array{type: string, count: int, total_size: int}>}
      */
     protected function aggregateStats(array $rows): array
@@ -158,7 +153,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         $byType = [];
         foreach ($rows as $row) {
             $type = (string) $row['type'];
-            $size = $this->fileSize((int) $row['id']);
+            $size = $this->fileSize(rtrim((string) ($row['path'] ?? ''), '/') . '/' . ((string) ($row['filename'] ?? '')));
             $byType[$type] ??= ['count' => 0, 'total_size' => 0];
             $byType[$type]['count']++;
             $byType[$type]['total_size'] += $size;
@@ -180,11 +175,9 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         ];
     }
 
-    protected function fileSize(int $assetId): int
+    protected function fileSize(string $fullPath): int
     {
-        $asset = Asset::getById($assetId);
-
-        return $asset !== null ? (int) $asset->getFileSize() : 0;
+        return AssetStorageSize::bytes($fullPath);
     }
 
     /**

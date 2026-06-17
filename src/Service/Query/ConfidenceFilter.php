@@ -25,7 +25,7 @@ final class ConfidenceFilter
         int $probablyUnusedDays,
     ): array {
         $locked = 'EXISTS (SELECT 1 FROM ' . PimcoreSchema::TABLE_PROPERTIES . ' cfp WHERE cfp.cid = a.id AND cfp.ctype = :cf_ctype AND cfp.name = :cf_lock_prop AND cfp.data = \'1\')';
-        $inHistory = 'a.id IN (SELECT DISTINCT pal.asset_id FROM ' . $auditTable . ' pal)';
+        $inHistory = 'EXISTS (SELECT 1 FROM ' . $auditTable . ' pal WHERE pal.asset_id = a.id)';
         $params = ['cf_ctype' => PimcoreSchema::ELEMENT_TYPE_ASSET, 'cf_lock_prop' => $lockProperty];
 
         if ($level === ConfidenceLevel::Protected) {

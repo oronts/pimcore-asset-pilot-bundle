@@ -22,6 +22,8 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class AssetManagementController
 {
+    private const int MAX_TAGS = 500;
+
     public function __construct(
         private readonly AssetSearchService $searchService,
         private readonly AssetPropertyService $propertyService,
@@ -115,7 +117,13 @@ class AssetManagementController
     public function availableTags(): JsonResponse
     {
         try {
-            $tags = array_map($this->serializeTag(...), (new Tag\Listing())->getTags());
+            $listing = new Tag\Listing();
+            $listing->setLimit(self::MAX_TAGS);
+            $tags = array_map($this->serializeTag(...), $listing->getTags());
+
+            if (count($tags) === self::MAX_TAGS) {
+                $this->logger->warning('Asset Pilot: tag list capped at {max}; some tags are not returned.', ['max' => self::MAX_TAGS]);
+            }
 
             return new JsonResponse($tags);
         } catch (\Throwable $e) {
