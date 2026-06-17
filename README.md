@@ -75,6 +75,11 @@ Install the database table and permissions, then build the Studio UI assets:
 
 ```bash
 bin/console pimcore:bundle:install OrontsAssetPilotBundle
+
+# Build the Studio UI (Module Federation remote; ships as source, not prebuilt)
+npm --prefix assets/studio ci
+npm --prefix assets/studio run build
+
 bin/console assets:install
 bin/console cache:clear
 ```

@@ -66,7 +66,25 @@ lock configured the stamp is inert and duplicate organize messages are not colla
 
 ### 6. Build the Studio UI assets
 
+The Studio UI is a Module Federation remote that ships as source under `assets/studio` and is not
+prebuilt in the package, so build it once after install (and after each bundle upgrade). The build
+writes `public/studio/build/<id>/entrypoints.json`, which `WebpackEntryPointProvider` discovers.
+
 ```bash
+npm --prefix assets/studio ci
+npm --prefix assets/studio run build
+
 bin/console assets:install
 bin/console cache:clear
 ```
+
+`public/studio/build/` is generated output (gitignored). In CI/CD, run the two `npm` commands as a
+build step before deploying. Until the build runs, the backend (rules engine, CLI, events, audit,
+REST API) works, but the Studio dashboard tabs do not load.
+
+> The build depends on Pimcore's `@pimcore/studio-ui-bundle` npm package, which Pimcore ships as a
+> tarball at `vendor/pimcore/studio-ui-bundle/public/build/studio-npm-package.tgz`. The `file:`
+> reference in `assets/studio/package.json` is relative to the bundle's location, so it resolves only
+> after `composer install` has placed `pimcore/studio-ui-bundle` in `vendor/`. If your install layout
+> differs from the standard `vendor/oronts/asset-pilot-bundle`, adjust that relative path to point at
+> the tarball.
