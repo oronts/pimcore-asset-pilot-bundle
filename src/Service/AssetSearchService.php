@@ -13,7 +13,7 @@ use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
-class AssetSearchService
+class AssetSearchService implements AssetSearchServiceInterface
 {
     public function __construct(
         private readonly Connection $connection,

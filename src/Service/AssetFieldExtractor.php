@@ -17,7 +17,7 @@ use Pimcore\Model\DataObject\Data\ImageGallery;
 use Pimcore\Tool;
 use Psr\Log\LoggerInterface;
 
-class AssetFieldExtractor
+class AssetFieldExtractor implements AssetFieldExtractorInterface
 {
     protected const array ASSET_FIELD_TYPES = [
         'image',

@@ -9,7 +9,7 @@ use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 use Psr\Log\LoggerInterface;
 
-class ConfidenceScorer
+class ConfidenceScorer implements ConfidenceScorerInterface
 {
     public const int RECENTLY_UPLOADED_DAYS = 30;
     public const int PROBABLY_UNUSED_DAYS = 90;

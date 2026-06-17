@@ -14,7 +14,7 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 
-class RuleEngine
+class RuleEngine implements RuleEngineInterface
 {
     /** @var Rule[] */
     protected readonly array $sortedRules;

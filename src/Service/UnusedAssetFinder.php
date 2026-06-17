@@ -20,7 +20,7 @@ use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-class UnusedAssetFinder
+class UnusedAssetFinder implements UnusedAssetFinderInterface
 {
     public function __construct(
         private readonly Connection $connection,

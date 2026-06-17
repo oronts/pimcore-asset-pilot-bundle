@@ -40,6 +40,13 @@ services:
     Oronts\AssetPilotBundle\PathResolver\PathResolverInterface: '@Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver'
     Oronts\AssetPilotBundle\Naming\NamingStrategyInterface: '@Oronts\AssetPilotBundle\Naming\SafeNamingStrategy'
 
+    Oronts\AssetPilotBundle\Engine\RuleEngineInterface: '@Oronts\AssetPilotBundle\Engine\RuleEngine'
+    Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface: '@Oronts\AssetPilotBundle\Service\AssetFieldExtractor'
+    Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface: '@Oronts\AssetPilotBundle\Service\UnusedAssetFinder'
+    Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetSearchService'
+    Oronts\AssetPilotBundle\Service\ConfidenceScorerInterface: '@Oronts\AssetPilotBundle\Service\ConfidenceScorer'
+    Oronts\AssetPilotBundle\Audit\AuditLoggerInterface: '@Oronts\AssetPilotBundle\Audit\AuditLogger'
+
     # -- Engine -----------------------------------------------------------------
 
     Oronts\AssetPilotBundle\Engine\RuleEngine:

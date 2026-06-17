@@ -11,7 +11,7 @@ use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
 
-class AuditLogger
+class AuditLogger implements AuditLoggerInterface
 {
     public const string TABLE_NAME = 'asset_pilot_audit_log';
 
