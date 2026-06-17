@@ -53,4 +53,23 @@ class ConfigurationTest extends TestCase
 
         $this->processRule(['strategy' => 'callback']);
     }
+
+    #[Test]
+    public function allowedClassesDefaultsToAnEmptyArray(): void
+    {
+        $config = (new Processor())->processConfiguration(new Configuration(), [[]]);
+
+        self::assertSame([], $config['allowed_classes']);
+        self::assertSame(50, $config['async']['batch_size']);
+    }
+
+    #[Test]
+    public function removedDeadNodesAreRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['strategies' => ['default' => 'always']],
+        ]);
+    }
 }

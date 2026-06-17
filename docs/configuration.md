@@ -8,6 +8,9 @@ Create `config/packages/oronts_asset_pilot.yaml`:
 oronts_asset_pilot:
     enabled: true
 
+    # Optional global allowlist. Empty means the save listener reacts to every class.
+    allowed_classes: []
+
     rules:
         product_images:
             class: Product
@@ -27,9 +30,6 @@ oronts_asset_pilot:
             strategy: always
             priority: 70
 
-    strategies:
-        default: always
-
     naming:
         collision_pattern: counter
         slugify: true
@@ -47,9 +47,6 @@ oronts_asset_pilot:
             - /Protected/
             - /Manual/
         lock_property: asset_pilot_locked
-
-    logging:
-        channel: asset_pilot
 ```
 
 ## Configuration Reference
@@ -57,17 +54,16 @@ oronts_asset_pilot:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | `bool` | `true` | Global on/off switch |
+| `allowed_classes` | `string[]` | `[]` | Global allowlist of DataObject classes the save listener reacts to. Empty means all classes |
 | `rules` | `map` | `[]` | Named rule definitions (see below) |
-| `strategies.default` | `enum` | `always` | Default strategy: `always`, `first_assignment`, `callback` |
 | `naming.collision_pattern` | `enum` | `counter` | Filename collision resolution: `counter`, `timestamp`, `uuid` |
 | `naming.slugify` | `bool` | `true` | Slugify filenames during organization |
 | `async.enabled` | `bool` | `true` | Dispatch moves via Symfony Messenger |
-| `async.batch_size` | `int` | `50` | Operations per batch message |
+| `async.batch_size` | `int` | `50` | Default operations per batch message, used as the default for the `--batch-size` CLI option and the bulk API `batchSize` |
 | `audit.enabled` | `bool` | `true` | Enable audit logging |
 | `audit.retention_days` | `int` | `90` | Days to retain audit entries |
 | `protection.exclude_folders` | `string[]` | `[]` | Folders excluded from organization (e.g., `["/Protected/"]`) |
 | `protection.lock_property` | `string` | `asset_pilot_locked` | Custom property name used to lock assets |
-| `logging.channel` | `string` | `asset_pilot` | Monolog channel name |
 
 ## Rule Options
 
@@ -85,3 +81,11 @@ oronts_asset_pilot:
 | `filters.min_size` | `int` | no | `null` | Minimum file size in bytes |
 | `filters.max_size` | `int` | no | `null` | Maximum file size in bytes |
 | `filters.extensions` | `string[]` | no | `[]` | Allowed file extensions |
+
+## Removed keys
+
+The `strategies.default` and `logging.channel` keys were removed because nothing consumed them: the
+per-rule `strategy` already defaults to `always`, and the bundle logs through the standard autowired
+`LoggerInterface` (a dedicated Monolog channel is configured in the host application's `monolog.yaml`,
+not here). If your config still sets either key, delete it, otherwise the container will reject it as
+an unrecognized option.

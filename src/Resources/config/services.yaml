@@ -3,6 +3,8 @@ services:
         autowire: true
         autoconfigure: true
         public: false
+        bind:
+            int $defaultBatchSize: '%oronts_asset_pilot.async.batch_size%'
 
     _instanceof:
         Oronts\AssetPilotBundle\PathResolver\PathResolverInterface:
@@ -140,7 +142,7 @@ services:
     Oronts\AssetPilotBundle\EventListener\DataObjectSaveListener:
         arguments:
             $enabled: '%oronts_asset_pilot.enabled%'
-            $allowedClasses: []
+            $allowedClasses: '%oronts_asset_pilot.allowed_classes%'
             $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
         tags:
             - { name: 'kernel.event_listener', event: 'pimcore.dataobject.postUpdate', method: 'onPostUpdate' }

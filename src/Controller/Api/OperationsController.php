@@ -33,6 +33,7 @@ class OperationsController
         protected readonly RuleEngine $ruleEngine,
         protected readonly AssetFieldExtractor $fieldExtractor,
         protected readonly LoggerInterface $logger,
+        protected readonly int $defaultBatchSize = 50,
     ) {}
 
     #[Route('/organize/explain', name: 'oronts_asset_pilot_organize_explain', methods: ['POST'])]
@@ -235,7 +236,7 @@ class OperationsController
         }
 
         if ($async) {
-            $batchSize = max(1, (int) ($data['batchSize'] ?? 50));
+            $batchSize = max(1, (int) ($data['batchSize'] ?? $this->defaultBatchSize));
             $batches = array_chunk($objectIds, $batchSize);
             foreach ($batches as $batch) {
                 $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));

@@ -38,6 +38,7 @@ class OrganizeCommand extends Command
         protected readonly AssetFieldExtractor $fieldExtractor,
         protected readonly NamingStrategyInterface $namingStrategy,
         protected readonly LoggerInterface $logger,
+        protected readonly int $defaultBatchSize = 50,
     ) {
         parent::__construct();
     }
@@ -49,7 +50,7 @@ class OrganizeCommand extends Command
             ->addOption('object-id', 'o', InputOption::VALUE_REQUIRED, 'Specific object ID to organize')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Preview without actually moving assets')
             ->addOption('async', null, InputOption::VALUE_NONE, 'Dispatch to messenger queue for async processing')
-            ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Batch size for bulk operations', '50');
+            ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Batch size for bulk operations', (string) $this->defaultBatchSize);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int

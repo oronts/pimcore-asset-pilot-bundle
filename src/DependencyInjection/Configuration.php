@@ -22,14 +22,17 @@ class Configuration implements ConfigurationInterface
                     ->defaultTrue()
                     ->info('Enable or disable the Asset Pilot engine globally.')
                 ->end()
+                ->arrayNode('allowed_classes')
+                    ->scalarPrototype()->end()
+                    ->defaultValue([])
+                    ->info('Global allowlist of DataObject class names the save listener reacts to. Empty means all classes; rules still gate per class.')
+                ->end()
             ->end();
 
         $this->addRulesSection($rootNode);
-        $this->addStrategiesSection($rootNode);
         $this->addNamingSection($rootNode);
         $this->addAsyncSection($rootNode);
         $this->addAuditSection($rootNode);
-        $this->addLoggingSection($rootNode);
         $this->addProtectionSection($rootNode);
 
         return $treeBuilder;
@@ -122,24 +125,6 @@ class Configuration implements ConfigurationInterface
             ->end();
     }
 
-    protected function addStrategiesSection(ArrayNodeDefinition $rootNode): void
-    {
-        $rootNode
-            ->children()
-                ->arrayNode('strategies')
-                    ->addDefaultsIfNotSet()
-                    ->info('Global strategy settings.')
-                    ->children()
-                        ->enumNode('default')
-                            ->values(['always', 'first_assignment', 'callback'])
-                            ->defaultValue('always')
-                            ->info('Default strategy applied when a rule does not specify one.')
-                        ->end()
-                    ->end()
-                ->end()
-            ->end();
-    }
-
     protected function addNamingSection(ArrayNodeDefinition $rootNode): void
     {
         $rootNode
@@ -200,24 +185,6 @@ class Configuration implements ConfigurationInterface
                             ->defaultValue(90)
                             ->min(1)
                             ->info('Number of days to retain audit log entries before cleanup.')
-                        ->end()
-                    ->end()
-                ->end()
-            ->end();
-    }
-
-    protected function addLoggingSection(ArrayNodeDefinition $rootNode): void
-    {
-        $rootNode
-            ->children()
-                ->arrayNode('logging')
-                    ->addDefaultsIfNotSet()
-                    ->info('Logging channel configuration.')
-                    ->children()
-                        ->scalarNode('channel')
-                            ->defaultValue('asset_pilot')
-                            ->cannotBeEmpty()
-                            ->info('Pimcore/Monolog log channel name.')
                         ->end()
                     ->end()
                 ->end()
