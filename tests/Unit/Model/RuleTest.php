@@ -56,9 +56,10 @@ class RuleTest extends TestCase
         self::assertSame('/Assets/{{ sapId }}', $rule->targetPath);
         self::assertSame(MoveStrategy::Always, $rule->strategy);
         self::assertNull($rule->callback);
-        self::assertSame(0, $rule->priority);
+        self::assertSame(10, $rule->priority);
         self::assertTrue($rule->enabled);
         self::assertSame([], $rule->filters);
+        self::assertSame([], $rule->options);
     }
 
     #[Test]
@@ -74,6 +75,7 @@ class RuleTest extends TestCase
             'priority' => 50,
             'enabled' => false,
             'filters' => ['types' => ['image'], 'max_size' => 10485760],
+            'options' => ['threshold' => 5, 'mode' => 'strict'],
         ]);
 
         self::assertSame('full_rule', $rule->name);
@@ -85,6 +87,7 @@ class RuleTest extends TestCase
         self::assertSame(50, $rule->priority);
         self::assertFalse($rule->enabled);
         self::assertSame(['types' => ['image'], 'max_size' => 10485760], $rule->filters);
+        self::assertSame(['threshold' => 5, 'mode' => 'strict'], $rule->options);
     }
 
     #[Test]

@@ -1,0 +1,56 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Tests\Unit\DependencyInjection;
+
+use Oronts\AssetPilotBundle\DependencyInjection\Configuration;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
+use Symfony\Component\Config\Definition\Processor;
+
+#[CoversClass(Configuration::class)]
+class ConfigurationTest extends TestCase
+{
+    /** @param array<string, mixed> $rule */
+    private function processRule(array $rule): array
+    {
+        return (new Processor())->processConfiguration(new Configuration(), [
+            ['rules' => ['my_rule' => ['class' => 'Product', 'target_path' => '/x'] + $rule]],
+        ]);
+    }
+
+    #[Test]
+    public function ruleAcceptsFreeFormArrayOptions(): void
+    {
+        $config = $this->processRule(['options' => ['threshold' => 5, 'mode' => 'strict']]);
+
+        self::assertSame(['threshold' => 5, 'mode' => 'strict'], $config['rules']['my_rule']['options']);
+    }
+
+    #[Test]
+    public function ruleOptionsDefaultsToAnEmptyArray(): void
+    {
+        $config = $this->processRule([]);
+
+        self::assertSame([], $config['rules']['my_rule']['options']);
+    }
+
+    #[Test]
+    public function ruleOptionsRejectsAScalar(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->processRule(['options' => 'strict']);
+    }
+
+    #[Test]
+    public function callbackStrategyRequiresACallbackService(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->processRule(['strategy' => 'callback']);
+    }
+}

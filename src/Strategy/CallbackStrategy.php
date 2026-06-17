@@ -36,14 +36,19 @@ class CallbackStrategy implements ConflictStrategyInterface
         }
 
         $callback = $this->container->get($rule->callback);
-        if (!is_callable($callback)) {
-            $this->logger->error('CallbackStrategy: service "{service}" is not callable', [
+
+        // A custom strategy is a ConflictStrategyInterface service (resolve()); a plain callable is
+        // also accepted. The documented examples implement the interface, which is_callable() rejects.
+        if ($callback instanceof ConflictStrategyInterface) {
+            $result = $callback->resolve($asset, $currentObject, $rule);
+        } elseif (is_callable($callback)) {
+            $result = $callback($asset, $currentObject, $rule);
+        } else {
+            $this->logger->error('CallbackStrategy: service "{service}" must implement ConflictStrategyInterface or be callable', [
                 'service' => $rule->callback,
             ]);
             return false;
         }
-
-        $result = $callback($asset, $currentObject, $rule);
 
         $this->logger->debug('CallbackStrategy: callback for rule "{rule}" returned {result}', [
             'rule' => $rule->name,

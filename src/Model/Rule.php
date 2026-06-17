@@ -19,6 +19,7 @@ readonly class Rule
         public int $priority,
         public bool $enabled,
         public array $filters,
+        public array $options = [],
     ) {}
 
     public static function fromConfig(string $name, array $config): self
@@ -31,9 +32,10 @@ readonly class Rule
             targetPath: $config['target_path'],
             strategy: MoveStrategy::from($config['strategy'] ?? 'always'),
             callback: $config['callback'] ?? null,
-            priority: $config['priority'] ?? 0,
+            priority: $config['priority'] ?? 10,
             enabled: $config['enabled'] ?? true,
             filters: $config['filters'] ?? [],
+            options: $config['options'] ?? [],
         );
     }
 }

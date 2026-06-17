@@ -601,9 +601,18 @@ class ApprovalStrategy implements ConflictStrategyInterface
 
     public function supports(MoveStrategy $strategy): bool
     {
-        return $strategy === MoveStrategy::Callback;
+        // Reached via the callback strategy; return false so it is not selected directly.
+        return false;
     }
 }
+```
+
+Register the service as public so `CallbackStrategy` can resolve it by id:
+
+```yaml
+services:
+    App\AssetPilot\Strategy\ApprovalStrategy:
+        public: true
 ```
 
 ### Sync Mode (No Messenger Queue)
@@ -1261,7 +1270,9 @@ services:
 
 ### Custom Strategy
 
-Control when assets should be moved. Implement `ConflictStrategyInterface` and register with an alias.
+Control when assets should be moved. Implement `ConflictStrategyInterface` and reference your service
+through the built-in `callback` strategy: the rule sets `strategy: callback` and `callback: <your service id>`,
+and `CallbackStrategy` delegates the decision to your `resolve()`.
 
 ```php
 namespace App\AssetPilot\Strategy;
@@ -1282,7 +1293,9 @@ class BusinessHoursStrategy implements ConflictStrategyInterface
 
     public function supports(MoveStrategy $strategy): bool
     {
-        return $strategy === MoveStrategy::Callback;
+        // Reached via the callback strategy, not by direct resolver selection. Returning a built-in
+        // value here would collide with the bundle's own CallbackStrategy, so return false.
+        return false;
     }
 }
 ```
@@ -1290,8 +1303,7 @@ class BusinessHoursStrategy implements ConflictStrategyInterface
 ```yaml
 services:
     App\AssetPilot\Strategy\BusinessHoursStrategy:
-        tags:
-            - { name: 'oronts_asset_pilot.strategy', alias: 'business_hours' }
+        public: true   # CallbackStrategy resolves it from the container by service id
 ```
 
 Reference it in a rule config:
@@ -1305,6 +1317,10 @@ oronts_asset_pilot:
             strategy: callback
             callback: App\AssetPilot\Strategy\BusinessHoursStrategy
 ```
+
+> The three built-in strategy names (`always`, `first_assignment`, `callback`) are the only values
+> accepted by the rule `strategy` option. Custom logic plugs in through `callback`, as above; there
+> is no separate custom strategy name to register.
 
 ### Custom Path Resolver
 
