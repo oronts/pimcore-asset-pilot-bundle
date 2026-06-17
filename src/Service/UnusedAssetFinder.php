@@ -14,6 +14,7 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -52,25 +53,19 @@ class UnusedAssetFinder
             $qb = $this->connection->createQueryBuilder()
                 ->select('a.id, a.path, a.filename, a.type, a.mimetype, a.creationDate as created_at, a.modificationDate as modified_at')
                 ->addSelect('CASE WHEN lp.data = \'1\' THEN 1 ELSE 0 END as locked')
-                ->from('assets', 'a')
-                ->leftJoin('a', 'properties', 'lp', 'lp.cid = a.id AND lp.ctype = :lock_ctype AND lp.name = :lock_prop')
-                ->where('a.type != :folder')
-                ->setParameter('folder', 'folder')
-                ->setParameter('lock_ctype', 'asset')
+                ->from(PimcoreSchema::TABLE_ASSETS, 'a')
+                ->leftJoin('a', PimcoreSchema::TABLE_PROPERTIES, 'lp', 'lp.cid = a.id AND lp.ctype = :lock_ctype AND lp.name = :lock_prop')
+                ->setParameter('lock_ctype', PimcoreSchema::ELEMENT_TYPE_ASSET)
                 ->setParameter('lock_prop', $this->lockProperty)
-                ->andWhere('a.id NOT IN (SELECT d.targetid FROM dependencies d WHERE d.targettype = :assetType)')
-                ->setParameter('assetType', 'asset')
                 ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
+            $this->applyUnusedPredicate($qb);
 
             $countQb = $this->connection->createQueryBuilder()
                 ->select('COUNT(*) as total')
-                ->from('assets', 'a')
-                ->where('a.type != :folder')
-                ->setParameter('folder', 'folder')
-                ->andWhere('a.id NOT IN (SELECT d.targetid FROM dependencies d WHERE d.targettype = :assetType)')
-                ->setParameter('assetType', 'asset');
+                ->from(PimcoreSchema::TABLE_ASSETS, 'a');
+            $this->applyUnusedPredicate($countQb);
 
             $this->applyFilters($qb, $filters);
             $this->applyFilters($countQb, $filters);
@@ -118,11 +113,8 @@ class UnusedAssetFinder
         try {
             $qb = $this->connection->createQueryBuilder()
                 ->select('COUNT(*) as total')
-                ->from('assets', 'a')
-                ->where('a.type != :folder')
-                ->setParameter('folder', 'folder')
-                ->andWhere('a.id NOT IN (SELECT d.targetid FROM dependencies d WHERE d.targettype = :assetType)')
-                ->setParameter('assetType', 'asset');
+                ->from(PimcoreSchema::TABLE_ASSETS, 'a');
+            $this->applyUnusedPredicate($qb);
 
             $this->applyFilters($qb, $filters);
 
@@ -141,17 +133,12 @@ class UnusedAssetFinder
         try {
             // The assets table has no size column, so real byte totals require loading each unused
             // asset and reading its storage size. This is an on-demand panel, not a hot path.
-            $rows = $this->connection->createQueryBuilder()
+            $qb = $this->connection->createQueryBuilder()
                 ->select('a.id', 'a.type')
-                ->from('assets', 'a')
-                ->where('a.type != :folder')
-                ->setParameter('folder', 'folder')
-                ->andWhere('a.id NOT IN (SELECT d.targetid FROM dependencies d WHERE d.targettype = :assetType)')
-                ->setParameter('assetType', 'asset')
-                ->executeQuery()
-                ->fetchAllAssociative();
+                ->from(PimcoreSchema::TABLE_ASSETS, 'a');
+            $this->applyUnusedPredicate($qb);
 
-            return $this->aggregateStats($rows);
+            return $this->aggregateStats($qb->executeQuery()->fetchAllAssociative());
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to get unused asset stats: {error}', [
                 'error' => $e->getMessage(),
@@ -304,15 +291,33 @@ class UnusedAssetFinder
         return ['moved' => count($movedIds), 'failed' => $failed, 'errors' => $errors];
     }
 
+    /**
+     * Restrict a query on the `assets` table (alias `a`) to non-folder assets that no element
+     * references. The shared predicate behind findUnused/countUnused/getUnusedStats.
+     */
+    private function applyUnusedPredicate(QueryBuilder $qb): void
+    {
+        // Distinct param name: the user-supplied `filters['folder']` path filter also binds :folder,
+        // which previously clobbered this type exclusion when both were present.
+        $qb
+            ->andWhere('a.type != :notFolderType')
+            ->andWhere(sprintf(
+                'a.id NOT IN (SELECT d.targetid FROM %s d WHERE d.targettype = :assetType)',
+                PimcoreSchema::TABLE_DEPENDENCIES,
+            ))
+            ->setParameter('notFolderType', PimcoreSchema::ASSET_TYPE_FOLDER)
+            ->setParameter('assetType', PimcoreSchema::ELEMENT_TYPE_ASSET);
+    }
+
     private function isReferenced(int $assetId): bool
     {
         $count = (int) $this->connection->createQueryBuilder()
             ->select('COUNT(*)')
-            ->from('dependencies')
+            ->from(PimcoreSchema::TABLE_DEPENDENCIES)
             ->where('targetid = :id')
             ->andWhere('targettype = :type')
             ->setParameter('id', $assetId)
-            ->setParameter('type', 'asset')
+            ->setParameter('type', PimcoreSchema::ELEMENT_TYPE_ASSET)
             ->executeQuery()
             ->fetchOne();
 

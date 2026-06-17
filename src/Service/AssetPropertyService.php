@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
@@ -30,9 +31,9 @@ class AssetPropertyService
 
     public function unlockAsset(int $assetId): void
     {
-        $this->connection->delete('properties', [
+        $this->connection->delete(PimcoreSchema::TABLE_PROPERTIES, [
             'cid' => $assetId,
-            'ctype' => 'asset',
+            'ctype' => PimcoreSchema::ELEMENT_TYPE_ASSET,
             'name' => $this->lockProperty,
         ]);
         $this->logger->info('Asset Pilot: unlocked asset {id}', ['id' => $assetId]);
@@ -42,11 +43,14 @@ class AssetPropertyService
     public function setProperty(int $assetId, string $assetPath, string $name, string $type, string $data): void
     {
         $this->connection->executeStatement(
-            'INSERT INTO properties (cid, ctype, cpath, name, type, data, inheritable) VALUES (:cid, :ctype, :cpath, :name, :type, :data, 0)
-             ON DUPLICATE KEY UPDATE data = :data, type = :type',
+            sprintf(
+                'INSERT INTO %s (cid, ctype, cpath, name, type, data, inheritable) VALUES (:cid, :ctype, :cpath, :name, :type, :data, 0)
+                 ON DUPLICATE KEY UPDATE data = :data, type = :type',
+                PimcoreSchema::TABLE_PROPERTIES,
+            ),
             [
                 'cid' => $assetId,
-                'ctype' => 'asset',
+                'ctype' => PimcoreSchema::ELEMENT_TYPE_ASSET,
                 'cpath' => $assetPath,
                 'name' => $name,
                 'type' => $type,

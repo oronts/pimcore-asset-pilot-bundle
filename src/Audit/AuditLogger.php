@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Audit;
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
 
@@ -317,7 +318,7 @@ class AuditLogger
                 ->select('al.asset_id, MAX(al.asset_path_to) as last_path, MAX(al.created_at) as last_moved')
                 ->addSelect('a.path, a.filename, a.type, a.mimetype, a.modificationDate as modified_at')
                 ->from(self::TABLE_NAME, 'al')
-                ->innerJoin('al', 'assets', 'a', 'al.asset_id = a.id')
+                ->innerJoin('al', PimcoreSchema::TABLE_ASSETS, 'a', 'al.asset_id = a.id')
                 ->where('al.rule_name = :rule')
                 ->andWhere('al.status = :status')
                 ->setParameter('rule', $ruleName)

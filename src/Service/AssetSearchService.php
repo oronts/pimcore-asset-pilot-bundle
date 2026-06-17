@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -60,13 +61,13 @@ class AssetSearchService
         [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
-            $depFilter = 'a.id IN (SELECT d.targetid FROM dependencies d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)';
+            $depFilter = $this->objectDependencyFilter();
 
             $qb = $this->createBaseQuery()
                 ->andWhere($depFilter)
                 ->setParameter('objId', $objectId)
-                ->setParameter('srcType', 'object')
-                ->setParameter('tgtType', 'asset')
+                ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
+                ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET)
                 ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
@@ -74,8 +75,8 @@ class AssetSearchService
             $countQb = $this->createCountQuery()
                 ->andWhere($depFilter)
                 ->setParameter('objId', $objectId)
-                ->setParameter('srcType', 'object')
-                ->setParameter('tgtType', 'asset');
+                ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
+                ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET);
 
             if (!empty($type)) {
                 $qb->andWhere('a.type = :type')->setParameter('type', $type);
@@ -98,11 +99,11 @@ class AssetSearchService
         return $this->connection->createQueryBuilder()
             ->select('a.id, a.path, a.filename, a.type, a.mimetype, a.creationDate as created_at, a.modificationDate as modified_at')
             ->addSelect('CASE WHEN lp.data = \'1\' THEN 1 ELSE 0 END as locked')
-            ->from('assets', 'a')
-            ->leftJoin('a', 'properties', 'lp', 'lp.cid = a.id AND lp.ctype = :lock_ctype AND lp.name = :lock_prop')
+            ->from(PimcoreSchema::TABLE_ASSETS, 'a')
+            ->leftJoin('a', PimcoreSchema::TABLE_PROPERTIES, 'lp', 'lp.cid = a.id AND lp.ctype = :lock_ctype AND lp.name = :lock_prop')
             ->where('a.type != :folder_type')
-            ->setParameter('folder_type', 'folder')
-            ->setParameter('lock_ctype', 'asset')
+            ->setParameter('folder_type', PimcoreSchema::ASSET_TYPE_FOLDER)
+            ->setParameter('lock_ctype', PimcoreSchema::ELEMENT_TYPE_ASSET)
             ->setParameter('lock_prop', $this->lockProperty);
     }
 
@@ -110,9 +111,17 @@ class AssetSearchService
     {
         return $this->connection->createQueryBuilder()
             ->select('COUNT(*) as total')
-            ->from('assets', 'a')
+            ->from(PimcoreSchema::TABLE_ASSETS, 'a')
             ->where('a.type != :folder_type')
-            ->setParameter('folder_type', 'folder');
+            ->setParameter('folder_type', PimcoreSchema::ASSET_TYPE_FOLDER);
+    }
+
+    private function objectDependencyFilter(): string
+    {
+        return sprintf(
+            'a.id IN (SELECT d.targetid FROM %s d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)',
+            PimcoreSchema::TABLE_DEPENDENCIES,
+        );
     }
 
     private function applySearchFilters(QueryBuilder $qb, array $filters): void
@@ -134,10 +143,10 @@ class AssetSearchService
 
         $objectId = (int) ($filters['objectId'] ?? 0);
         if ($objectId > 0) {
-            $qb->andWhere('a.id IN (SELECT d.targetid FROM dependencies d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)')
+            $qb->andWhere($this->objectDependencyFilter())
                 ->setParameter('objId', $objectId)
-                ->setParameter('srcType', 'object')
-                ->setParameter('tgtType', 'asset');
+                ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
+                ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET);
         }
     }
 
