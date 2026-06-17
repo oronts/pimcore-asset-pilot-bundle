@@ -1231,6 +1231,11 @@ The `DeduplicateStamp` TTLs:
 - **30 seconds** for single-object organize messages (`asset_pilot_organize_{objectId}`)
 - **60 seconds** for bulk organize messages (`asset_pilot_bulk_{batchHash}`)
 
+> **Requirement:** the loop guard reads `cache.app` and the lock factory reads the configured lock
+> store. Both must be a **shared** backend (Redis), not a local/non-shared store (APCu, array, local
+> filesystem). With a non-shared store the guarantees do not hold across PHP-FPM and Messenger workers
+> or horizontally scaled pods, and duplicate moves can slip through.
+
 ---
 
 ## Extending
