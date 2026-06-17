@@ -16,6 +16,9 @@ services:
         Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface:
             tags: ['oronts_asset_pilot.strategy']
 
+        Oronts\AssetPilotBundle\Engine\RuleProviderInterface:
+            tags: ['oronts_asset_pilot.rule_provider']
+
     # -- Core services ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\:
@@ -52,6 +55,7 @@ services:
     Oronts\AssetPilotBundle\Engine\RuleEngine:
         arguments:
             $rules: '%oronts_asset_pilot.rules%'
+            $ruleProviders: !tagged_iterator { tag: 'oronts_asset_pilot.rule_provider' }
 
     # -- Path resolvers ---------------------------------------------------------
 

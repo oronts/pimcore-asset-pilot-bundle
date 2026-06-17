@@ -67,6 +67,36 @@ class RuleEngineTest extends TestCase
     }
 
     #[Test]
+    public function ruleProvidersContributeRulesMergedAndSortedByPriority(): void
+    {
+        $configRule = $this->createRule('config', 'Product', 50);
+        $providedRule = $this->createRule('provided', 'Product', 90);
+
+        $provider = new class($providedRule) implements \Oronts\AssetPilotBundle\Engine\RuleProviderInterface {
+            public function __construct(private readonly Rule $rule) {}
+
+            public function getRules(): iterable
+            {
+                return [$this->rule];
+            }
+        };
+
+        $engine = new RuleEngine(
+            rules: [$configRule],
+            conditionEvaluator: $this->conditionEvaluator,
+            pathResolver: $this->pathResolver,
+            filter: $this->filter,
+            logger: new NullLogger(),
+            ruleProviders: [$provider],
+        );
+
+        $rules = $engine->getRules();
+        self::assertCount(2, $rules);
+        self::assertSame('provided', $rules[0]->name);
+        self::assertSame('config', $rules[1]->name);
+    }
+
+    #[Test]
     public function matchReturnsEmptyWhenNoRules(): void
     {
         $engine = $this->createEngine([]);

@@ -19,24 +19,42 @@ class RuleEngine implements RuleEngineInterface
     /** @var Rule[] */
     protected readonly array $sortedRules;
 
+    /**
+     * @param iterable<Rule|array<string, mixed>>      $rules         configured rules
+     * @param iterable<RuleProviderInterface>          $ruleProviders consumer-tagged rule providers
+     */
     public function __construct(
-        array $rules,
+        iterable $rules,
         protected readonly ConditionEvaluatorInterface $conditionEvaluator,
         protected readonly PathResolverInterface $pathResolver,
         protected readonly AssetFilterInterface $filter,
         protected readonly LoggerInterface $logger,
+        iterable $ruleProviders = [],
     ) {
         $parsed = [];
         foreach ($rules as $rule) {
-            if ($rule instanceof Rule) {
-                $parsed[] = $rule;
-            } elseif (is_array($rule)) {
-                $name = $rule['name'] ?? 'unnamed';
-                $parsed[] = Rule::fromConfig($name, $rule);
+            $parsed[] = $this->normalizeRule($rule);
+        }
+        foreach ($ruleProviders as $provider) {
+            foreach ($provider->getRules() as $rule) {
+                $parsed[] = $this->normalizeRule($rule);
             }
         }
+        $parsed = array_filter($parsed);
         usort($parsed, static fn (Rule $a, Rule $b): int => $b->priority <=> $a->priority);
         $this->sortedRules = $parsed;
+    }
+
+    private function normalizeRule(mixed $rule): ?Rule
+    {
+        if ($rule instanceof Rule) {
+            return $rule;
+        }
+        if (is_array($rule)) {
+            return Rule::fromConfig($rule['name'] ?? 'unnamed', $rule);
+        }
+
+        return null;
     }
 
     /** @return RuleMatch[] */
