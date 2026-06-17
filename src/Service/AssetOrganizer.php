@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetMoveEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Model\RuleMatch;
@@ -276,6 +277,7 @@ class AssetOrganizer
         $total = count($objectIds);
 
         $this->logger->info('Asset Pilot: starting bulk organization for {count} objects', ['count' => $total]);
+        $this->eventDispatcher->dispatch(new BulkOrganizeEvent($objectIds, $triggerType), AssetPilotEvents::BULK_STARTED);
 
         foreach ($objectIds as $index => $objectId) {
             $object = AbstractObject::getById($objectId);
@@ -302,6 +304,7 @@ class AssetOrganizer
         $this->logger->info('Asset Pilot: bulk organization complete - {total} results', [
             'total' => count($allResults),
         ]);
+        $this->eventDispatcher->dispatch(new BulkOrganizeEvent($objectIds, $triggerType, $allResults), AssetPilotEvents::BULK_COMPLETED);
 
         return $allResults;
     }
@@ -489,7 +492,7 @@ class AssetOrganizer
             $this->auditLogger->log($operation);
 
             // Dispatch post-move event
-            $postMoveEvent = new AssetMoveEvent($asset, $sourcePath, $fullTargetPath, $object, $rule, $triggerType);
+            $postMoveEvent = new AssetMoveEvent($asset, $sourcePath, $fullTargetPath, $object, $rule, $triggerType, operation: $operation);
             $this->eventDispatcher->dispatch($postMoveEvent, AssetPilotEvents::POST_MOVE);
 
             $this->logger->info('Asset Pilot: moved asset {id} from "{source}" to "{target}" (rule: {rule}, {duration}ms)', [
@@ -520,7 +523,7 @@ class AssetOrganizer
 
             $this->auditLogger->log($operation);
 
-            $failedEvent = new AssetMoveEvent($asset, $sourcePath, $fullTargetPath, $object, $rule, $triggerType);
+            $failedEvent = new AssetMoveEvent($asset, $sourcePath, $fullTargetPath, $object, $rule, $triggerType, operation: $operation, throwable: $e);
             $this->eventDispatcher->dispatch($failedEvent, AssetPilotEvents::MOVE_FAILED);
 
             $this->logger->error('Asset Pilot: failed to move asset {id}: {error}', [

@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
 use Oronts\AssetPilotBundle\Service\AssetSearchService;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,6 +25,7 @@ class AssetManagementController
         private readonly AssetSearchService $searchService,
         private readonly AssetPropertyService $propertyService,
         private readonly LoggerInterface $logger,
+        private readonly EventDispatcherInterface $eventDispatcher,
     ) {}
 
     #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_lock_asset', methods: ['POST'])]
@@ -188,6 +192,11 @@ class AssetManagementController
                 'tags' => count($tagIds),
                 'replace' => $replace ? 'yes' : 'no',
             ]);
+
+            $this->eventDispatcher->dispatch(
+                new AssetMutationEvent($assetIds, 'tag', ['tagIds' => $tagIds, 'replace' => $replace]),
+                AssetPilotEvents::ASSETS_TAGGED,
+            );
 
             return new JsonResponse([
                 'tagged' => count($assetIds),

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Event;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -22,6 +23,8 @@ class AssetMoveEvent extends Event
         public readonly Rule $rule,
         public readonly TriggerType $triggerType,
         public readonly bool $dryRun = false,
+        public readonly ?MoveOperation $operation = null,
+        public readonly ?\Throwable $throwable = null,
     ) {}
 
     public function cancel(): void

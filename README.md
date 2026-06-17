@@ -1500,20 +1500,40 @@ class AssetMoveListener
             return;
         }
 
-        // Access event data: $event->asset, $event->object, $event->rule, $event->triggerType
+        // Access event data: $event->asset, $event->object, $event->rule, $event->triggerType.
+        // On POST_MOVE/MOVE_FAILED, $event->operation holds the MoveOperation and, on failure,
+        // $event->throwable holds the cause. $event->isDryRun() is true during a preview.
     }
 }
 ```
 
-Available events:
+Move events (`AssetMoveEvent`):
 
 | Event | Constant | Description |
 |-------|----------|-------------|
-| `oronts_asset_pilot.pre_move` | `AssetPilotEvents::PRE_MOVE` | Before move, cancellable |
-| `oronts_asset_pilot.post_move` | `AssetPilotEvents::POST_MOVE` | After successful move |
-| `oronts_asset_pilot.move_failed` | `AssetPilotEvents::MOVE_FAILED` | After failed move |
-| `oronts_asset_pilot.bulk_started` | `AssetPilotEvents::BULK_STARTED` | Bulk operation started |
-| `oronts_asset_pilot.bulk_completed` | `AssetPilotEvents::BULK_COMPLETED` | Bulk operation finished |
+| `oronts_asset_pilot.pre_move` | `AssetPilotEvents::PRE_MOVE` | Before move, cancellable (also fired in dry-run; `isDryRun()` is true) |
+| `oronts_asset_pilot.post_move` | `AssetPilotEvents::POST_MOVE` | After a successful move; carries the `MoveOperation` |
+| `oronts_asset_pilot.move_failed` | `AssetPilotEvents::MOVE_FAILED` | After a failed move; carries the `MoveOperation` and `throwable` |
+
+Bulk events (`BulkOrganizeEvent`, carrying `objectIds`/`triggerType`/`results`):
+
+| Event | Constant | Description |
+|-------|----------|-------------|
+| `oronts_asset_pilot.bulk_started` | `AssetPilotEvents::BULK_STARTED` | Before a bulk organize run |
+| `oronts_asset_pilot.bulk_completed` | `AssetPilotEvents::BULK_COMPLETED` | After a bulk organize run; `results` populated |
+
+Mutation events (`AssetMutationEvent`, carrying `assetIds`/`mutation`/`context`) — for hooking every
+asset change outside the move pipeline (CDN purge, search reindex, DAM sync):
+
+| Event | Constant | Description |
+|-------|----------|-------------|
+| `oronts_asset_pilot.asset_locked` | `AssetPilotEvents::ASSET_LOCKED` | An asset was locked |
+| `oronts_asset_pilot.asset_unlocked` | `AssetPilotEvents::ASSET_UNLOCKED` | An asset was unlocked |
+| `oronts_asset_pilot.asset_property_set` | `AssetPilotEvents::ASSET_PROPERTY_SET` | A property was bulk-set |
+| `oronts_asset_pilot.assets_tagged` | `AssetPilotEvents::ASSETS_TAGGED` | Assets were bulk-tagged |
+| `oronts_asset_pilot.unused_deleted` | `AssetPilotEvents::UNUSED_DELETED` | Unused assets were deleted |
+| `oronts_asset_pilot.unused_moved` | `AssetPilotEvents::UNUSED_MOVED` | Unused assets were moved |
+| `oronts_asset_pilot.reverted` | `AssetPilotEvents::REVERTED` | A move was reverted |
 
 ---
 

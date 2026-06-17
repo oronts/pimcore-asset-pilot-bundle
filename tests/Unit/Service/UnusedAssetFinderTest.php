@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 
 #[CoversClass(UnusedAssetFinder::class)]
 class UnusedAssetFinderTest extends TestCase
@@ -21,6 +22,7 @@ class UnusedAssetFinderTest extends TestCase
             $this->createMock(Connection::class),
             new NullLogger(),
             $this->createMock(ConfidenceScorer::class),
+            new EventDispatcher(),
         );
     }
 

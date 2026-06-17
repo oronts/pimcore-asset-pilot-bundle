@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Psr\Log\NullLogger;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 
 #[CoversClass(AuditController::class)]
 class AuditControllerRevertTest extends TestCase
@@ -39,7 +40,7 @@ class AuditControllerRevertTest extends TestCase
         $asset->expects(self::once())->method('save')
             ->willReturnCallback(function () use (&$calls): Asset { $calls[] = 'save'; return $this->createMock(Asset::class); });
 
-        $controller = new class($this->createMock(AuditLogger::class), new NullLogger(), $loopGuard) extends AuditController {
+        $controller = new class($this->createMock(AuditLogger::class), new NullLogger(), $loopGuard, new EventDispatcher()) extends AuditController {
             public function exposedSaveReverted(Asset $asset, int $assetId): void
             {
                 $this->saveReverted($asset, $assetId);

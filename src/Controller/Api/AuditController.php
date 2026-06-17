@@ -8,10 +8,13 @@ use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -25,6 +28,7 @@ class AuditController
         protected readonly AuditLogger $auditLogger,
         protected readonly LoggerInterface $logger,
         protected readonly LoopGuard $loopGuard,
+        protected readonly EventDispatcherInterface $eventDispatcher,
     ) {}
 
     #[Route('/audit', name: 'oronts_asset_pilot_audit', methods: ['GET'])]
@@ -179,6 +183,11 @@ class AuditController
                 'assetId' => $assetId,
                 'path' => $sourcePath,
             ]);
+
+            $this->eventDispatcher->dispatch(
+                new AssetMutationEvent([$assetId], 'revert', ['from' => $targetPath, 'to' => $sourcePath]),
+                AssetPilotEvents::REVERTED,
+            );
 
             return new JsonResponse(['message' => 'Operation reverted successfully', 'newPath' => $sourcePath]);
         } catch (\Throwable $e) {

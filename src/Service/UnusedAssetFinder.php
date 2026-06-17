@@ -9,11 +9,14 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class UnusedAssetFinder
 {
@@ -21,6 +24,7 @@ class UnusedAssetFinder
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
         private readonly ConfidenceScorer $scorer,
+        private readonly EventDispatcherInterface $eventDispatcher,
         private readonly string $lockProperty = 'asset_pilot_locked',
     ) {}
 
@@ -172,7 +176,7 @@ class UnusedAssetFinder
      */
     public function deleteAssets(array $assetIds): array
     {
-        $deleted = 0;
+        $deletedIds = [];
         $failed = 0;
         $errors = [];
 
@@ -199,7 +203,7 @@ class UnusedAssetFinder
                 }
 
                 $asset->delete();
-                $deleted++;
+                $deletedIds[] = $id;
 
                 $this->logger->info('Asset Pilot: deleted unused asset {id} at {path}', [
                     'id' => $id,
@@ -211,7 +215,11 @@ class UnusedAssetFinder
             }
         }
 
-        return ['deleted' => $deleted, 'failed' => $failed, 'errors' => $errors];
+        if ($deletedIds !== []) {
+            $this->eventDispatcher->dispatch(new AssetMutationEvent($deletedIds, 'unused_delete'), AssetPilotEvents::UNUSED_DELETED);
+        }
+
+        return ['deleted' => count($deletedIds), 'failed' => $failed, 'errors' => $errors];
     }
 
     /**
@@ -220,7 +228,7 @@ class UnusedAssetFinder
      */
     public function moveAssets(array $assetIds, string $targetFolder): array
     {
-        $moved = 0;
+        $movedIds = [];
         $failed = 0;
         $errors = [];
 
@@ -247,7 +255,7 @@ class UnusedAssetFinder
 
                 $asset->setParent($folder);
                 $asset->save();
-                $moved++;
+                $movedIds[] = $id;
 
                 $this->logger->info('Asset Pilot: moved unused asset {id} to {path}', [
                     'id' => $id,
@@ -259,7 +267,11 @@ class UnusedAssetFinder
             }
         }
 
-        return ['moved' => $moved, 'failed' => $failed, 'errors' => $errors];
+        if ($movedIds !== []) {
+            $this->eventDispatcher->dispatch(new AssetMutationEvent($movedIds, 'unused_move', ['targetFolder' => $targetFolder]), AssetPilotEvents::UNUSED_MOVED);
+        }
+
+        return ['moved' => count($movedIds), 'failed' => $failed, 'errors' => $errors];
     }
 
     private function isReferenced(int $assetId): bool
