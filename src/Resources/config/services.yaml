@@ -49,6 +49,7 @@ services:
     Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver:
         arguments:
             $twigExtensions: !tagged_iterator oronts_asset_pilot.twig_extension
+            $contextProviders: !tagged_iterator oronts_asset_pilot.context_provider
         tags:
             - { name: 'oronts_asset_pilot.path_resolver', priority: 0 }
 

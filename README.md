@@ -1382,6 +1382,43 @@ services:
 
 Now `condition: 'in_business_hours() and is_image(asset)'` works.
 
+### Add Path-Template Variables
+
+The core template context is `object`, `asset`, `locale`, `date`, `className`. To expose your own
+domain variables (e.g. `sapId`, `categories`) to `target_path` templates, tag a
+`ContextProviderInterface` with `oronts_asset_pilot.context_provider`:
+
+```php
+use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
+use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
+
+class CommerceContextProvider implements ContextProviderInterface
+{
+    public function getContext(AbstractObject $object, Asset $asset, ?string $locale): array
+    {
+        return [
+            'sapId' => method_exists($object, 'getSapId') ? ($object->getSapId() ?? 'unknown') : 'unknown',
+        ];
+    }
+}
+```
+
+```yaml
+services:
+    App\AssetPilot\Context\CommerceContextProvider:
+        tags: ['oronts_asset_pilot.context_provider']
+```
+
+Now `target_path: '/Products/{{ sapId|safe_key }}'` works. (Consumer-specific fields like `sapId`
+live in a provider, not in the generic bundle.)
+
+> **Breaking change:** earlier versions pre-resolved `sapId`, `categories`, `category`, `salesOrgs`,
+> and `salesOrg` into the context automatically. They are no longer built in. A template using
+> `{{ sapId }}` (etc.) must now register a context provider as above, or call the object method
+> directly (`{{ object.getSapId()|default('unknown') }}`). Core keys (`object`, `asset`, `date`,
+> `locale`, `className`) always win and cannot be overridden by a provider.
+
 > Use names that do not clash with the built-ins. The bundle's own Twig filters/functions
 > (`safe_key`, `pluck`, `coalesce`, ...) and condition functions (`is_image`, `asset_type`, ...) are
 > registered first; reuse a built-in name and a consumer expression function will override it, while a

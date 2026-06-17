@@ -22,38 +22,27 @@ use Twig\TwigFunction;
  *
  * Supports full Twig syntax in target_path templates:
  *
- *   Method calls:     {{ object.getSapId() }}
+ *   Method calls:     {{ object.getKey() }}
  *   Property access:  {{ object.key }}, {{ object.id }}
- *   Array access:     {{ categories[0].sapId }}
- *   Null coalescing:  {{ object.getSapId()|default('unknown') }}
- *   Conditionals:     {% if categories|length > 0 %}{{ categories[0].key }}{% else %}uncategorized{% endif %}
- *   Joins:            {{ categories|pluck('sapId')|join('-') }}
- *   Custom filters:   {{ value|safe_key }}, {{ items|pluck('key') }}, {{ items|first_of('sapId') }}
+ *   Null coalescing:  {{ object.getKey()|default('unknown') }}
+ *   Custom filters:   {{ value|safe_key }}, {{ items|pluck('key') }}, {{ items|first_of('key') }}
  *   Custom functions: coalesce(a, b, c), prop(obj, 'method', ...args)
  *
- * Pre-resolved context variables:
- *   object       — the DataObject
- *   asset        — the Asset being organized
- *   locale       — locale code for localized fields (e.g. 'en', 'de') or null
- *   date         — DateTimeImmutable (use date.format('Y') etc.)
- *   sapId        — object.getSapId() ?? 'unknown'
- *   className    — object class name
- *   categories   — object.getCategories() ?? []
- *   category     — first category or null
- *   salesOrgs    — object.getSalesOrganizations() ?? []
- *   salesOrg     — first sales org or null
- *
+ * Core context variables: object, asset, locale, date (DateTimeImmutable), className. Any additional
+ * variables come from tagged ContextProviderInterface services (oronts_asset_pilot.context_provider).
  */
 class TemplatePathResolver implements PathResolverInterface
 {
     protected ?Environment $twig = null;
 
     /**
-     * @param iterable<ExtensionInterface> $twigExtensions consumer-tagged Twig extensions
+     * @param iterable<ExtensionInterface>       $twigExtensions  consumer-tagged Twig extensions
+     * @param iterable<ContextProviderInterface> $contextProviders consumer-tagged context providers
      */
     public function __construct(
         protected readonly LoggerInterface $logger,
         protected readonly iterable $twigExtensions = [],
+        protected readonly iterable $contextProviders = [],
     ) {}
 
     public function resolve(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): string
@@ -113,46 +102,22 @@ class TemplatePathResolver implements PathResolverInterface
 
     protected function buildContext(AbstractObject $object, Asset $asset, ?string $locale = null): array
     {
-        $now = new \DateTimeImmutable();
+        // Consumer-specific variables (sapId, categories, ...) come from tagged context providers,
+        // keeping this generic bundle free of any one consumer's domain fields. Core keys win over
+        // provider keys so a provider can never shadow object/asset/date/locale/className.
+        $context = [];
+        foreach ($this->contextProviders as $provider) {
+            $context = [...$context, ...$provider->getContext($object, $asset, $locale)];
+        }
 
-        $context = [
+        return [
+            ...$context,
             'object' => $object,
             'asset' => $asset,
-            'date' => $now,
+            'date' => new \DateTimeImmutable(),
             'locale' => $locale,
             'className' => $object instanceof Concrete ? $object->getClassName() : 'Folder',
-            'sapId' => 'unknown',
-            'categories' => [],
-            'category' => null,
-            'salesOrgs' => [],
-            'salesOrg' => null,
         ];
-
-        // Pre-resolve sapId
-        if (method_exists($object, 'getSapId')) {
-            $sapId = $object->getSapId();
-            $context['sapId'] = $sapId !== null && $sapId !== '' ? (string) $sapId : 'unknown';
-        }
-
-        // Pre-resolve categories
-        if (method_exists($object, 'getCategories')) {
-            $cats = $object->getCategories();
-            if (is_array($cats) && !empty($cats)) {
-                $context['categories'] = $cats;
-                $context['category'] = $cats[0];
-            }
-        }
-
-        // Pre-resolve sales organizations
-        if (method_exists($object, 'getSalesOrganizations')) {
-            $orgs = $object->getSalesOrganizations();
-            if (is_array($orgs) && !empty($orgs)) {
-                $context['salesOrgs'] = $orgs;
-                $context['salesOrg'] = $orgs[0];
-            }
-        }
-
-        return $context;
     }
 
     /**
