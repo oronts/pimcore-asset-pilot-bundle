@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Schema\AbstractSchemaManager;
+use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Pimcore\Extension\Bundle\Installer\SettingsStoreAwareInstaller;
 use Pimcore\Model\User\Permission\Definition;
@@ -27,45 +29,32 @@ class Installer extends SettingsStoreAwareInstaller
         $currentSchema = $schemaManager->introspectSchema();
         $schema = clone $currentSchema;
 
-        if (!$schema->hasTable(self::TABLE_AUDIT_LOG)) {
-            $table = $schema->createTable(self::TABLE_AUDIT_LOG);
+        // Idempotent: create the table when absent, otherwise add only the missing columns/indexes
+        // so a reinstall over a partial or older schema repairs it instead of being a no-op.
+        $table = $schema->hasTable(self::TABLE_AUDIT_LOG)
+            ? $schema->getTable(self::TABLE_AUDIT_LOG)
+            : $schema->createTable(self::TABLE_AUDIT_LOG);
 
-            $table->addColumn('id', 'integer', ['autoincrement' => true, 'notnull' => true]);
-            $table->addColumn('asset_id', 'integer', ['notnull' => true]);
-            $table->addColumn('asset_path_from', 'string', ['length' => 500, 'notnull' => true]);
-            $table->addColumn('asset_path_to', 'string', ['length' => 500, 'notnull' => true]);
-            $table->addColumn('object_id', 'integer', ['notnull' => true]);
-            $table->addColumn('object_class', 'string', ['length' => 255, 'notnull' => true]);
-            $table->addColumn('rule_name', 'string', ['length' => 255, 'notnull' => true]);
-            $table->addColumn('trigger_type', 'string', ['length' => 50, 'notnull' => true]);
-            $table->addColumn('status', 'string', ['length' => 50, 'notnull' => true]);
-            $table->addColumn('error_message', 'text', ['notnull' => false]);
-            $table->addColumn('duration_ms', 'integer', ['notnull' => false]);
-            $table->addColumn('user_id', 'integer', ['notnull' => false]);
-            $table->addColumn('created_at', 'datetime', ['notnull' => true]);
+        foreach (self::auditColumns() as [$name, $type, $options]) {
+            if (!$table->hasColumn($name)) {
+                $table->addColumn($name, $type, $options);
+            }
+        }
 
+        if ($table->getPrimaryKey() === null) {
             $table->setPrimaryKey(['id']);
-            $table->addIndex(['asset_id'], 'idx_audit_asset_id');
-            $table->addIndex(['object_id'], 'idx_audit_object_id');
-            $table->addIndex(['rule_name'], 'idx_audit_rule_name');
-            $table->addIndex(['status'], 'idx_audit_status');
-            $table->addIndex(['created_at'], 'idx_audit_created_at');
         }
 
-        $comparator = $schemaManager->createComparator();
-        $schemaDiff = $comparator->compareSchemas($currentSchema, $schema);
-
-        $platform = $this->db->getDatabasePlatform();
-        $sqlStatements = $platform->getAlterSchemaSQL($schemaDiff);
-
-        foreach ($sqlStatements as $sql) {
-            $this->db->executeStatement($sql);
+        foreach (self::auditIndexes() as $indexName => $columns) {
+            if (!$table->hasIndex($indexName)) {
+                $table->addIndex($columns, $indexName);
+            }
         }
 
-        // Register Pimcore permissions
+        $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
+
         foreach (AssetPilotPermission::cases() as $permission) {
-            $def = Definition::getByKey($permission->value);
-            if ($def === null) {
+            if (Definition::getByKey($permission->value) === null) {
                 Definition::create($permission->value)
                     ->setCategory(AssetPilotPermission::CATEGORY)
                     ->save();
@@ -85,23 +74,66 @@ class Installer extends SettingsStoreAwareInstaller
             $schema->dropTable(self::TABLE_AUDIT_LOG);
         }
 
-        $comparator = $schemaManager->createComparator();
-        $schemaDiff = $comparator->compareSchemas($currentSchema, $schema);
+        $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
 
-        $platform = $this->db->getDatabasePlatform();
-        $sqlStatements = $platform->getAlterSchemaSQL($schemaDiff);
-
-        foreach ($sqlStatements as $sql) {
-            $this->db->executeStatement($sql);
-        }
-
-        // Remove Pimcore permissions
         foreach (AssetPilotPermission::cases() as $permission) {
-            $def = Definition::getByKey($permission->value);
-            $def?->delete();
+            Definition::getByKey($permission->value)?->delete();
         }
 
         parent::uninstall();
+    }
+
+    private function applySchemaDiff(AbstractSchemaManager $schemaManager, Schema $current, Schema $target): void
+    {
+        $schemaDiff = $schemaManager->createComparator()->compareSchemas($current, $target);
+        $platform = $this->db->getDatabasePlatform();
+
+        foreach ($platform->getAlterSchemaSQL($schemaDiff) as $sql) {
+            $this->db->executeStatement($sql);
+        }
+    }
+
+    /**
+     * The desired audit-log columns: [name, doctrine type, options].
+     *
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    protected static function auditColumns(): array
+    {
+        return [
+            ['id', 'integer', ['autoincrement' => true, 'notnull' => true]],
+            ['asset_id', 'integer', ['notnull' => true]],
+            ['asset_path_from', 'string', ['length' => 500, 'notnull' => true]],
+            ['asset_path_to', 'string', ['length' => 500, 'notnull' => true]],
+            ['object_id', 'integer', ['notnull' => true]],
+            ['object_class', 'string', ['length' => 255, 'notnull' => true]],
+            ['rule_name', 'string', ['length' => 255, 'notnull' => true]],
+            ['trigger_type', 'string', ['length' => 50, 'notnull' => true]],
+            ['status', 'string', ['length' => 50, 'notnull' => true]],
+            ['error_message', 'text', ['notnull' => false]],
+            ['duration_ms', 'integer', ['notnull' => false]],
+            ['user_id', 'integer', ['notnull' => false]],
+            ['created_at', 'datetime', ['notnull' => true]],
+        ];
+    }
+
+    /**
+     * The desired audit-log indexes, keyed by index name. The composites back the
+     * per-asset-history and rule/status/time dashboard queries.
+     *
+     * @return array<string, list<string>>
+     */
+    protected static function auditIndexes(): array
+    {
+        return [
+            'idx_audit_asset_id' => ['asset_id'],
+            'idx_audit_object_id' => ['object_id'],
+            'idx_audit_rule_name' => ['rule_name'],
+            'idx_audit_status' => ['status'],
+            'idx_audit_created_at' => ['created_at'],
+            'idx_audit_asset_status' => ['asset_id', 'status'],
+            'idx_audit_rule_status_created' => ['rule_name', 'status', 'created_at'],
+        ];
     }
 
     public function needsReloadAfterInstall(): bool
