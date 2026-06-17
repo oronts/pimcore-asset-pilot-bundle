@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Strategy;
 
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -25,7 +26,7 @@ readonly class FirstAssignmentStrategy implements ConflictStrategyInterface
                 'SELECT COUNT(*) FROM asset_pilot_audit_log WHERE asset_id = :assetId AND status = :status',
                 [
                     'assetId' => $asset->getId(),
-                    'status' => 'completed',
+                    'status' => OperationStatus::Completed->value,
                 ],
             );
 

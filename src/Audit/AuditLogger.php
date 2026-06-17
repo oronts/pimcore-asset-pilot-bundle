@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Audit;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
@@ -283,9 +284,9 @@ class AuditLogger
                     $breakdown[$class] = [
                         'className' => $class,
                         'total' => 0,
-                        'completed' => 0,
-                        'failed' => 0,
-                        'skipped' => 0,
+                        OperationStatus::Completed->value => 0,
+                        OperationStatus::Failed->value => 0,
+                        OperationStatus::Skipped->value => 0,
                         'ruleCount' => $ruleCounts[$class] ?? 0,
                     ];
                 }
@@ -320,7 +321,7 @@ class AuditLogger
                 ->where('al.rule_name = :rule')
                 ->andWhere('al.status = :status')
                 ->setParameter('rule', $ruleName)
-                ->setParameter('status', 'completed')
+                ->setParameter('status', OperationStatus::Completed->value)
                 ->groupBy('al.asset_id, a.path, a.filename, a.type, a.mimetype, a.modificationDate')
                 ->orderBy('last_moved', 'DESC')
                 ->setFirstResult($offset)
@@ -332,7 +333,7 @@ class AuditLogger
                 ->where('al.rule_name = :rule')
                 ->andWhere('al.status = :status')
                 ->setParameter('rule', $ruleName)
-                ->setParameter('status', 'completed');
+                ->setParameter('status', OperationStatus::Completed->value);
 
             if (!empty($filters['since'])) {
                 $qb->andWhere('al.created_at >= :since')->setParameter('since', $filters['since']);

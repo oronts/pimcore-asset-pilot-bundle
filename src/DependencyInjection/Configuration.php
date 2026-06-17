@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\DependencyInjection;
 
+use Oronts\AssetPilotBundle\Enum\CollisionPattern;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -148,8 +149,8 @@ class Configuration implements ConfigurationInterface
                     ->info('Asset naming and collision handling settings.')
                     ->children()
                         ->enumNode('collision_pattern')
-                            ->values(['counter', 'timestamp', 'uuid'])
-                            ->defaultValue('counter')
+                            ->values(CollisionPattern::values())
+                            ->defaultValue(CollisionPattern::Counter->value)
                             ->info('How to resolve filename collisions at the target path.')
                         ->end()
                         ->booleanNode('slugify')

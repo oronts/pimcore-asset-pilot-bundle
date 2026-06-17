@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
@@ -226,7 +227,7 @@ class AssetManagementController
 
         $assetIds = $data['assetIds'] ?? [];
         $name = trim((string) ($data['name'] ?? ''));
-        $type = trim((string) ($data['type'] ?? 'text'));
+        $type = trim((string) ($data['type'] ?? PropertyType::Text->value));
         $value = $data['data'] ?? '';
 
         if (empty($assetIds) || !is_array($assetIds)) {
@@ -237,9 +238,8 @@ class AssetManagementController
             return new JsonResponse(['error' => 'name is required'], Response::HTTP_BAD_REQUEST);
         }
 
-        $allowedTypes = ['text', 'bool', 'select'];
-        if (!in_array($type, $allowedTypes, true)) {
-            return new JsonResponse(['error' => 'type must be one of: ' . implode(', ', $allowedTypes)], Response::HTTP_BAD_REQUEST);
+        if (!in_array($type, PropertyType::values(), true)) {
+            return new JsonResponse(['error' => 'type must be one of: ' . implode(', ', PropertyType::values())], Response::HTTP_BAD_REQUEST);
         }
 
         $assetIds = array_map('intval', $assetIds);

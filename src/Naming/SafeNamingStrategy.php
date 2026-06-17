@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Naming;
 
+use Oronts\AssetPilotBundle\Enum\CollisionPattern;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Asset\Service as AssetService;
 use Psr\Log\LoggerInterface;
@@ -40,12 +41,13 @@ class SafeNamingStrategy implements NamingStrategyInterface
         }
 
         $safeName = match ($this->collisionPattern) {
-            'counter' => $this->resolveWithCounter($basename, $extension, $targetPath),
-            'timestamp' => $this->resolveWithTimestamp($basename, $extension),
-            'uuid' => $this->resolveWithUuid($basename, $extension),
+            CollisionPattern::Counter->value => $this->resolveWithCounter($basename, $extension, $targetPath),
+            CollisionPattern::Timestamp->value => $this->resolveWithTimestamp($basename, $extension),
+            CollisionPattern::Uuid->value => $this->resolveWithUuid($basename, $extension),
             default => throw new \InvalidArgumentException(sprintf(
-                'Unknown collision pattern "%s". Supported: counter, timestamp, uuid.',
+                'Unknown collision pattern "%s". Supported: %s.',
                 $this->collisionPattern,
+                implode(', ', CollisionPattern::values()),
             )),
         };
 

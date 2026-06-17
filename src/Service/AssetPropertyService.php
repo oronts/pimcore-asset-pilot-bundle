@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Pimcore\Model\Asset;
@@ -22,7 +23,7 @@ class AssetPropertyService
 
     public function lockAsset(int $assetId, string $assetPath): void
     {
-        $this->setProperty($assetId, $assetPath, $this->lockProperty, 'bool', '1');
+        $this->setProperty($assetId, $assetPath, $this->lockProperty, PropertyType::Bool->value, '1');
         $this->logger->info('Asset Pilot: locked asset {id}', ['id' => $assetId]);
         $this->eventDispatcher->dispatch(new AssetMutationEvent([$assetId], 'lock', ['property' => $this->lockProperty]), AssetPilotEvents::ASSET_LOCKED);
     }
@@ -64,7 +65,7 @@ class AssetPropertyService
         $failed = 0;
         $errors = [];
 
-        if ($type === 'bool') {
+        if ($type === PropertyType::Bool->value) {
             $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
         }
 
@@ -77,7 +78,7 @@ class AssetPropertyService
                     continue;
                 }
 
-                $dbValue = $type === 'bool' ? ($value ? '1' : '0') : (string) $value;
+                $dbValue = $type === PropertyType::Bool->value ? ($value ? '1' : '0') : (string) $value;
                 $this->setProperty($id, $asset->getRealFullPath(), $name, $type, $dbValue);
                 $updatedIds[] = $id;
             } catch (\Throwable $e) {
