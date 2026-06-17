@@ -42,82 +42,32 @@ class RuleEngine
     /** @return RuleMatch[] */
     public function match(AbstractObject $object, Asset $asset): array
     {
-        $matches = [];
+        return $this->evaluateRules($object, $asset, null, null);
+    }
 
-        foreach ($this->sortedRules as $rule) {
-            if (!$rule->enabled) {
-                $this->logger->debug('Rule "{rule}" is disabled, skipping.', ['rule' => $rule->name]);
-                continue;
-            }
-
-            if (!$this->matchesClass($rule, $object)) {
-                $this->logger->debug('Rule "{rule}" class mismatch for object {id} (expected "{expected}", got "{actual}").', [
-                    'rule' => $rule->name,
-                    'id' => $object->getId(),
-                    'expected' => $rule->class,
-                    'actual' => $object->getClassName(),
-                ]);
-                continue;
-            }
-
-            if (!$this->conditionEvaluator->evaluate($object, $asset, $rule)) {
-                $this->logger->debug('Rule "{rule}" condition not met for object {objectId} and asset {assetId}.', [
-                    'rule' => $rule->name,
-                    'objectId' => $object->getId(),
-                    'assetId' => $asset->getId(),
-                ]);
-                continue;
-            }
-
-            if (!$this->filter->accept($asset, $object, $rule)) {
-                $this->logger->debug('Rule "{rule}" filter rejected asset {assetId}.', [
-                    'rule' => $rule->name,
-                    'assetId' => $asset->getId(),
-                ]);
-                continue;
-            }
-
-            $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule);
-
-            $this->logger->debug('Rule "{rule}" matched object {objectId} and asset {assetId}, resolved path: {path}.', [
-                'rule' => $rule->name,
-                'objectId' => $object->getId(),
-                'assetId' => $asset->getId(),
-                'path' => $resolvedPath,
-            ]);
-
-            $matches[] = new RuleMatch(
-                rule: $rule,
-                object: $object,
-                asset: $asset,
-                resolvedPath: $resolvedPath,
-            );
-        }
-
-        return $matches;
+    /** @return RuleMatch[] */
+    public function matchField(AbstractObject $object, Asset $asset, string $fieldName, ?string $locale = null): array
+    {
+        return $this->evaluateRules($object, $asset, $fieldName, $locale);
     }
 
     /**
+     * Shared matching pass for match() (field-agnostic) and matchField() (field-scoped). A null
+     * $fieldName skips the field constraint; everything else (enabled, class, condition, filter,
+     * path) is identical, which is why both must run the same gate sequence.
+     *
      * @return RuleMatch[]
      */
-    public function matchField(AbstractObject $object, Asset $asset, string $fieldName, ?string $locale = null): array
+    private function evaluateRules(AbstractObject $object, Asset $asset, ?string $fieldName, ?string $locale): array
     {
         $matches = [];
 
         foreach ($this->sortedRules as $rule) {
-            if (!$rule->enabled) {
+            if (!$rule->enabled || !$this->matchesClass($rule, $object)) {
                 continue;
             }
 
-            if (!$this->matchesClass($rule, $object)) {
-                continue;
-            }
-
-            if (!$this->matchesFields($rule, $fieldName)) {
-                $this->logger->debug('Rule "{rule}" does not target field "{field}".', [
-                    'rule' => $rule->name,
-                    'field' => $fieldName,
-                ]);
+            if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
                 continue;
             }
 
@@ -131,12 +81,12 @@ class RuleEngine
 
             $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
 
-            $this->logger->debug('Rule "{rule}" matched field "{field}" for object {objectId} and asset {assetId} (locale: {locale}).', [
+            $this->logger->debug('Rule "{rule}" matched object {objectId} asset {assetId} (field: {field}) -> {path}', [
                 'rule' => $rule->name,
-                'field' => $fieldName,
                 'objectId' => $object->getId(),
                 'assetId' => $asset->getId(),
-                'locale' => $locale ?? 'none',
+                'field' => $fieldName ?? 'any',
+                'path' => $resolvedPath,
             ]);
 
             $matches[] = new RuleMatch(

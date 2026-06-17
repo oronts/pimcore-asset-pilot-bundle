@@ -13,7 +13,6 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\OperationResult;
-use Oronts\AssetPilotBundle\Model\RuleMatch;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Strategy\StrategyResolver;
 use Pimcore\Model\Asset;
@@ -59,7 +58,7 @@ class AssetOrganizer
             $fieldInfos = $this->fieldExtractor->extract($object);
 
             $this->logger->info('Asset Pilot: organizing assets for {class}:{id} ({fieldCount} asset fields)', [
-                'class' => $object instanceof Concrete ? $object->getClassName() : 'Folder',
+                'class' => $this->resolveObjectClass($object),
                 'id' => $object->getId(),
                 'fieldCount' => count($fieldInfos),
             ]);
@@ -102,7 +101,7 @@ class AssetOrganizer
                             sourcePath: $asset->getRealFullPath(),
                             targetPath: $match->resolvedPath,
                             objectId: $objectId,
-                            objectClass: $object instanceof Concrete ? $object->getClassName() : 'Folder',
+                            objectClass: $this->resolveObjectClass($object),
                             ruleName: $match->rule->name,
                             status: OperationStatus::Skipped,
                             triggerType: $triggerType,
@@ -122,7 +121,7 @@ class AssetOrganizer
             $failed = count(array_filter($results, static fn (OperationResult $r) => $r->status === OperationStatus::Failed));
 
             $this->logger->info('Asset Pilot: finished organizing {class}:{id} - {moved} moved, {skipped} skipped, {failed} failed', [
-                'class' => $object instanceof Concrete ? $object->getClassName() : 'Folder',
+                'class' => $this->resolveObjectClass($object),
                 'id' => $object->getId(),
                 'moved' => $moved,
                 'skipped' => $skipped,
@@ -142,7 +141,7 @@ class AssetOrganizer
         $operations = [];
         $processedAssetIds = [];
         $objectId = (int) $object->getId();
-        $objectClass = $object instanceof Concrete ? $object->getClassName() : 'Folder';
+        $objectClass = $this->resolveObjectClass($object);
         $fieldInfos = $this->fieldExtractor->extract($object);
 
         foreach ($fieldInfos as $fieldInfo) {
@@ -262,7 +261,7 @@ class AssetOrganizer
         }
 
         $this->logger->info('Asset Pilot: dry run for {class}:{id} found {count} pending moves', [
-            'class' => $object instanceof Concrete ? $object->getClassName() : 'Folder',
+            'class' => $this->resolveObjectClass($object),
             'id' => $object->getId(),
             'count' => count($operations),
         ]);
@@ -320,7 +319,7 @@ class AssetOrganizer
         $startTime = hrtime(true);
         $assetId = (int) $asset->getId();
         $objectId = (int) $object->getId();
-        $objectClass = $object instanceof Concrete ? $object->getClassName() : 'Folder';
+        $objectClass = $this->resolveObjectClass($object);
         $sourcePath = $asset->getRealFullPath();
         $fullTargetPath = rtrim($targetPath, '/') . '/' . $targetFilename;
 
@@ -536,6 +535,11 @@ class AssetOrganizer
         } finally {
             $this->loopGuard->releaseAsset($assetId);
         }
+    }
+
+    private function resolveObjectClass(AbstractObject $object): string
+    {
+        return $object instanceof Concrete ? $object->getClassName() : 'Folder';
     }
 
     private function matchingExcludeFolder(string $path): ?string
