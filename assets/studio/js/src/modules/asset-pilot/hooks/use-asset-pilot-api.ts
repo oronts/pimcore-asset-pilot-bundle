@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
 import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters } from '../types'
 
@@ -13,17 +13,22 @@ function useAsyncData<T>(fetcher: () => Promise<T>, deps: unknown[] = []): Async
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const requestId = useRef(0)
 
   const fetch = useCallback(() => {
+    const id = ++requestId.current
     setLoading(true)
     setError(null)
     fetcher()
-      .then(setData)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+      .then(d => { if (id === requestId.current) { setData(d); setError(null) } })
+      .catch((e: Error) => { if (id === requestId.current) setError(e.message) })
+      .finally(() => { if (id === requestId.current) setLoading(false) })
   }, deps)
 
-  useEffect(() => { fetch() }, [fetch])
+  useEffect(() => {
+    fetch()
+    return () => { requestId.current++ }
+  }, [fetch])
 
   return { data, loading, error, refetch: fetch }
 }
