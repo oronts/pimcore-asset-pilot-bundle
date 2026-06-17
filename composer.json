@@ -22,8 +22,9 @@
         "symfony/messenger": "^7.3"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.0",
-        "friendsofphp/php-cs-fixer": "^3.50"
+        "friendsofphp/php-cs-fixer": "^3.50",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
         "psr-4": {
@@ -48,6 +49,7 @@
     "scripts": {
         "test": "phpunit",
         "cs": "php-cs-fixer fix --dry-run --diff",
-        "cs-fix": "php-cs-fixer fix"
+        "cs-fix": "php-cs-fixer fix",
+        "stan": "phpstan analyse"
     }
 }

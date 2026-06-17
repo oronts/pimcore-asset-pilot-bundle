@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
-use Psr\Log\LoggerInterface;
+use Pimcore\Model\DataObject\Concrete;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -28,7 +28,6 @@ class DebugRuleCommand extends Command
         private readonly RuleEngine $ruleEngine,
         private readonly AssetFieldExtractor $fieldExtractor,
         private readonly NamingStrategyInterface $namingStrategy,
-        private readonly LoggerInterface $logger,
     ) {
         parent::__construct();
     }
@@ -62,7 +61,8 @@ class DebugRuleCommand extends Command
         $fieldFilter = $input->getOption('field');
         $assetIdFilter = $input->getOption('asset-id');
 
-        $io->title(sprintf('Asset Pilot — Rule Debugger for %s #%d', $object->getClassName(), $object->getId()));
+        $className = $object instanceof Concrete ? $object->getClassName() : 'Folder';
+        $io->title(sprintf('Asset Pilot — Rule Debugger for %s #%d', $className, $object->getId()));
 
         if ($assetIdFilter !== null) {
             $asset = Asset::getById((int) $assetIdFilter);

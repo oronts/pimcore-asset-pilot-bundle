@@ -32,7 +32,6 @@ class ConfigValidatorTest extends TestCase
         $this->container = $this->createMock(ContainerInterface::class);
         $this->validator = new ConfigValidator(
             $this->container,
-            new NullLogger(),
             new ExpressionConditionEvaluator(new NullLogger()),
             new TemplatePathResolver(new NullLogger()),
         );

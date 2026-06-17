@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Model\RuleMatch;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 
 class RuleEngine implements RuleEngineInterface
@@ -152,7 +153,7 @@ class RuleEngine implements RuleEngineInterface
                     conditionExpression: $rule->condition,
                     conditionResult: null,
                     conditionError: null,
-                    filterDetails: 'expected ' . $rule->class . ', got ' . $object->getClassName(),
+                    filterDetails: 'expected ' . $rule->class . ', got ' . ($this->objectClassName($object) ?? 'Folder'),
                     resolvedPath: null,
                     priority: $rule->priority,
                     enabled: true,
@@ -269,7 +270,12 @@ class RuleEngine implements RuleEngineInterface
             return true;
         }
 
-        return $object->getClassName() === $rule->class;
+        return $this->objectClassName($object) === $rule->class;
+    }
+
+    private function objectClassName(AbstractObject $object): ?string
+    {
+        return $object instanceof Concrete ? $object->getClassName() : null;
     }
 
     protected function matchesFields(Rule $rule, string $fieldName): bool

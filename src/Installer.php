@@ -76,8 +76,13 @@ class Installer extends SettingsStoreAwareInstaller
 
         $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
 
+        // Permission\Definition has no delete() (its DAO only saves), so remove the rows directly.
+        $keyColumn = $this->db->getDatabasePlatform()->quoteIdentifier('key');
         foreach (AssetPilotPermission::cases() as $permission) {
-            Definition::getByKey($permission->value)?->delete();
+            $this->db->executeStatement(
+                sprintf('DELETE FROM users_permission_definitions WHERE %s = ?', $keyColumn),
+                [$permission->value],
+            );
         }
 
         parent::uninstall();

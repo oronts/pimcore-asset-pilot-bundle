@@ -9,8 +9,8 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
 use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
 use Pimcore\Model\DataObject\ClassDefinition;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Psr\Container\ContainerInterface;
-use Psr\Log\LoggerInterface;
 
 class ConfigValidator
 {
@@ -22,7 +22,6 @@ class ConfigValidator
      */
     public function __construct(
         private readonly ContainerInterface $callbacks,
-        private readonly LoggerInterface $logger,
         private readonly ExpressionConditionEvaluator $conditionEvaluator,
         private readonly TemplatePathResolver $pathResolver,
     ) {}
@@ -93,7 +92,7 @@ class ConfigValidator
         // Also collect localized field names
         $localizedFieldNames = [];
         $localizedFields = $classDef->getFieldDefinition('localizedfields');
-        if ($localizedFields !== null) {
+        if ($localizedFields instanceof Localizedfields) {
             $localizedFieldNames = array_keys($localizedFields->getFieldDefinitions());
         }
 

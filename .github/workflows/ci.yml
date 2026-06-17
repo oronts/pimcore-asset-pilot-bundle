@@ -31,6 +31,9 @@ jobs:
       - name: Coding standards (php-cs-fixer)
         run: vendor/bin/php-cs-fixer fix --dry-run --diff
 
+      - name: Static analysis (phpstan)
+        run: vendor/bin/phpstan analyse --no-progress
+
       - name: Run PHPUnit
         run: vendor/bin/phpunit
 

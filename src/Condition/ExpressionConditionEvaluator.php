@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Condition;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
@@ -131,7 +132,7 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         $el->register(
             'object_class',
             static fn (string $object): string => sprintf('(%s)->getClassName()', $object),
-            static fn (array $vars, AbstractObject $object): string => $object->getClassName(),
+            static fn (array $vars, AbstractObject $object): string => $object instanceof Concrete ? ($object->getClassName() ?? '') : '',
         );
 
         $el->register(

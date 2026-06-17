@@ -14,6 +14,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -299,7 +300,7 @@ class OperationsController
             $objects[] = [
                 'id' => $obj->getId(),
                 'key' => $obj->getKey(),
-                'className' => $obj->getClassName(),
+                'className' => $obj instanceof Concrete ? $obj->getClassName() : null,
             ];
         }
 
