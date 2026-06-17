@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
@@ -22,6 +23,8 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AssetManagementController
 {
+    use HandlesBulkIds;
+
     private const int MAX_TAGS = 500;
 
     public function __construct(
@@ -171,20 +174,17 @@ class AssetManagementController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
-        $tagIds = $data['tagIds'] ?? [];
         $replace = (bool) ($data['replace'] ?? false);
 
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
 
-        if (empty($tagIds) || !is_array($tagIds)) {
-            return new JsonResponse(['error' => 'tagIds array is required'], Response::HTTP_BAD_REQUEST);
+        $tagIds = $this->validatedBulkIds($data['tagIds'] ?? null, 'tagIds');
+        if ($tagIds instanceof JsonResponse) {
+            return $tagIds;
         }
-
-        $assetIds = array_map('intval', $assetIds);
-        $tagIds = array_map('intval', $tagIds);
 
         try {
             Tag::batchAssignTagsToElement('asset', $assetIds, $tagIds, $replace);
@@ -226,13 +226,13 @@ class AssetManagementController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
         $name = trim((string) ($data['name'] ?? ''));
         $type = trim((string) ($data['type'] ?? PropertyType::Text->value));
         $value = $data['data'] ?? '';
 
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
 
         if ($name === '') {
@@ -243,7 +243,6 @@ class AssetManagementController
             return new JsonResponse(['error' => 'type must be one of: ' . implode(', ', PropertyType::values())], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = array_map('intval', $assetIds);
         $result = $this->propertyService->bulkSetProperty($assetIds, $name, $type, $value);
 
         return new JsonResponse([

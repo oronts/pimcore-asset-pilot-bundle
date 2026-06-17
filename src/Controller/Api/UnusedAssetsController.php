@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
 use Psr\Log\LoggerInterface;
@@ -15,6 +16,8 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class UnusedAssetsController
 {
+    use HandlesBulkIds;
+
     public function __construct(
         private readonly UnusedAssetFinder $unusedAssetFinder,
         private readonly LoggerInterface $logger,
@@ -71,12 +74,10 @@ class UnusedAssetsController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
-
-        $assetIds = array_map('intval', $assetIds);
 
         $this->logger->info('Asset Pilot: bulk delete requested for {count} unused assets', [
             'count' => count($assetIds),
@@ -97,18 +98,16 @@ class UnusedAssetsController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
         $targetFolder = $data['targetFolder'] ?? '';
 
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
 
         if (empty($targetFolder)) {
             return new JsonResponse(['error' => 'targetFolder is required'], Response::HTTP_BAD_REQUEST);
         }
-
-        $assetIds = array_map('intval', $assetIds);
 
         $this->logger->info('Asset Pilot: bulk move requested for {count} unused assets to {folder}', [
             'count' => count($assetIds),

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -27,6 +28,8 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class OperationsController
 {
+    use HandlesBulkIds;
+
     public function __construct(
         protected readonly AssetOrganizer $organizer,
         protected readonly MessageBusInterface $messageBus,
@@ -185,11 +188,19 @@ class OperationsController
         }
 
         $className = $data['className'] ?? null;
-        $objectIds = $data['objectIds'] ?? [];
+        $rawObjectIds = $data['objectIds'] ?? [];
         $async = $data['async'] ?? true;
 
-        if ($className === null && empty($objectIds)) {
+        if ($className === null && empty($rawObjectIds)) {
             return new JsonResponse(['error' => 'className or objectIds required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $objectIds = [];
+        if (!empty($rawObjectIds)) {
+            $objectIds = $this->validatedBulkIds($rawObjectIds, 'objectIds');
+            if ($objectIds instanceof JsonResponse) {
+                return $objectIds;
+            }
         }
 
         // Resolve object IDs from class name if not provided directly
