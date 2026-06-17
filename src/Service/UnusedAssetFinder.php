@@ -205,6 +205,14 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                     continue;
                 }
 
+                // Per-asset Pimcore workspace ACL (defence in depth over the flat operate permission).
+                // isAllowed() resolves the current user itself and returns true on CLI.
+                if (!$asset->isAllowed('delete')) {
+                    $errors[$id] = 'Not permitted to delete this asset';
+                    $failed++;
+                    continue;
+                }
+
                 // Verify it's actually unused (race condition safety)
                 if ($this->isReferenced($id)) {
                     $errors[$id] = 'Asset is now referenced by an object';
@@ -248,6 +256,12 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Failed to create folder: ' . $e->getMessage()]];
         }
 
+        // The current user must be allowed to create children in the target folder (Pimcore's
+        // workspace ACL for placing an element); isAllowed() returns true on CLI.
+        if (!$folder->isAllowed('create')) {
+            return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Not permitted to move assets into the target folder']];
+        }
+
         foreach ($assetIds as $id) {
             try {
                 $asset = Asset::getById($id);
@@ -259,6 +273,12 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
                 if ($asset instanceof Asset\Folder) {
                     $errors[$id] = 'Cannot move folders';
+                    $failed++;
+                    continue;
+                }
+
+                if (!$asset->isAllowed('publish')) {
+                    $errors[$id] = 'Not permitted to move this asset';
                     $failed++;
                     continue;
                 }

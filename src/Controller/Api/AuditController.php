@@ -144,6 +144,11 @@ class AuditController
             return new JsonResponse(['error' => 'Asset not found'], Response::HTTP_NOT_FOUND);
         }
 
+        // Per-asset Pimcore workspace ACL on top of the admin-level operate permission.
+        if (!$asset->isAllowed('publish')) {
+            return new JsonResponse(['error' => 'You are not permitted to revert this asset'], Response::HTTP_FORBIDDEN);
+        }
+
         $currentPath = $asset->getRealFullPath();
         $targetPath = $entry['asset_path_to'] ?? '';
 
