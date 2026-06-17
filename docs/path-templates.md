@@ -30,7 +30,7 @@ You can call any method on the `object` and `asset` variables directly in the te
 | Function | Usage | Description |
 |----------|-------|-------------|
 | `coalesce` | `{{ coalesce(a, b, c) }}` | First non-null, non-empty value |
-| `prop` | `{{ prop(obj, 'method', arg1) }}` | Safely call a method on an object |
+| `prop` | `{{ prop(obj, 'getSku', arg1) }}` | Call a read accessor (`get`/`is`/`has`) on an object; other methods return null |
 | `rel` | `{{ rel(object, 'categories', 0) }}` | Safely access a relation by index |
 | `has_relation` | `{% if has_relation(object, 'categories') %}` | Check if relation has items |
 

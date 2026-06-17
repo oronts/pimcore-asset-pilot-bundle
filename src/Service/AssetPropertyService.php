@@ -19,7 +19,7 @@ class AssetPropertyService
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly string $lockProperty = 'asset_pilot_locked',
+        private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     public function lockAsset(int $assetId, string $assetPath): void

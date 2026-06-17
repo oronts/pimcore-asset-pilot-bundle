@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\DependencyInjection;
 
 use Oronts\AssetPilotBundle\Enum\CollisionPattern;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -210,7 +211,7 @@ class Configuration implements ConfigurationInterface
                             ->info('Asset folders excluded from organization (e.g. ["/Protected/", "/Manual/"]).')
                         ->end()
                         ->scalarNode('lock_property')
-                            ->defaultValue('asset_pilot_locked')
+                            ->defaultValue(AssetProtection::DEFAULT_LOCK_PROPERTY)
                             ->info('Custom property name that locks an asset from organization.')
                         ->end()
                     ->end()

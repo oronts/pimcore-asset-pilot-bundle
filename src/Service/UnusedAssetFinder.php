@@ -28,7 +28,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         private readonly LoggerInterface $logger,
         private readonly ConfidenceScorer $scorer,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly string $lockProperty = 'asset_pilot_locked',
+        private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**

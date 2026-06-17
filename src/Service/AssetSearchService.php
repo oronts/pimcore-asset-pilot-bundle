@@ -18,7 +18,7 @@ class AssetSearchService implements AssetSearchServiceInterface
     public function __construct(
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
-        private readonly string $lockProperty = 'asset_pilot_locked',
+        private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**

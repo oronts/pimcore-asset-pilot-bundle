@@ -279,9 +279,13 @@ class TemplatePathResolver implements PathResolverInterface
             return 'unknown';
         }, ['is_variadic' => true]));
 
-        // prop(obj, 'method', ...args) — safely call a method on any object
+        // prop(obj, 'method', ...args) — call a read accessor on an object. Restricted to get/is/has
+        // accessors so a path template (admin-authored, but still) cannot invoke a mutating method.
         $twig->addFunction(new TwigFunction('prop', static function (mixed $obj, string $method, mixed ...$args): mixed {
             if ($obj === null || !is_object($obj) || !method_exists($obj, $method)) {
+                return null;
+            }
+            if (!preg_match('/^(get|is|has)[A-Z0-9]/', $method)) {
                 return null;
             }
             return $obj->$method(...$args);

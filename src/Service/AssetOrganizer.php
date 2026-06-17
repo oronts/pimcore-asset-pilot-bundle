@@ -33,7 +33,7 @@ class AssetOrganizer
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly array $excludeFolders = [],
-        protected readonly string $lockProperty = 'asset_pilot_locked',
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /** @return OperationResult[] */
@@ -476,16 +476,16 @@ class AssetOrganizer
             $asset->setParent($folder);
             $asset->setFilename($targetFilename);
 
+            // Mark recently-moved (5min TTL) before unmarking processing so the asset never sits in a
+            // window where it is neither flagged — that gap could let async ping-pong slip through when
+            // the asset is shared between multiple objects. Only set it once the save actually lands.
             $this->loopGuard->markAssetProcessing($assetId);
             try {
                 $asset->save();
+                $this->loopGuard->markAssetRecentlyMoved($assetId);
             } finally {
                 $this->loopGuard->unmarkAssetProcessing($assetId);
             }
-
-            // Mark as recently moved (5min TTL) to prevent async ping-pong
-            // when this asset is shared between multiple objects
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
 
             $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
 
