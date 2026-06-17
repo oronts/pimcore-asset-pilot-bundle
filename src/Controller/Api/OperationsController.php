@@ -264,7 +264,7 @@ class OperationsController
         }
 
         if ($async) {
-            $batchSize = $data['batchSize'] ?? 50;
+            $batchSize = max(1, (int) ($data['batchSize'] ?? 50));
             $batches = array_chunk($objectIds, $batchSize);
             foreach ($batches as $batch) {
                 $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));

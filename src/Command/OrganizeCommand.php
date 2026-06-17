@@ -214,7 +214,7 @@ class OrganizeCommand extends Command
 
         if ($async) {
             // Dispatch in batches
-            $batches = array_chunk($objectIds, $batchSize);
+            $batches = array_chunk($objectIds, max(1, $batchSize));
             foreach ($batches as $batch) {
                 $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));
                 $this->messageBus->dispatch(Envelope::wrap(

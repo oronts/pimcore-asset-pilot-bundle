@@ -85,7 +85,7 @@ class AuditController
             fputcsv($handle, ['ID', 'Asset ID', 'From', 'To', 'Object ID', 'Class', 'Rule', 'Trigger', 'Status', 'Duration (ms)', 'Error', 'Date']);
 
             foreach ($items as $item) {
-                fputcsv($handle, [
+                fputcsv($handle, array_map($this->sanitizeCsvCell(...), [
                     $item['id'] ?? '',
                     $item['asset_id'] ?? '',
                     $item['asset_path_from'] ?? '',
@@ -98,7 +98,7 @@ class AuditController
                     $item['duration_ms'] ?? '',
                     $item['error_message'] ?? '',
                     $item['created_at'] ?? '',
-                ]);
+                ]));
             }
 
             fclose($handle);
@@ -198,6 +198,19 @@ class AuditController
 
             return new JsonResponse(['error' => 'Failed to revert: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    // A cell starting with = + - @ (or a control char) is executed as a formula by Excel/Sheets;
+    // prefix it with a quote to neutralize CSV formula injection.
+    protected function sanitizeCsvCell(mixed $value): string
+    {
+        $value = (string) $value;
+
+        if ($value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r", "\n"], true)) {
+            return "'" . $value;
+        }
+
+        return $value;
     }
 
     // The save fires asset.postUpdate -> AssetUploadListener, which would re-organize the asset back.

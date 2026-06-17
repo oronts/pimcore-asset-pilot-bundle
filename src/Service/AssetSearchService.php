@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
+use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -119,7 +120,7 @@ class AssetSearchService
         $q = trim($filters['q'] ?? '');
         if ($q !== '') {
             $qb->andWhere('(a.filename LIKE :q OR a.path LIKE :q)')
-                ->setParameter('q', '%' . $q . '%');
+                ->setParameter('q', '%' . Like::escape($q) . '%');
         }
 
         if (!empty($filters['type'])) {
@@ -127,7 +128,7 @@ class AssetSearchService
         }
 
         if (!empty($filters['folder'])) {
-            $folderPath = rtrim($filters['folder'], '/') . '/%';
+            $folderPath = Like::escape(rtrim($filters['folder'], '/')) . '/%';
             $qb->andWhere('a.path LIKE :folder_path')->setParameter('folder_path', $folderPath);
         }
 

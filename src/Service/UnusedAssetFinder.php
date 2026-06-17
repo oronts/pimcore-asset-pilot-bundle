@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
+use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -315,7 +316,7 @@ class UnusedAssetFinder
             foreach ($extensions as $i => $ext) {
                 $param = 'ext_' . $i;
                 $conditions[] = 'a.filename LIKE :' . $param;
-                $qb->setParameter($param, '%.' . ltrim(trim($ext), '.'));
+                $qb->setParameter($param, '%.' . Like::escape(ltrim(trim($ext), '.')));
             }
             $qb->andWhere('(' . implode(' OR ', $conditions) . ')');
         }
@@ -338,7 +339,7 @@ class UnusedAssetFinder
 
         if (!empty($filters['folder'])) {
             $qb->andWhere('a.path LIKE :folder')
-                ->setParameter('folder', rtrim($filters['folder'], '/') . '/%');
+                ->setParameter('folder', Like::escape(rtrim($filters['folder'], '/')) . '/%');
         }
 
         $confidence = ConfidenceLevel::tryFrom((string) ($filters['confidence'] ?? ''));
