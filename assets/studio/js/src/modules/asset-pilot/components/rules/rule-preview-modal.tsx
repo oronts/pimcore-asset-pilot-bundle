@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
 import type { MoveOperation } from '../../types'
 import { useToast } from '../../hooks/use-toast'
+import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 
 interface RulePreviewModalProps {
   ruleName: string
@@ -17,6 +18,7 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const modalRef = useModalDismiss<HTMLDivElement>(onClose)
 
   const runPreview = async (): Promise<void> => {
     const id = parseInt(objectId, 10)
@@ -53,7 +55,7 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
 
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.rule-preview.title', { name: ruleName })}</h3>
           <button onClick={onClose} style={closeBtnStyle}>&times;</button>

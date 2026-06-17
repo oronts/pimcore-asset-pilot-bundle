@@ -65,7 +65,9 @@ export const UnusedAssetsTab: React.FC = () => {
     setActionLoading(true)
     try {
       const result = await assetPilotApi.bulkDeleteAssets([...selected])
-      toast.success(t('asset-pilot.unused.deleted-result', { deleted: result.deleted ?? 0, failed: result.failed }))
+      const msg = t('asset-pilot.unused.deleted-result', { deleted: result.deleted ?? 0, failed: result.failed })
+      if (result.failed > 0) toast.warning(msg)
+      else toast.success(msg)
       setSelected(new Set())
       refetch()
     } catch (e: unknown) {
@@ -80,7 +82,9 @@ export const UnusedAssetsTab: React.FC = () => {
     setActionLoading(true)
     try {
       const result = await assetPilotApi.bulkMoveAssets([...selected], targetFolder)
-      toast.success(t('asset-pilot.unused.moved-result', { moved: result.moved ?? 0, failed: result.failed }))
+      const msg = t('asset-pilot.unused.moved-result', { moved: result.moved ?? 0, failed: result.failed })
+      if (result.failed > 0) toast.warning(msg)
+      else toast.success(msg)
       setSelected(new Set())
       refetch()
     } catch (e: unknown) {

@@ -3,6 +3,13 @@ import { useToast } from '../../hooks/use-toast'
 
 type ElementType = 'asset' | 'data-object'
 
+interface PimcoreStudioApi {
+  element?: {
+    openAsset: (id: number) => Promise<void>
+    openDataObject: (id: number) => Promise<void>
+  }
+}
+
 interface OpenButtonProps {
   id: number
   type: ElementType
@@ -17,7 +24,7 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
     setOpening(true)
 
     try {
-      const api = (window as any).PimcoreStudio
+      const api = (window as unknown as { PimcoreStudio?: PimcoreStudioApi }).PimcoreStudio
       if (api?.element != null) {
         if (type === 'asset') {
           await api.element.openAsset(id)

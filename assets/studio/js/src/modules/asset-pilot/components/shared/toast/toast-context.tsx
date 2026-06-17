@@ -53,7 +53,7 @@ const iconMap: Record<ToastType, string> = {
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
-  injectStyles('ap-toast-styles', TOAST_CSS)
+  useEffect(() => { injectStyles('ap-toast-styles', TOAST_CSS) }, [])
 
   const removeToast = useCallback((id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id))

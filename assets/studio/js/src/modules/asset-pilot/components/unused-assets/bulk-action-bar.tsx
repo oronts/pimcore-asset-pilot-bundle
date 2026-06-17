@@ -35,7 +35,9 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
       } catch { /* skip */ }
     }
     setLockLoading(false)
-    toast.success(t('asset-pilot.lock.lock-success', { count: success }))
+    const failed = assetIds.length - success
+    if (failed > 0) toast.warning(t('asset-pilot.lock.lock-partial', { success, failed }))
+    else toast.success(t('asset-pilot.lock.lock-success', { count: success }))
     onLockDone?.()
   }
 
@@ -49,7 +51,9 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
       } catch { /* skip */ }
     }
     setLockLoading(false)
-    toast.success(t('asset-pilot.lock.unlock-success', { count: success }))
+    const failed = assetIds.length - success
+    if (failed > 0) toast.warning(t('asset-pilot.lock.unlock-partial', { success, failed }))
+    else toast.success(t('asset-pilot.lock.unlock-success', { count: success }))
     onLockDone?.()
   }
 

@@ -231,6 +231,8 @@ export const en: Record<string, string> = {
   'asset-pilot.lock.unlock-selected': 'Unlock Selected',
   'asset-pilot.lock.lock-success': '{{count}} asset(s) locked',
   'asset-pilot.lock.unlock-success': '{{count}} asset(s) unlocked',
+  'asset-pilot.lock.lock-partial': '{{success}} asset(s) locked, {{failed}} failed',
+  'asset-pilot.lock.unlock-partial': '{{success}} asset(s) unlocked, {{failed}} failed',
   'asset-pilot.lock.tooltip': 'Locked assets are excluded from automatic organization',
   'asset-pilot.lock.confirm-title': 'Confirm Lock',
   'asset-pilot.lock.confirm-description': 'Lock {{count}} asset(s)? Locked assets will be excluded from automatic organization.',

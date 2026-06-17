@@ -122,7 +122,7 @@ export interface BulkPreviewResponse {
 // Unused Assets
 export type ConfidenceLevel = 'definitely_unused' | 'probably_unused' | 'recently_uploaded' | 'historically_used' | 'protected'
 
-export interface UnusedAsset {
+export interface AssetItem {
   id: number
   path: string
   filename: string
@@ -133,6 +133,9 @@ export interface UnusedAsset {
   modified_at: string | null
   full_path: string
   locked?: boolean
+}
+
+export interface UnusedAsset extends AssetItem {
   confidence: ConfidenceLevel
 }
 
@@ -151,6 +154,13 @@ export interface UnusedAssetFilters {
 
 export interface PaginatedUnusedResponse {
   items: UnusedAsset[]
+  total: number
+  page: number
+  pages: number
+}
+
+export interface PaginatedAssetResponse {
+  items: AssetItem[]
   total: number
   page: number
   pages: number

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
-import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters } from '../types'
+import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters } from '../types'
 
 interface AsyncState<T> {
   data: T | null
@@ -70,7 +70,7 @@ export function useUnusedStats(): AsyncState<UnusedAssetStats> {
   return useAsyncData(() => assetPilotApi.getUnusedStats())
 }
 
-export function useAssetSearch(filters: AssetSearchFilters): AsyncState<PaginatedUnusedResponse> {
+export function useAssetSearch(filters: AssetSearchFilters): AsyncState<PaginatedAssetResponse> {
   return useAsyncData(
     () => assetPilotApi.searchAssets(filters),
     [filters.page, filters.limit, filters.q, filters.type, filters.folder, filters.objectId, filters.sort, filters.order],

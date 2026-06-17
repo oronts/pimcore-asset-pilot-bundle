@@ -231,6 +231,8 @@ export const de: Record<string, string> = {
   'asset-pilot.lock.unlock-selected': 'Ausgewählte entsperren',
   'asset-pilot.lock.lock-success': '{{count}} Asset(s) gesperrt',
   'asset-pilot.lock.unlock-success': '{{count}} Asset(s) entsperrt',
+  'asset-pilot.lock.lock-partial': '{{success}} Asset(s) gesperrt, {{failed}} fehlgeschlagen',
+  'asset-pilot.lock.unlock-partial': '{{success}} Asset(s) entsperrt, {{failed}} fehlgeschlagen',
   'asset-pilot.lock.tooltip': 'Gesperrte Assets sind von der automatischen Organisation ausgenommen',
   'asset-pilot.lock.confirm-title': 'Sperren bestätigen',
   'asset-pilot.lock.confirm-description': '{{count}} Asset(s) sperren? Gesperrte Assets werden von der automatischen Organisation ausgenommen.',

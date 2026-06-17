@@ -8,10 +8,12 @@ import type {
   BulkOrganizeRequest,
   BulkPreviewResponse,
   PaginatedAuditResponse,
+  AuditEntry,
   AuditFilters,
   PreviewResponse,
   ExplainResponse,
   PaginatedUnusedResponse,
+  PaginatedAssetResponse,
   UnusedAssetFilters,
   UnusedAssetStats,
   BulkActionResult,
@@ -88,7 +90,7 @@ export const assetPilotApi = {
       method: 'POST',
       body: JSON.stringify({ className, page, limit }),
     }),
-  getStatus: () => request<{ stats: Record<string, number>; recentOperations: unknown[] }>('/operations/status'),
+  getStatus: () => request<{ stats: Record<string, number | Record<string, number>>; recentOperations: AuditEntry[] }>('/operations/status'),
 
   // Audit
   getAudit: (filters: AuditFilters = {}) =>
@@ -144,7 +146,7 @@ export const assetPilotApi = {
 
   // Asset Management
   searchAssets: (filters: AssetSearchFilters = {}) =>
-    request<PaginatedUnusedResponse>(
+    request<PaginatedAssetResponse>(
       `/assets/search${buildQuery({
         q: filters.q,
         type: filters.type,
@@ -157,11 +159,11 @@ export const assetPilotApi = {
       })}`,
     ),
   getAssetsByObject: (objectId: number, page = 1, limit = 50, type?: string) =>
-    request<PaginatedUnusedResponse>(
+    request<PaginatedAssetResponse>(
       `/assets/by-object/${objectId}${buildQuery({ page, limit, type })}`,
     ),
   getAssetsByRule: (ruleName: string, page = 1, limit = 50, since?: string, className?: string) =>
-    request<PaginatedUnusedResponse>(
+    request<PaginatedAssetResponse>(
       `/audit/by-rule/${encodeURIComponent(ruleName)}/assets${buildQuery({ page, limit, since, class: className })}`,
     ),
   getAvailableTags: () => request<TagItem[]>('/assets/tags'),

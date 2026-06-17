@@ -4,7 +4,7 @@
     "target": "es2017",
     "moduleResolution": "bundler",
     "types": ["reflect-metadata", "@types/webpack-env"],
-    "strictNullChecks": true,
+    "strict": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
