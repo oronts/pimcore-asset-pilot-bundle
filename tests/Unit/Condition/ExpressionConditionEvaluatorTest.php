@@ -54,6 +54,21 @@ class ExpressionConditionEvaluatorTest extends TestCase
     }
 
     #[Test]
+    public function evaluateSwallowsErrorsWhileEvaluateStrictPropagatesThem(): void
+    {
+        $rule = $this->createRule('1 / 0');
+        $object = $this->createMock(AbstractObject::class);
+        $asset = $this->createMock(Asset::class);
+
+        // evaluate() must never throw (the live pipeline path) ...
+        self::assertFalse($this->evaluator->evaluate($object, $asset, $rule));
+
+        // ... but evaluateStrict() lets the error surface so explain() can report it.
+        $this->expectException(\Throwable::class);
+        $this->evaluator->evaluateStrict($object, $asset, $rule);
+    }
+
+    #[Test]
     public function returnsTrueWhenConditionIsNull(): void
     {
         $object = $this->createMock(AbstractObject::class);

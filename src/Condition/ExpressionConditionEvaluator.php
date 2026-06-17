@@ -28,27 +28,8 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
 
     public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
     {
-        if ($rule->condition === null || $rule->condition === '') {
-            return true;
-        }
-
         try {
-            $result = (bool) $this->getExpressionLanguage()->evaluate(
-                $this->getCompiledExpression($rule->condition),
-                [
-                    'object' => $object,
-                    'asset' => $asset,
-                    'rule' => $rule,
-                ],
-            );
-
-            $this->logger->debug('Condition "{condition}" evaluated to {result} for rule "{rule}".', [
-                'condition' => $rule->condition,
-                'result' => $result ? 'true' : 'false',
-                'rule' => $rule->name,
-            ]);
-
-            return $result;
+            return $this->evaluateStrict($object, $asset, $rule);
         } catch (\Throwable $e) {
             $this->logger->warning('Condition evaluation failed for rule "{rule}": {error}', [
                 'rule' => $rule->name,
@@ -59,6 +40,30 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
 
             return false;
         }
+    }
+
+    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule): bool
+    {
+        if ($rule->condition === null || $rule->condition === '') {
+            return true;
+        }
+
+        $result = (bool) $this->getExpressionLanguage()->evaluate(
+            $this->getCompiledExpression($rule->condition),
+            [
+                'object' => $object,
+                'asset' => $asset,
+                'rule' => $rule,
+            ],
+        );
+
+        $this->logger->debug('Condition "{condition}" evaluated to {result} for rule "{rule}".', [
+            'condition' => $rule->condition,
+            'result' => $result ? 'true' : 'false',
+            'rule' => $rule->name,
+        ]);
+
+        return $result;
     }
 
     /**

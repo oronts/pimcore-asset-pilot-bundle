@@ -162,7 +162,7 @@ class RuleEngine
             $conditionError = null;
             if ($rule->condition !== null && $rule->condition !== '') {
                 try {
-                    $conditionResult = $this->conditionEvaluator->evaluate($object, $asset, $rule);
+                    $conditionResult = $this->conditionEvaluator->evaluateStrict($object, $asset, $rule);
                 } catch (\Throwable $e) {
                     $conditionResult = false;
                     $conditionError = $e->getMessage();

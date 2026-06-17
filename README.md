@@ -1435,6 +1435,16 @@ class WorkflowConditionEvaluator implements ConditionEvaluatorInterface
 {
     public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
     {
+        // The live pipeline must never throw from a condition; swallow and treat errors as "no match".
+        try {
+            return $this->evaluateStrict($object, $asset, $rule);
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule): bool
+    {
         if ($rule->condition === null) {
             return true;
         }
