@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -126,19 +127,14 @@ class RulesController
                 );
             }
 
-            $operations = $this->assetOrganizer->dryRun($object);
-
-            $filtered = array_values(array_filter(
-                $operations,
-                static fn ($op): bool => $op->ruleName === $name,
-            ));
+            $operations = $this->assetOrganizer->dryRun($object, TriggerType::Api, $name);
 
             $filtered = array_map(static fn ($op) => [
                 'assetId' => $op->assetId,
                 'sourcePath' => $op->sourcePath,
                 'targetPath' => $op->targetPath,
                 'ruleName' => $op->ruleName,
-            ], $filtered);
+            ], $operations);
 
             $this->logger->info('Preview for rule "{rule}" on object {objectId}: {count} operations.', [
                 'rule' => $name,
@@ -158,5 +154,46 @@ class RulesController
                 JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
+    }
+
+    #[Route('/rules/{name}/apply', name: 'oronts_asset_pilot_rules_apply', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function apply(string $name, Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($data) || (int) ($data['objectId'] ?? 0) <= 0) {
+            return new JsonResponse(['error' => 'objectId is required and must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        $object = AbstractObject::getById((int) $data['objectId']);
+        if ($object === null) {
+            return new JsonResponse(['error' => sprintf('Object with ID %d not found.', (int) $data['objectId'])], JsonResponse::HTTP_NOT_FOUND);
+        }
+
+        $known = array_filter($this->ruleEngine->getRules(), static fn (Rule $r): bool => $r->name === $name);
+        if ($known === []) {
+            return new JsonResponse(['error' => sprintf('Rule "%s" not found.', $name)], JsonResponse::HTTP_NOT_FOUND);
+        }
+
+        $results = $this->assetOrganizer->organize($object, TriggerType::Api, $name);
+
+        return new JsonResponse([
+            'rule' => $name,
+            'results' => array_map(static fn ($r): array => [
+                'status' => $r->status->value,
+                'message' => $r->message,
+                'operation' => $r->operation !== null ? [
+                    'assetId' => $r->operation->assetId,
+                    'sourcePath' => $r->operation->sourcePath,
+                    'targetPath' => $r->operation->targetPath,
+                    'ruleName' => $r->operation->ruleName,
+                ] : null,
+            ], $results),
+        ]);
     }
 }

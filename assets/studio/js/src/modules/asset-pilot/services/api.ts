@@ -61,6 +61,11 @@ export const assetPilotApi = {
   getRuleDetail: (name: string) => request<RuleDetail>(`/rules/${encodeURIComponent(name)}`),
   previewRule: (name: string, objectId: number) =>
     request<unknown[]>(`/rules/${encodeURIComponent(name)}/preview?objectId=${objectId}`),
+  applyRule: (name: string, objectId: number) =>
+    request<OrganizeResponse>(`/rules/${encodeURIComponent(name)}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ objectId }),
+    }),
 
   // Operations
   organize: (data: OrganizeRequest) =>

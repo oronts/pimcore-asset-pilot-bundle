@@ -37,7 +37,7 @@ class AssetOrganizer
     ) {}
 
     /** @return OperationResult[] */
-    public function organize(AbstractObject $object, TriggerType $triggerType = TriggerType::ObjectSave): array
+    public function organize(AbstractObject $object, TriggerType $triggerType = TriggerType::ObjectSave, ?string $ruleName = null): array
     {
         $objectId = (int) $object->getId();
 
@@ -81,6 +81,10 @@ class AssetOrganizer
                     }
 
                     $matches = $this->ruleEngine->matchField($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
+
+                    if ($ruleName !== null) {
+                        $matches = array_values(array_filter($matches, static fn ($m): bool => $m->rule->name === $ruleName));
+                    }
 
                     if (empty($matches)) {
                         $this->logger->debug('Asset Pilot: no rules matched for asset {assetId} in field "{field}"', [
@@ -136,7 +140,7 @@ class AssetOrganizer
     }
 
     /** @return MoveOperation[] */
-    public function dryRun(AbstractObject $object, TriggerType $triggerType = TriggerType::Manual): array
+    public function dryRun(AbstractObject $object, TriggerType $triggerType = TriggerType::Manual, ?string $ruleName = null): array
     {
         $operations = [];
         $processedAssetIds = [];
@@ -154,6 +158,9 @@ class AssetOrganizer
                 }
 
                 $matches = $this->ruleEngine->matchField($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
+                if ($ruleName !== null) {
+                    $matches = array_values(array_filter($matches, static fn ($m): bool => $m->rule->name === $ruleName));
+                }
                 if (empty($matches)) {
                     continue;
                 }

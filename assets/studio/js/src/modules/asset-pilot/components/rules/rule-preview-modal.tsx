@@ -41,7 +41,7 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
     if (isNaN(id)) return
     setApplying(true)
     try {
-      await assetPilotApi.organize({ objectId: id })
+      await assetPilotApi.applyRule(ruleName, id)
       toast.success(t('asset-pilot.rule-preview.apply-success'))
       onClose()
     } catch (e) {
