@@ -15,15 +15,16 @@ export function useSort<T>(defaultField?: string, defaultDirection: SortDirectio
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultDirection)
 
   const toggleSort = useCallback((field: string) => {
-    setSortField(prev => {
-      if (prev === field) {
-        setSortDirection(d => d === 'asc' ? 'desc' : 'asc')
-        return field
-      }
+    // Compute the next direction from current state with plain (idempotent) setters. Nesting
+    // setSortDirection inside the setSortField updater, or toggling via `d => ...`, double-flips
+    // under React 18 StrictMode (which invokes updaters twice) and the sort would not change.
+    if (field === sortField) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
       setSortDirection('asc')
-      return field
-    })
-  }, [])
+    }
+  }, [sortField, sortDirection])
 
   const sortedData = useCallback((items: T[]): T[] => {
     if (sortField == null) return items

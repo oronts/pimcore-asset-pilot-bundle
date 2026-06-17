@@ -17,7 +17,16 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
 
   return (
     <th
+      role="columnheader"
+      aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+      tabIndex={0}
       onClick={() => onToggle(field)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onToggle(field)
+        }
+      }}
       style={{
         ...baseStyle,
         ...style,

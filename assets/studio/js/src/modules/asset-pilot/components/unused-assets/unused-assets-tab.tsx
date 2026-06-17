@@ -92,6 +92,11 @@ export const UnusedAssetsTab: React.FC = () => {
 
   const hasFilters = filters.type != null || filters.extension != null || filters.before != null || filters.after != null || filters.folder != null || filters.confidence != null
 
+  const goToPage = (page: number) => {
+    setFilters(f => ({ ...f, page }))
+    setSelected(new Set())
+  }
+
   return (
     <div ref={containerRef}>
       {stats != null && (
@@ -171,11 +176,11 @@ export const UnusedAssetsTab: React.FC = () => {
 
           {data.pages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 16 }}>
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) - 1 }))} disabled={(filters.page ?? 1) <= 1} style={pageBtnStyle}>{t('asset-pilot.common.prev')}</button>
+              <button onClick={() => goToPage((filters.page ?? 1) - 1)} disabled={(filters.page ?? 1) <= 1} style={pageBtnStyle}>{t('asset-pilot.common.prev')}</button>
               {pageNumbers(data.page, data.pages).map(p => (
-                <button key={p} onClick={() => setFilters(f => ({ ...f, page: p }))} style={{ ...pageBtnStyle, background: (filters.page ?? 1) === p ? '#1677ff' : '#fff', color: (filters.page ?? 1) === p ? '#fff' : '#595959' }}>{p}</button>
+                <button key={p} onClick={() => goToPage(p)} style={{ ...pageBtnStyle, background: (filters.page ?? 1) === p ? '#1677ff' : '#fff', color: (filters.page ?? 1) === p ? '#fff' : '#595959' }}>{p}</button>
               ))}
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) + 1 }))} disabled={(filters.page ?? 1) >= data.pages} style={pageBtnStyle}>{t('asset-pilot.common.next')}</button>
+              <button onClick={() => goToPage((filters.page ?? 1) + 1)} disabled={(filters.page ?? 1) >= data.pages} style={pageBtnStyle}>{t('asset-pilot.common.next')}</button>
             </div>
           )}
         </>

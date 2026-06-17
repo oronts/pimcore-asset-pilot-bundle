@@ -71,6 +71,11 @@ export const AssetManagementTab: React.FC = () => {
     refetch()
   }
 
+  const goToPage = (page: number): void => {
+    setFilters(f => ({ ...f, page }))
+    setSelected(new Set())
+  }
+
   return (
     <div ref={containerRef}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -173,11 +178,11 @@ export const AssetManagementTab: React.FC = () => {
 
           {data.pages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 16 }}>
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) - 1 }))} disabled={(filters.page ?? 1) <= 1} style={pageBtnStyle}>{t('asset-pilot.common.prev')}</button>
+              <button onClick={() => goToPage((filters.page ?? 1) - 1)} disabled={(filters.page ?? 1) <= 1} style={pageBtnStyle}>{t('asset-pilot.common.prev')}</button>
               {pageNumbers(data.page, data.pages).map(p => (
-                <button key={p} onClick={() => setFilters(f => ({ ...f, page: p }))} style={{ ...pageBtnStyle, background: (filters.page ?? 1) === p ? '#1677ff' : '#fff', color: (filters.page ?? 1) === p ? '#fff' : '#595959' }}>{p}</button>
+                <button key={p} onClick={() => goToPage(p)} style={{ ...pageBtnStyle, background: (filters.page ?? 1) === p ? '#1677ff' : '#fff', color: (filters.page ?? 1) === p ? '#fff' : '#595959' }}>{p}</button>
               ))}
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) + 1 }))} disabled={(filters.page ?? 1) >= data.pages} style={pageBtnStyle}>{t('asset-pilot.common.next')}</button>
+              <button onClick={() => goToPage((filters.page ?? 1) + 1)} disabled={(filters.page ?? 1) >= data.pages} style={pageBtnStyle}>{t('asset-pilot.common.next')}</button>
             </div>
           )}
         </>
