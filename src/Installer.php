@@ -16,6 +16,7 @@ class Installer extends SettingsStoreAwareInstaller
 {
     public const string TABLE_AUDIT_LOG = 'asset_pilot_audit_log';
     public const string TABLE_QUARANTINE = 'asset_pilot_quarantine';
+    public const string TABLE_INTEGRITY_LOG = 'asset_pilot_integrity_log';
 
     public function __construct(
         BundleInterface $bundle,
@@ -34,6 +35,7 @@ class Installer extends SettingsStoreAwareInstaller
         // so a reinstall over a partial or older schema repairs it instead of being a no-op.
         $this->ensureTable($schema, self::TABLE_AUDIT_LOG, self::auditColumns(), self::auditIndexes());
         $this->ensureTable($schema, self::TABLE_QUARANTINE, self::quarantineColumns(), self::quarantineIndexes(), self::quarantineUniqueIndexes());
+        $this->ensureTable($schema, self::TABLE_INTEGRITY_LOG, self::integrityLogColumns(), self::integrityLogIndexes());
 
         $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
 
@@ -54,7 +56,7 @@ class Installer extends SettingsStoreAwareInstaller
         $currentSchema = $schemaManager->introspectSchema();
         $schema = clone $currentSchema;
 
-        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE] as $tableName) {
+        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG] as $tableName) {
             if ($schema->hasTable($tableName)) {
                 $schema->dropTable($tableName);
             }
@@ -192,6 +194,33 @@ class Installer extends SettingsStoreAwareInstaller
     {
         return [
             'uniq_quarantine_asset' => ['asset_id'],
+        ];
+    }
+
+    /**
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    protected static function integrityLogColumns(): array
+    {
+        return [
+            ['id', 'integer', ['autoincrement' => true, 'notnull' => true]],
+            ['asset_id', 'integer', ['notnull' => true]],
+            ['from_version', 'integer', ['notnull' => false]],
+            ['to_version', 'integer', ['notnull' => false]],
+            ['checker', 'string', ['length' => 100, 'notnull' => true]],
+            ['status', 'string', ['length' => 20, 'notnull' => true]],
+            ['created_at', 'datetime', ['notnull' => true]],
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    protected static function integrityLogIndexes(): array
+    {
+        return [
+            'idx_integrity_asset' => ['asset_id'],
+            'idx_integrity_asset_status' => ['asset_id', 'status'],
         ];
     }
 

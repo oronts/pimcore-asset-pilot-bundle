@@ -165,6 +165,10 @@ services:
             $enabled: '%oronts_asset_pilot.integrity.enabled%'
             $skipExtensions: '%oronts_asset_pilot.integrity.skip_extensions%'
 
+    Oronts\AssetPilotBundle\Service\VersionRollbackHealer:
+        arguments:
+            $onUnrecoverable: '%oronts_asset_pilot.integrity.on_unrecoverable%'
+
     # -- Quarantine -------------------------------------------------------------
 
     Oronts\AssetPilotBundle\Service\QuarantineService:
@@ -292,6 +296,10 @@ services:
             - { name: 'console.command' }
 
     Oronts\AssetPilotBundle\Command\CheckIntegrityCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\HealAssetsCommand:
         tags:
             - { name: 'console.command' }
 

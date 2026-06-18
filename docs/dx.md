@@ -52,10 +52,12 @@ Every mutation dispatches a typed event you can subscribe to. Constants live on 
 |-------|--------|
 | Move pipeline | `PRE_MOVE`, `POST_MOVE`, `MOVE_FAILED` |
 | Bulk runs | `BULK_STARTED`, `BULK_COMPLETED` |
-| Asset mutations | `ASSET_LOCKED`, `ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED` |
+| Asset mutations | `ASSET_LOCKED`, `ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED`, `QUARANTINED`, `RESTORED` |
+| Integrity heal | `INTEGRITY_PRE_HEAL`, `INTEGRITY_POST_HEAL` |
 
-`PRE_MOVE` can veto or rewrite a move; the rest are notifications carrying the `MoveOperation` /
-`OperationResult` / error. See [Extending — Events](extending.md#events).
+`PRE_MOVE` can veto or rewrite a move and `INTEGRITY_PRE_HEAL` can veto a version rollback; the rest
+are notifications carrying the `MoveOperation` / `OperationResult` / error. See
+[Extending — Events](extending.md#events).
 
 ## Inspect and debug
 

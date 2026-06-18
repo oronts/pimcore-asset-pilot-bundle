@@ -62,6 +62,7 @@ oronts_asset_pilot:
     integrity:
         enabled: true
         skip_extensions: [svg]
+        on_unrecoverable: report   # report | quarantine
 ```
 
 ## Configuration Reference
@@ -86,6 +87,7 @@ oronts_asset_pilot:
 | `quarantine.grace_days` | `int` | `30` | Days a quarantined asset is kept before the purge task may hard-delete it (if still unused) |
 | `integrity.enabled` | `bool` | `true` | Enable broken-asset detection (the `findBroken` scan; explicit `--by-ids`/`?ids` checks ignore this) |
 | `integrity.skip_extensions` | `string[]` | `[svg]` | Extensions skipped during the integrity scan (e.g. `svg`, which the renderer flags noisily) |
+| `integrity.on_unrecoverable` | `enum` | `report` | A broken asset with no renderable version: `report` (log + heal-log row) or `quarantine` (also best-effort quarantine, only if still unused) |
 
 ## Rule Options
 

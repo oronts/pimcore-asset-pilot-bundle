@@ -1,0 +1,97 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Service;
+
+use Doctrine\DBAL\Connection;
+use Psr\Log\LoggerInterface;
+
+/**
+ * The owned record of every integrity heal: what was rolled back, from which version to which, and
+ * the verdict that triggered it. It is the audit trail AND the undo source — undo restores
+ * `from_version` (the pre-heal state), because a version that renders can still be the wrong content.
+ */
+class IntegrityHealLog
+{
+    public const string TABLE = 'asset_pilot_integrity_log';
+
+    public const string STATUS_HEALED = 'healed';
+    public const string STATUS_UNRECOVERABLE = 'unrecoverable';
+    public const string STATUS_UNDONE = 'undone';
+
+    public function __construct(
+        protected readonly Connection $connection,
+        protected readonly LoggerInterface $logger,
+    ) {}
+
+    public function record(int $assetId, ?int $fromVersion, ?int $toVersion, string $checker, string $status): void
+    {
+        try {
+            $this->connection->insert(self::TABLE, [
+                'asset_id' => $assetId,
+                'from_version' => $fromVersion,
+                'to_version' => $toVersion,
+                'checker' => $checker,
+                'status' => $status,
+                'created_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to write integrity heal log: {error}', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * The most recent heal of this asset that can still be undone (a `healed` row carrying the
+     * pre-heal version to roll back to).
+     *
+     * @return array{id: int, from_version: ?int, to_version: ?int}|null
+     */
+    public function findUndoable(int $assetId): ?array
+    {
+        try {
+            $row = $this->connection->createQueryBuilder()
+                ->select('id', 'from_version', 'to_version')
+                ->from(self::TABLE)
+                ->where('asset_id = :assetId')
+                ->andWhere('status = :status')
+                ->andWhere('from_version IS NOT NULL')
+                ->setParameter('assetId', $assetId)
+                ->setParameter('status', self::STATUS_HEALED)
+                ->orderBy('id', 'DESC')
+                ->setMaxResults(1)
+                ->executeQuery()
+                ->fetchAssociative();
+
+            if ($row === false) {
+                return null;
+            }
+
+            return [
+                'id' => (int) $row['id'],
+                'from_version' => $row['from_version'] !== null ? (int) $row['from_version'] : null,
+                'to_version' => $row['to_version'] !== null ? (int) $row['to_version'] : null,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to read integrity heal log: {error}', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    public function markUndone(int $id): void
+    {
+        try {
+            $this->connection->update(self::TABLE, ['status' => self::STATUS_UNDONE], ['id' => $id]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to mark heal {id} undone: {error}', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+}

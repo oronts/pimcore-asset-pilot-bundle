@@ -139,6 +139,28 @@ feature never flags an asset broken just because a tool was missing. Each scanne
 render-tested, so the scan is bounded (`--limit`); use `--by-ids` to check exactly the assets you
 care about. Detection only — rolling back to a working version is a separate, guarded heal.
 
+### Heal Assets (version rollback)
+
+```bash
+# Preview: which broken assets could be rolled back, and to which version (no write)
+bin/console asset-pilot:heal-assets --folder=/Products --dry-run
+
+# Roll broken assets back to their last renderable version
+bin/console asset-pilot:heal-assets --by-ids=1024,1025
+
+# Reverse the most recent heal of specific assets
+bin/console asset-pilot:heal-assets --undo --by-ids=1024
+```
+
+The destructive counterpart to `check-integrity`: for each broken asset it walks versions
+newest-to-oldest, finds the first whose stored binary renders (probed without touching the live
+asset), and restores it. The restore save is LoopGuard-wrapped so it does not re-enter the organize
+pipeline, and every heal is recorded so `--undo` can reverse it (a renderable version can still be
+the wrong content). An asset that is broken with no renderable version is reported (and, when
+`integrity.on_unrecoverable: quarantine`, best-effort quarantined if still unused), never silently
+left. A missing/unsupported render tool yields `unverifiable` and the asset is never healed. Bound
+the run with `--by-ids` or the scan filters plus `--limit`; for a large catalog run it in batches.
+
 ### Quarantine Purge
 
 ```bash

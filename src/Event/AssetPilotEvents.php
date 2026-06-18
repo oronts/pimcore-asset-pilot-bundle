@@ -21,4 +21,7 @@ class AssetPilotEvents
     public const string REVERTED = 'oronts_asset_pilot.reverted';
     public const string QUARANTINED = 'oronts_asset_pilot.quarantined';
     public const string RESTORED = 'oronts_asset_pilot.restored';
+
+    public const string INTEGRITY_PRE_HEAL = 'oronts_asset_pilot.integrity_pre_heal';
+    public const string INTEGRITY_POST_HEAL = 'oronts_asset_pilot.integrity_post_heal';
 }

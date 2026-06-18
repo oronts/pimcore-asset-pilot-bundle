@@ -249,6 +249,11 @@ class Configuration implements ConfigurationInterface
                             ->defaultValue(['svg'])
                             ->info('Extensions skipped during integrity scans (e.g. svg, which render tools handle inconsistently).')
                         ->end()
+                        ->enumNode('on_unrecoverable')
+                            ->values(['report', 'quarantine'])
+                            ->defaultValue('report')
+                            ->info('What to do with a broken asset that has no renderable version: report only (log + heal-log row), or also best-effort quarantine it (only if still unused).')
+                        ->end()
                     ->end()
                 ->end()
             ->end();

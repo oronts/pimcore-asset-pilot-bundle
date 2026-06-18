@@ -40,6 +40,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `quarantine.grace_days` | int | `30` | Days before the purge task may hard-delete a quarantined asset (if still unused) |
 | `integrity.enabled` | bool | `true` | Enable broken-asset integrity detection |
 | `integrity.skip_extensions` | list | `[svg]` | Extensions skipped during integrity scans |
+| `integrity.on_unrecoverable` | enum | `report` | Broken asset with no renderable version: `report` (log only) or `quarantine` (best-effort, unused-only) |
 
 ### Rule options
 
@@ -78,6 +79,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
+| `asset-pilot:heal-assets` | Roll broken assets back to the last renderable version (`--by-ids`, `--dry-run`, `--undo`, scan filters) |
 
 ## REST endpoints
 
@@ -90,6 +92,8 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 | GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
 | POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |
+| POST | `/integrity/heal` | Operate |
+| POST | `/integrity/undo` | Admin |
 | POST | `/organize`, `/organize/bulk` | Operate |
 | POST | `/organize/preview`, `/organize/explain`, `/operations/bulk-preview` | View |
 | POST | `/operations/replay` | Operate |
@@ -112,7 +116,7 @@ Constants on `AssetPilotEvents`. Details in [DX](dx.md#events) and
 
 `PRE_MOVE`, `POST_MOVE`, `MOVE_FAILED`, `BULK_STARTED`, `BULK_COMPLETED`, `ASSET_LOCKED`,
 `ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED`,
-`QUARANTINED`, `RESTORED`.
+`QUARANTINED`, `RESTORED`, `INTEGRITY_PRE_HEAL` (cancellable), `INTEGRITY_POST_HEAL`.
 
 ## Enums
 
