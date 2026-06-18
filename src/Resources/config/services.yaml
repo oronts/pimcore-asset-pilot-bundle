@@ -148,6 +148,12 @@ services:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    # -- Maintenance tasks ------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Maintenance\AuditRetentionTask:
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotAuditRetention' }
+
     # -- Health checks ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\Health\HealthChecker:

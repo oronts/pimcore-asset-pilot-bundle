@@ -196,6 +196,14 @@ All commands can be automated via cron. Example crontab entries:
 # --- Monthly ---
 # Clean up old audit log entries
 0 5 1 * * cd /var/www/html && bin/console asset-pilot:audit --cleanup >> /var/log/asset-pilot.log 2>&1
+```
+
+Audit-log retention also runs automatically as a Pimcore maintenance task (`AuditRetentionTask`,
+registered under `pimcore.maintenance.task`), so it is pruned to `audit.retention_days` on every
+maintenance run without a dedicated cron entry. The cron entry above stays valid for an explicit
+schedule.
+
+```bash
 
 # --- CI/CD ---
 # Validate config after deployments
