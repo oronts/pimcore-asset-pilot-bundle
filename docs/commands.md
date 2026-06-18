@@ -58,6 +58,18 @@ bin/console asset-pilot:rules-diff rules.yaml --fail-on-diff
 The diff classifies each rule as added, removed, changed, or unchanged. `rules-diff` first validates
 the imported rules (reusing `validate-config`) and aborts if any are invalid.
 
+### Rule Overlap
+
+```bash
+# Report rules that compete for the same assets (same class + overlapping fields)
+bin/console asset-pilot:rule-overlap
+```
+
+Static analysis of the rule set only (no catalog scan): for each overlapping pair it shows the
+shared class, the shared fields, and which rule wins by priority. Overlap can be intentional (a
+wildcard fallback alongside specific rules); same-priority overlaps are ambiguous and should be
+re-prioritized. A catalog-wide "what would rule X move" impact report is a separate, async concern.
+
 ### Health Check
 
 ```bash

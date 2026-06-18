@@ -9,7 +9,9 @@ use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Model\RuleOverlap;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
 use Oronts\AssetPilotBundle\Service\RulePortability;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
@@ -25,8 +27,34 @@ class RulesController
         protected readonly AssetOrganizer $assetOrganizer,
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly RulePortability $portability,
+        protected readonly RuleOverlapAnalyzer $overlapAnalyzer,
         protected readonly LoggerInterface $logger,
     ) {}
+
+    #[Route('/rules/overlap', name: 'oronts_asset_pilot_rules_overlap', methods: ['GET'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function overlap(): JsonResponse
+    {
+        try {
+            $overlaps = array_map(static fn (RuleOverlap $overlap): array => [
+                'ruleA' => $overlap->ruleA,
+                'ruleB' => $overlap->ruleB,
+                'class' => $overlap->class,
+                'sharedFields' => $overlap->sharedFields,
+                'higherPriority' => $overlap->higherPriority,
+                'samePriority' => $overlap->samePriority,
+            ], $this->overlapAnalyzer->analyze());
+
+            return new JsonResponse(['overlaps' => $overlaps]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to analyze rule overlap.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to analyze rule overlap.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
 
     #[Route('/rules/export', name: 'oronts_asset_pilot_rules_export', methods: ['GET'], priority: 1)]
     #[IsGranted(AssetPilotPermission::View->value)]
