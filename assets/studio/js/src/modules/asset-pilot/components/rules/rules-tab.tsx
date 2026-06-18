@@ -2,9 +2,12 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRules } from '../../hooks/use-asset-pilot-api'
 import type { RuleData } from '../../types'
+import { assetPilotApi } from '../../services/api'
+import { useToast } from '../../hooks/use-toast'
 import { StrategyTag } from '../shared/status-tag'
 import { RuleDetailModal } from './rule-detail-modal'
 import { RulePreviewModal } from './rule-preview-modal'
+import { RuleOverlapPanel } from './rule-overlap-panel'
 import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
@@ -26,7 +29,9 @@ const cols: ColumnConfig[] = [
 
 export const RulesTab: React.FC = () => {
   const { t } = useTranslation()
+  const toast = useToast()
   const { data: rules, loading, error, refetch } = useRules()
+  const [exporting, setExporting] = useState(false)
   const [detailRule, setDetailRule] = useState<string | null>(null)
   const [previewRule, setPreviewRule] = useState<string | null>(null)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -55,13 +60,29 @@ export const RulesTab: React.FC = () => {
     })
   }
 
+  const handleExport = async (): Promise<void> => {
+    setExporting(true)
+    try {
+      await assetPilotApi.exportRules()
+    } catch {
+      toast.error(t('asset-pilot.rules.export.failed'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const sorted = sortedData(rules)
 
   return (
     <div ref={containerRef}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.rules.configured', { count: rules.length })}</h4>
+        <button onClick={handleExport} disabled={exporting} style={btnStyle}>
+          {exporting ? t('asset-pilot.common.loading') : t('asset-pilot.rules.export.button')}
+        </button>
       </div>
+
+      <RuleOverlapPanel />
 
       <ResponsiveTableWrapper>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

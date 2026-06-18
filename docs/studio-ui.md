@@ -6,9 +6,9 @@ Asset Pilot integrates into Pimcore Studio as a Module Federation remote. The UI
 
 | Tab | Description |
 |-----|-------------|
-| **Dashboard** | Statistics overview (organized, pending, failed, skipped counts), class breakdown table, recent operations list |
-| **Rules** | View all configured rules with priority, strategy, target path. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. |
-| **Operations** | Single object organize (with dry-run, async, and explain modes). Bulk organize by class with paginated preview and "Organize All" button. System status with refresh. |
+| **Dashboard** | Statistics overview (organized, pending, failed, skipped counts), a health panel (audit table, rule config, shared cache, async transport), class breakdown table, recent operations list |
+| **Rules** | View all configured rules with priority, strategy, target path. Export the rule set as a portable artifact. An overlap panel warns about rules competing for the same assets. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. |
+| **Operations** | Single object organize (with dry-run, async, and explain modes). Bulk organize by class with paginated preview and "Organize All" button. Replay failed operations (Operate permission). System status with refresh. |
 | **Audit Log** | Full operation history with sorting. Filter by class, status, and rule name. CSV export. Revert individual operations. |
 | **Unused Assets** | Confidence-scored unused asset list with color-coded badges. Filter by type, extensions, date range, folder, and confidence level. Bulk delete or move selected assets. Filter presets. |
 | **Asset Management** | Search assets by filename/path, filter by type, folder, or Object ID. Lock/unlock assets. Bulk assign tags. Bulk set custom properties. Sortable columns with pagination. |

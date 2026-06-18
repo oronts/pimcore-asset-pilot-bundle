@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
-import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters } from '../types'
+import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse } from '../types'
 
 interface AsyncState<T> {
   data: T | null
@@ -39,6 +39,14 @@ export function useDashboard(): AsyncState<DashboardData> {
 
 export function useRules(): AsyncState<RuleData[]> {
   return useAsyncData(() => assetPilotApi.getRules())
+}
+
+export function useHealth(): AsyncState<HealthReport> {
+  return useAsyncData(() => assetPilotApi.getHealth())
+}
+
+export function useRuleOverlap(): AsyncState<RuleOverlapResponse> {
+  return useAsyncData(() => assetPilotApi.getRuleOverlap())
 }
 
 export function useRuleDetail(name: string | null): AsyncState<RuleDetail> {

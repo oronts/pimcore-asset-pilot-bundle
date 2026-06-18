@@ -232,3 +232,51 @@ export interface AssetSearchFilters {
   sort?: string
   order?: 'asc' | 'desc'
 }
+
+export type HealthStatus = 'ok' | 'warning' | 'critical'
+
+export interface HealthCheckItem {
+  name: string
+  status: HealthStatus
+  message: string
+  details?: Record<string, unknown>
+}
+
+export interface HealthReport {
+  status: HealthStatus
+  checks: HealthCheckItem[]
+}
+
+export interface RuleOverlapItem {
+  ruleA: string
+  ruleB: string
+  class: string
+  sharedFields: string[]
+  higherPriority: string | null
+  samePriority: boolean
+}
+
+export interface RuleOverlapResponse {
+  overlaps: RuleOverlapItem[]
+}
+
+export interface RulesExportArtifact {
+  format_version: number
+  rules: Record<string, Record<string, unknown>>
+}
+
+export interface ReplayParams {
+  since?: string
+  rule?: string
+  class?: string
+  async?: boolean
+  limit?: number
+}
+
+export interface ReplaySummary {
+  candidates: number
+  organized: number
+  dispatched: number
+  skipped: number
+  failed: number
+}

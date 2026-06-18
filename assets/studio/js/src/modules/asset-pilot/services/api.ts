@@ -19,6 +19,11 @@ import type {
   BulkActionResult,
   TagItem,
   AssetSearchFilters,
+  HealthReport,
+  RuleOverlapResponse,
+  RulesExportArtifact,
+  ReplayParams,
+  ReplaySummary,
 } from '../types'
 
 const BASE_URL = '/pimcore-studio/api/asset-pilot'
@@ -58,9 +63,23 @@ export const assetPilotApi = {
   getDashboard: () => request<DashboardData>('/dashboard'),
   getClassStats: () => request<ClassStat[]>('/dashboard/class-stats'),
 
+  // Health
+  getHealth: () => request<HealthReport>('/health'),
+
   // Rules
   getRules: () => request<RuleData[]>('/rules'),
   getRuleDetail: (name: string) => request<RuleDetail>(`/rules/${encodeURIComponent(name)}`),
+  getRuleOverlap: () => request<RuleOverlapResponse>('/rules/overlap'),
+  exportRules: async (): Promise<void> => {
+    const artifact = await request<RulesExportArtifact>('/rules/export')
+    const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'asset-pilot-rules.json'
+    link.click()
+    URL.revokeObjectURL(url)
+  },
   previewRule: (name: string, objectId: number) =>
     request<unknown[]>(`/rules/${encodeURIComponent(name)}/preview?objectId=${objectId}`),
   applyRule: (name: string, objectId: number) =>
@@ -91,6 +110,11 @@ export const assetPilotApi = {
       body: JSON.stringify({ className, page, limit }),
     }),
   getStatus: () => request<{ stats: Record<string, number | Record<string, number>>; recentOperations: AuditEntry[] }>('/operations/status'),
+  replayFailures: (params: ReplayParams = {}) =>
+    request<ReplaySummary>('/operations/replay', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
 
   // Audit
   getAudit: (filters: AuditFilters = {}) =>

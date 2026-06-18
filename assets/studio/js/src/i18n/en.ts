@@ -31,6 +31,34 @@ export const en: Record<string, string> = {
   'asset-pilot.common.page-info': 'page {{page}}/{{pages}}',
   'asset-pilot.common.no-data': 'No data available',
 
+  // Health (F7)
+  'asset-pilot.health.title': 'Health',
+  'asset-pilot.health.checking': 'Running health checks...',
+  'asset-pilot.health.status.ok': 'OK',
+  'asset-pilot.health.status.warning': 'Warning',
+  'asset-pilot.health.status.critical': 'Critical',
+  'asset-pilot.health.check.audit_table': 'Audit table',
+  'asset-pilot.health.check.rule_config': 'Rule configuration',
+  'asset-pilot.health.check.shared_cache': 'Shared cache',
+  'asset-pilot.health.check.async_transport': 'Async transport',
+
+  // Rule export + overlap (F12 / F8)
+  'asset-pilot.rules.export.button': 'Export rules',
+  'asset-pilot.rules.export.failed': 'Failed to export rules.',
+  'asset-pilot.rules.overlap.title': '{{count}} overlapping rule pair(s)',
+  'asset-pilot.rules.overlap.ambiguous': 'ambiguous (same priority)',
+  'asset-pilot.rules.overlap.winner': '{{rule}} wins',
+
+  // Failure replay (F6)
+  'asset-pilot.replay.title': 'Replay Failures',
+  'asset-pilot.replay.desc': 'Re-run the objects whose organization failed. Re-organizing is idempotent: already-placed assets are skipped.',
+  'asset-pilot.replay.async': 'Queue via the messenger worker (recommended)',
+  'asset-pilot.replay.button': 'Replay failed operations',
+  'asset-pilot.replay.queued': 'Queued {{count}} object(s) for re-organization.',
+  'asset-pilot.replay.done': 'Re-organized {{count}} object(s).',
+  'asset-pilot.replay.partial': 'Re-organized {{organized}}, {{failed}} failed again.',
+  'asset-pilot.replay.failed': 'Failed to replay operations.',
+
   // Column headers (shared across tabs)
   'asset-pilot.columns.id': 'ID',
   'asset-pilot.columns.asset': 'Asset',

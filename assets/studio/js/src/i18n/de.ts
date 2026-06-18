@@ -31,6 +31,34 @@ export const de: Record<string, string> = {
   'asset-pilot.common.page-info': 'Seite {{page}}/{{pages}}',
   'asset-pilot.common.no-data': 'Keine Daten verfügbar',
 
+  // Health (F7)
+  'asset-pilot.health.title': 'Zustand',
+  'asset-pilot.health.checking': 'Health-Checks laufen...',
+  'asset-pilot.health.status.ok': 'OK',
+  'asset-pilot.health.status.warning': 'Warnung',
+  'asset-pilot.health.status.critical': 'Kritisch',
+  'asset-pilot.health.check.audit_table': 'Audit-Tabelle',
+  'asset-pilot.health.check.rule_config': 'Regelkonfiguration',
+  'asset-pilot.health.check.shared_cache': 'Geteilter Cache',
+  'asset-pilot.health.check.async_transport': 'Async-Transport',
+
+  // Rule export + overlap (F12 / F8)
+  'asset-pilot.rules.export.button': 'Regeln exportieren',
+  'asset-pilot.rules.export.failed': 'Export der Regeln fehlgeschlagen.',
+  'asset-pilot.rules.overlap.title': '{{count}} überlappende(s) Regelpaar(e)',
+  'asset-pilot.rules.overlap.ambiguous': 'mehrdeutig (gleiche Priorität)',
+  'asset-pilot.rules.overlap.winner': '{{rule}} gewinnt',
+
+  // Failure replay (F6)
+  'asset-pilot.replay.title': 'Fehler erneut ausführen',
+  'asset-pilot.replay.desc': 'Objekte, deren Organisation fehlschlug, erneut ausführen. Die erneute Organisation ist idempotent: bereits platzierte Assets werden übersprungen.',
+  'asset-pilot.replay.async': 'Über den Messenger-Worker einreihen (empfohlen)',
+  'asset-pilot.replay.button': 'Fehlgeschlagene Operationen erneut ausführen',
+  'asset-pilot.replay.queued': '{{count}} Objekt(e) zur erneuten Organisation eingereiht.',
+  'asset-pilot.replay.done': '{{count}} Objekt(e) erneut organisiert.',
+  'asset-pilot.replay.partial': '{{organized}} erneut organisiert, {{failed}} erneut fehlgeschlagen.',
+  'asset-pilot.replay.failed': 'Erneute Ausführung fehlgeschlagen.',
+
   // Column headers
   'asset-pilot.columns.id': 'ID',
   'asset-pilot.columns.asset': 'Asset',

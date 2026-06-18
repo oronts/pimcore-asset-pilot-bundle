@@ -4,6 +4,7 @@ import { useDashboard, useClassStats } from '../../hooks/use-asset-pilot-api'
 import { StatCard } from './stat-card'
 import { ClassBreakdownTable } from './class-breakdown-table'
 import { RecentOperationsTable } from './recent-operations-table'
+import { HealthPanel } from './health-panel'
 import { CardSkeleton } from '../shared/skeleton/card-skeleton'
 import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 
@@ -45,6 +46,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToAudit })
         <StatCard label={t('asset-pilot.dashboard.failed')} value={dashboard.totalFailed} color="#ff4d4f" />
         <StatCard label={t('asset-pilot.dashboard.skipped')} value={dashboard.totalSkipped} color="#8c8c8c" />
         <StatCard label={t('asset-pilot.dashboard.rules')} value={dashboard.rulesCount} color="#1677ff" />
+      </div>
+
+      <div style={{ marginBottom: 28 }}>
+        <HealthPanel />
       </div>
 
       <div style={{ marginBottom: 28 }}>
