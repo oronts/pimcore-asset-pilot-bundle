@@ -78,6 +78,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
 | `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
+| `asset-pilot:find-duplicates` | Report byte-identical assets (`--scan` to build the hash index, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:heal-assets` | Roll broken assets back to the last renderable version (`--by-ids`, `--dry-run`, `--undo`, scan filters) |
 
@@ -88,7 +89,7 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity` | View |
+| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity`, `/duplicates` | View |
 | GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
 | POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |

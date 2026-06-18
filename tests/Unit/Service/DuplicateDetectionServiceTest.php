@@ -1,0 +1,171 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
+
+use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Pimcore\Model\Asset;
+use Psr\Log\NullLogger;
+
+#[CoversClass(DuplicateDetectionService::class)]
+class DuplicateDetectionServiceTest extends TestCase
+{
+    private function asset(int $id, bool $folder = false): Asset
+    {
+        $asset = $this->createMock($folder ? Asset\Folder::class : Asset::class);
+        $asset->method('getId')->willReturn($id);
+
+        return $asset;
+    }
+
+    /**
+     * @param list<int>             $idsToScan
+     * @param array<int, ?Asset>    $assetsById
+     * @param array<int, string>    $checksumById
+     * @param array<int, int>       $sizeById
+     * @param \ArrayObject<int, array{0:int,1:string,2:int}> $upserts
+     * @param list<array{checksum: string, file_size: int, cnt: int}> $duplicateRows
+     * @param array<string, list<int>> $idsByChecksum
+     */
+    private function service(
+        array $idsToScan = [],
+        array $assetsById = [],
+        array $checksumById = [],
+        array $sizeById = [],
+        ?\ArrayObject $upserts = null,
+        array $duplicateRows = [],
+        array $idsByChecksum = [],
+    ): DuplicateDetectionService {
+        $upserts ??= new \ArrayObject();
+
+        return new class ($idsToScan, $assetsById, $checksumById, $sizeById, $upserts, $duplicateRows, $idsByChecksum) extends DuplicateDetectionService {
+            /**
+             * @param list<int>          $idsToScan
+             * @param array<int, ?Asset> $assetsById
+             * @param array<int, string> $checksumById
+             * @param array<int, int>    $sizeById
+             * @param \ArrayObject<int, array{0:int,1:string,2:int}> $upserts
+             * @param list<array{checksum: string, file_size: int, cnt: int}> $duplicateRows
+             * @param array<string, list<int>> $idsByChecksum
+             */
+            public function __construct(
+                private readonly array $idsToScan,
+                private readonly array $assetsById,
+                private readonly array $checksumById,
+                private readonly array $sizeById,
+                private readonly \ArrayObject $upserts,
+                private readonly array $duplicateRows,
+                private readonly array $idsByChecksum,
+            ) {
+                parent::__construct(
+                    (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(),
+                    new NullLogger(),
+                );
+            }
+
+            protected function listAssetIds(array $filters, int $offset, int $limit): array
+            {
+                return array_slice($this->idsToScan, $offset, $limit);
+            }
+
+            protected function loadAsset(int $id): ?Asset
+            {
+                return $this->assetsById[$id] ?? null;
+            }
+
+            protected function checksumOf(Asset $asset): string
+            {
+                return $this->checksumById[(int) $asset->getId()] ?? '';
+            }
+
+            protected function fileSizeOf(Asset $asset): int
+            {
+                return $this->sizeById[(int) $asset->getId()] ?? 0;
+            }
+
+            protected function upsert(int $assetId, string $checksum, int $fileSize): void
+            {
+                $this->upserts->append([$assetId, $checksum, $fileSize]);
+            }
+
+            protected function fetchDuplicateRows(int $offset, int $limit): array
+            {
+                return array_slice($this->duplicateRows, $offset, $limit);
+            }
+
+            protected function assetIdsForChecksum(string $checksum, int $cap): array
+            {
+                return array_slice($this->idsByChecksum[$checksum] ?? [], 0, $cap);
+            }
+        };
+    }
+
+    #[Test]
+    public function indexHashesEachAssetAndUpsertsIt(): void
+    {
+        $upserts = new \ArrayObject();
+        $stats = $this->service(
+            idsToScan: [1, 2],
+            assetsById: [1 => $this->asset(1), 2 => $this->asset(2)],
+            checksumById: [1 => 'aaa', 2 => 'bbb'],
+            sizeById: [1 => 10, 2 => 20],
+            upserts: $upserts,
+        )->index();
+
+        self::assertSame(['scanned' => 2, 'indexed' => 2, 'skipped' => 0], $stats);
+        self::assertSame([[1, 'aaa', 10], [2, 'bbb', 20]], $upserts->getArrayCopy());
+    }
+
+    #[Test]
+    public function indexSkipsFoldersMissingAndUnhashableAssets(): void
+    {
+        $upserts = new \ArrayObject();
+        $stats = $this->service(
+            idsToScan: [1, 2, 3, 4],
+            assetsById: [1 => $this->asset(1), 2 => $this->asset(2, folder: true), 4 => $this->asset(4)],
+            checksumById: [1 => 'aaa', 4 => ''], // id 3 missing; id 4 unhashable
+            sizeById: [1 => 10],
+            upserts: $upserts,
+        )->index();
+
+        self::assertSame(['scanned' => 4, 'indexed' => 1, 'skipped' => 3], $stats);
+        self::assertSame([[1, 'aaa', 10]], $upserts->getArrayCopy());
+    }
+
+    #[Test]
+    public function indexIsBoundedByTheLimit(): void
+    {
+        $stats = $this->service(
+            idsToScan: [1, 2, 3, 4, 5],
+            assetsById: array_map(fn (int $id): Asset => $this->asset($id), array_combine([1, 2, 3, 4, 5], [1, 2, 3, 4, 5])),
+            checksumById: [1 => 'a', 2 => 'b', 3 => 'c', 4 => 'd', 5 => 'e'],
+        )->index(limit: 2);
+
+        self::assertSame(2, $stats['scanned']);
+        self::assertSame(2, $stats['indexed']);
+    }
+
+    #[Test]
+    public function findDuplicatesMapsGroupedRowsToDuplicateGroups(): void
+    {
+        $groups = $this->service(
+            duplicateRows: [
+                ['checksum' => 'aaa', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'bbb', 'file_size' => 40, 'cnt' => 2],
+            ],
+            idsByChecksum: ['aaa' => [1, 2, 3], 'bbb' => [7, 8]],
+        )->findDuplicates();
+
+        self::assertCount(2, $groups);
+        self::assertSame('aaa', $groups[0]->checksum);
+        self::assertSame(10, $groups[0]->fileSize);
+        self::assertSame(3, $groups[0]->count);
+        self::assertSame([1, 2, 3], $groups[0]->assetIds);
+        self::assertSame([7, 8], $groups[1]->assetIds);
+    }
+}

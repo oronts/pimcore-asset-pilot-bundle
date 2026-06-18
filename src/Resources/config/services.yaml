@@ -303,6 +303,10 @@ services:
         tags:
             - { name: 'console.command' }
 
+    Oronts\AssetPilotBundle\Command\FindDuplicatesCommand:
+        tags:
+            - { name: 'console.command' }
+
     # -- Messenger handlers (autoconfigure handles #[AsMessageHandler]) ---------
 
     Oronts\AssetPilotBundle\MessageHandler\OrganizeAssetsHandler:

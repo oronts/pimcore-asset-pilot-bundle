@@ -17,6 +17,7 @@ class Installer extends SettingsStoreAwareInstaller
     public const string TABLE_AUDIT_LOG = 'asset_pilot_audit_log';
     public const string TABLE_QUARANTINE = 'asset_pilot_quarantine';
     public const string TABLE_INTEGRITY_LOG = 'asset_pilot_integrity_log';
+    public const string TABLE_CHECKSUM = 'asset_pilot_checksum';
 
     public function __construct(
         BundleInterface $bundle,
@@ -36,6 +37,7 @@ class Installer extends SettingsStoreAwareInstaller
         $this->ensureTable($schema, self::TABLE_AUDIT_LOG, self::auditColumns(), self::auditIndexes());
         $this->ensureTable($schema, self::TABLE_QUARANTINE, self::quarantineColumns(), self::quarantineIndexes(), self::quarantineUniqueIndexes());
         $this->ensureTable($schema, self::TABLE_INTEGRITY_LOG, self::integrityLogColumns(), self::integrityLogIndexes());
+        $this->ensureTable($schema, self::TABLE_CHECKSUM, self::checksumColumns(), self::checksumIndexes(), self::checksumUniqueIndexes());
 
         $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
 
@@ -56,7 +58,7 @@ class Installer extends SettingsStoreAwareInstaller
         $currentSchema = $schemaManager->introspectSchema();
         $schema = clone $currentSchema;
 
-        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG] as $tableName) {
+        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG, self::TABLE_CHECKSUM] as $tableName) {
             if ($schema->hasTable($tableName)) {
                 $schema->dropTable($tableName);
             }
@@ -221,6 +223,43 @@ class Installer extends SettingsStoreAwareInstaller
         return [
             'idx_integrity_asset' => ['asset_id'],
             'idx_integrity_asset_status' => ['asset_id', 'status'],
+        ];
+    }
+
+    /**
+     * The owned content-hash index: one row per scanned asset. asset_id is the PK (one hash per
+     * asset); the checksum index backs the duplicate GROUP BY and per-group lookup.
+     *
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    protected static function checksumColumns(): array
+    {
+        return [
+            ['id', 'integer', ['autoincrement' => true, 'notnull' => true]],
+            ['asset_id', 'integer', ['notnull' => true]],
+            ['checksum', 'string', ['length' => 64, 'notnull' => true]],
+            ['file_size', 'bigint', ['notnull' => true]],
+            ['indexed_at', 'datetime', ['notnull' => true]],
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    protected static function checksumIndexes(): array
+    {
+        return [
+            'idx_checksum' => ['checksum'],
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    protected static function checksumUniqueIndexes(): array
+    {
+        return [
+            'uniq_checksum_asset' => ['asset_id'],
         ];
     }
 

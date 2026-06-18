@@ -139,6 +139,27 @@ feature never flags an asset broken just because a tool was missing. Each scanne
 render-tested, so the scan is bounded (`--limit`); use `--by-ids` to check exactly the assets you
 care about. Detection only — rolling back to a working version is a separate, guarded heal.
 
+### Find Duplicates
+
+```bash
+# Build/refresh the content-hash index for a folder, then report byte-identical assets
+bin/console asset-pilot:find-duplicates --scan --folder=/Products --limit=5000
+
+# Report duplicates from the existing index (no scan)
+bin/console asset-pilot:find-duplicates
+```
+
+Pimcore stores no checksum or filesize column on the `assets` table, so there is no SQL `GROUP BY
+hash` to run against it. `--scan` populates an owned index (asset id, content hash, size) via a
+bounded, paged pass (capped by `--limit`; reusing Pimcore's stream-hashed MD5, folders and
+unhashable assets skipped). Reporting is then a single indexed `GROUP BY` over that index, so it
+never re-hashes the catalog and never blocks. For a whole catalog, run `--scan` in batches (raise
+`--limit`, or scan per `--folder`). Detection only; merging duplicates (re-pointing references,
+deleting the copy) is a separate, guarded step.
+
+The index is a snapshot from the last `--scan`: an asset deleted or re-uploaded afterwards stays
+listed (or stale) until the next scan, so re-scan or verify an id before acting on it.
+
 ### Heal Assets (version rollback)
 
 ```bash
