@@ -371,6 +371,43 @@ class AuditLogger implements AuditLoggerInterface
         }
     }
 
+    public function getDistinctFailedObjects(array $filters = [], int $limit = 100): array
+    {
+        try {
+            $qb = $this->connection->createQueryBuilder()
+                ->select('object_id, object_class, COUNT(*) as failures')
+                ->from(self::TABLE_NAME)
+                ->where('status = :status')
+                ->setParameter('status', OperationStatus::Failed->value)
+                ->groupBy('object_id, object_class')
+                ->orderBy('failures', 'DESC')
+                ->setMaxResults(max(1, $limit));
+
+            if (!empty($filters['since'])) {
+                $qb->andWhere('created_at >= :since')->setParameter('since', $filters['since']);
+            }
+            if (!empty($filters['rule_name'])) {
+                $qb->andWhere('rule_name = :rule')->setParameter('rule', $filters['rule_name']);
+            }
+            if (!empty($filters['object_class'])) {
+                $qb->andWhere('object_class = :class')->setParameter('class', $filters['object_class']);
+            }
+
+            return array_map(static fn (array $row): array => [
+                'object_id' => (int) $row['object_id'],
+                'object_class' => (string) $row['object_class'],
+                'failures' => (int) $row['failures'],
+            ], $qb->executeQuery()->fetchAllAssociative());
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to read failed-operation objects: {error}', [
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            return [];
+        }
+    }
+
     public function cleanup(int $retentionDays): int
     {
         $this->logger->info('Asset Pilot: starting audit cleanup for entries older than {days} days', [

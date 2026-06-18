@@ -70,6 +70,20 @@ shared class, the shared fields, and which rule wins by priority. Overlap can be
 wildcard fallback alongside specific rules); same-priority overlaps are ambiguous and should be
 re-prioritized. A catalog-wide "what would rule X move" impact report is a separate, async concern.
 
+### Replay Failures
+
+```bash
+# Re-run every object whose organization failed (idempotent: already-placed assets skip)
+bin/console asset-pilot:replay-failures
+
+# Scope by time, rule, or class; queue via Messenger; cap the candidate set
+bin/console asset-pilot:replay-failures --since="-7 days" --rule=product_images --async --limit=200
+```
+
+Reads the distinct failed objects from the audit log (bounded by `--limit`, grouped per object so a
+flood of failures is not an unbounded scan) and re-organizes each. `--async` queues an organize
+message per object instead of running inline. Exits non-zero if any inline re-organize fails again.
+
 ### Health Check
 
 ```bash

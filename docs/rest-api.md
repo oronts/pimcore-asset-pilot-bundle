@@ -22,6 +22,7 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | `POST` | `/organize/explain` | View | Detailed rule evaluation per asset |
 | `POST` | `/organize/bulk` | Operate | Bulk organize by class or IDs |
 | `POST` | `/operations/bulk-preview` | View | Paginated bulk preview |
+| `POST` | `/operations/replay` | Operate | Re-run failed objects (`{since?, rule?, class?, async?, limit?}`) |
 | `GET` | `/operations/status` | View | Operation statistics |
 
 #### Organize request body

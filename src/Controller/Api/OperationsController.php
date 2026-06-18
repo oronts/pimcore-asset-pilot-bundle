@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
@@ -36,9 +37,44 @@ class OperationsController
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
+        protected readonly FailureReplayService $failureReplay,
         protected readonly LoggerInterface $logger,
         protected readonly int $defaultBatchSize = 50,
     ) {}
+
+    #[Route('/operations/replay', name: 'oronts_asset_pilot_operations_replay', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function replay(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent() ?: '{}', true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+        if (!is_array($data)) {
+            $data = [];
+        }
+
+        $since = isset($data['since']) ? strtotime((string) $data['since']) : false;
+        $filters = array_filter([
+            'since' => $since !== false ? date('Y-m-d H:i:s', $since) : null,
+            'rule_name' => $data['rule'] ?? null,
+            'object_class' => $data['class'] ?? null,
+        ], static fn ($value): bool => $value !== null);
+
+        $async = (bool) ($data['async'] ?? false);
+        $limit = isset($data['limit']) ? max(1, (int) $data['limit']) : null;
+
+        $result = $this->failureReplay->replay($filters, $async, $limit);
+
+        return new JsonResponse([
+            'candidates' => $result->candidates,
+            'organized' => $result->organized,
+            'dispatched' => $result->dispatched,
+            'skipped' => $result->skipped,
+            'failed' => $result->failed,
+        ], $async ? Response::HTTP_ACCEPTED : Response::HTTP_OK);
+    }
 
     #[Route('/organize/explain', name: 'oronts_asset_pilot_organize_explain', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::View->value)]

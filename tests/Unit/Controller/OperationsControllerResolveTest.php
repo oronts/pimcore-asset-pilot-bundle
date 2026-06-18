@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Controller\Api\OperationsController;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -30,6 +31,7 @@ class OperationsControllerResolveTest extends TestCase
             $this->createMock(AuditLogger::class),
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
+            $this->createMock(FailureReplayService::class),
             new NullLogger(),
         ) extends OperationsController {
             public ?AbstractObject $stub = null;

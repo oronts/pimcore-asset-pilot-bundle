@@ -39,6 +39,14 @@ interface AuditLoggerInterface
     public function getClassBreakdown(): array;
 
     /**
+     * Distinct objects whose organization failed, newest-failure-heaviest first, for failure replay.
+     *
+     * @param array{since?: string, rule_name?: string, object_class?: string} $filters
+     * @return array<int, array{object_id: int, object_class: string, failures: int}>
+     */
+    public function getDistinctFailedObjects(array $filters = [], int $limit = 100): array;
+
+    /**
      * @param array<string, mixed> $filters
      * @return array{items: array<int, array<string, mixed>>, total: int, page: int, pages: int}
      */
