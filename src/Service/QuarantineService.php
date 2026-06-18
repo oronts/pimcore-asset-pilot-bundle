@@ -32,6 +32,7 @@ class QuarantineService
         protected readonly LoggerInterface $logger,
         protected readonly string $quarantineFolder = '/Quarantine',
         protected readonly int $graceDays = 30,
+        protected readonly ?ContentUsageScanner $contentScanner = null,
     ) {}
 
     /**
@@ -73,6 +74,12 @@ class QuarantineService
                 // Re-verify it is still unused (it may have been referenced since the listing).
                 if ($this->unusedAssetFinder->isReferenced($assetId)) {
                     $errors[$assetId] = 'Asset is now referenced by an object';
+                    ++$failed;
+                    continue;
+                }
+                // Quarantining moves the asset, which would break a hard-coded path reference in content.
+                if ($this->isReferencedInContent($asset)) {
+                    $errors[$assetId] = 'Asset is referenced in object content (text/WYSIWYG)';
                     ++$failed;
                     continue;
                 }
@@ -219,6 +226,13 @@ class QuarantineService
                     continue;
                 }
 
+                // A reference may have been hard-coded into content while quarantined; never hard-delete then.
+                if ($this->isReferencedInContent($asset)) {
+                    ++$skipped;
+                    $this->logger->warning('Asset Pilot: quarantined asset {id} is referenced in content; not purging.', ['id' => $assetId]);
+                    continue;
+                }
+
                 if (!$asset->isAllowed('delete')) {
                     ++$skipped;
                     continue;
@@ -251,6 +265,15 @@ class QuarantineService
         }
 
         return ['purged' => $purged, 'skipped' => $skipped, 'failed' => $failed];
+    }
+
+    /**
+     * Optional content-reference guard (opt-in, null when not configured): a hard-coded path
+     * reference in rich-text/text fields that the dependency table does not track.
+     */
+    private function isReferencedInContent(Asset $asset): bool
+    {
+        return $this->contentScanner?->isReferencedInContent($asset) === true;
     }
 
     protected function moveGuarded(Asset $asset, int $assetId, callable $mutate): void

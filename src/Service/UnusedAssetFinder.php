@@ -30,6 +30,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         private readonly ConfidenceScorerInterface $scorer,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
+        private readonly ?ContentUsageScanner $contentScanner = null,
     ) {}
 
     /**
@@ -236,6 +237,12 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                     continue;
                 }
 
+                if ($this->isReferencedInContent($asset)) {
+                    $errors[$id] = 'Asset is referenced in object content (text/WYSIWYG)';
+                    $failed++;
+                    continue;
+                }
+
                 $asset->delete();
                 $deletedIds[] = $id;
 
@@ -309,6 +316,13 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                     continue;
                 }
 
+                // Moving changes the path, which would break a hard-coded path reference in content.
+                if ($this->isReferencedInContent($asset)) {
+                    $errors[$id] = 'Asset is referenced in object content (text/WYSIWYG)';
+                    $failed++;
+                    continue;
+                }
+
                 $asset->setParent($folder);
                 $asset->save();
                 $movedIds[] = $id;
@@ -346,6 +360,15 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             ))
             ->setParameter('notFolderType', PimcoreSchema::ASSET_TYPE_FOLDER)
             ->setParameter('assetType', PimcoreSchema::ELEMENT_TYPE_ASSET);
+    }
+
+    /**
+     * Optional content-reference guard (opt-in, null when not configured): catches a hard-coded path
+     * reference in rich-text/text fields that the dependency table does not track.
+     */
+    private function isReferencedInContent(Asset $asset): bool
+    {
+        return $this->contentScanner?->isReferencedInContent($asset) === true;
     }
 
     public function isReferenced(int $assetId): bool

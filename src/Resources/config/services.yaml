@@ -154,6 +154,11 @@ services:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    Oronts\AssetPilotBundle\Service\ContentUsageScanner:
+        arguments:
+            $classes: '%oronts_asset_pilot.content_scan.classes%'
+            $enabled: '%oronts_asset_pilot.content_scan.enabled%'
+
     # -- Integrity (broken-asset detection) -------------------------------------
 
     Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker:

@@ -44,6 +44,7 @@ class Configuration implements ConfigurationInterface
         $this->addConfidenceSection($rootNode);
         $this->addQuarantineSection($rootNode);
         $this->addIntegritySection($rootNode);
+        $this->addContentScanSection($rootNode);
 
         return $treeBuilder;
     }
@@ -253,6 +254,28 @@ class Configuration implements ConfigurationInterface
                             ->values(['report', 'quarantine'])
                             ->defaultValue('report')
                             ->info('What to do with a broken asset that has no renderable version: report only (log + heal-log row), or also best-effort quarantine it (only if still unused).')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addContentScanSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('content_scan')
+                    ->addDefaultsIfNotSet()
+                    ->info('Opt-in guard: before deleting/moving an "unused" asset, also scan rich-text/text fields of these classes for a hard-coded reference to its path (which the dependency table misses).')
+                    ->children()
+                        ->booleanNode('enabled')
+                            ->defaultFalse()
+                            ->info('Enable the content-reference delete/move guard.')
+                        ->end()
+                        ->arrayNode('classes')
+                            ->scalarPrototype()->end()
+                            ->defaultValue([])
+                            ->info('DataObject class names whose wysiwyg/textarea/input fields are scanned. Empty = the guard is inert.')
                         ->end()
                     ->end()
                 ->end()

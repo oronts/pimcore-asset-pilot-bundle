@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
@@ -29,6 +30,7 @@ class QuarantineServiceTest extends TestCase
         bool $isReferenced = false,
         bool $allowCreate = true,
         array $expiredIds = [],
+        ?ContentUsageScanner $contentScanner = null,
     ): object {
         $finder = $this->createMock(UnusedAssetFinderInterface::class);
         $finder->method('isReferenced')->willReturn($isReferenced);
@@ -43,15 +45,16 @@ class QuarantineServiceTest extends TestCase
             $originalPaths,
             $allowCreate,
             $expiredIds,
+            $contentScanner,
         ) extends QuarantineService {
             public array $recorded = [];
             public array $removed = [];
             public array $deleted = [];
 
             /** @param array<int, ?Asset> $assetsById @param array<int, ?string> $originalPaths @param list<int> $expiredIds */
-            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private bool $allowCreate, private array $expiredIds)
+            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private bool $allowCreate, private array $expiredIds, ?ContentUsageScanner $scanner)
             {
-                parent::__construct($c, $lg, $f, $ed, $log);
+                parent::__construct($c, $lg, $f, $ed, $log, contentScanner: $scanner);
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -127,6 +130,36 @@ class QuarantineServiceTest extends TestCase
         self::assertSame(0, $result['quarantined']);
         self::assertSame(1, $result['failed']);
         self::assertArrayNotHasKey(1, $service->recorded);
+    }
+
+    #[Test]
+    public function skipsAssetsReferencedInContent(): void
+    {
+        $scanner = $this->createMock(ContentUsageScanner::class);
+        $scanner->method('isReferencedInContent')->willReturn(true);
+
+        $service = $this->service([1 => $this->asset('/Products/a.jpg')], contentScanner: $scanner);
+
+        $result = $service->quarantine([1]);
+
+        self::assertSame(0, $result['quarantined']);
+        self::assertSame(1, $result['failed']);
+        self::assertArrayNotHasKey(1, $service->recorded);
+    }
+
+    #[Test]
+    public function purgeSkipsAssetsReferencedInContent(): void
+    {
+        $scanner = $this->createMock(ContentUsageScanner::class);
+        $scanner->method('isReferencedInContent')->willReturn(true);
+
+        $service = $this->service([1 => $this->asset('/Products/a.jpg')], expiredIds: [1], contentScanner: $scanner);
+
+        $result = $service->purgeExpired();
+
+        self::assertSame(0, $result['purged']);
+        self::assertSame(1, $result['skipped']);
+        self::assertSame([], $service->deleted);
     }
 
     #[Test]

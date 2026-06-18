@@ -41,6 +41,8 @@ Full tree and defaults in [Configuration](configuration.md).
 | `integrity.enabled` | bool | `true` | Enable broken-asset integrity detection |
 | `integrity.skip_extensions` | list | `[svg]` | Extensions skipped during integrity scans |
 | `integrity.on_unrecoverable` | enum | `report` | Broken asset with no renderable version: `report` (log only) or `quarantine` (best-effort, unused-only) |
+| `content_scan.enabled` | bool | `false` | Opt-in delete/move guard: scan text fields for a hard-coded path reference the dependency table misses |
+| `content_scan.classes` | list | `[]` | Classes whose `wysiwyg`/`textarea`/`input` fields the guard scans |
 
 ### Rule options
 

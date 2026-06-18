@@ -296,6 +296,11 @@ bin/console asset-pilot:cleanup-unused --extension=jpg,png --folder=/uploads/tem
 bin/console asset-pilot:cleanup-unused --by-ids=1024,1025 --action=delete
 ```
 
+> Note: with `content_scan.enabled` (see [Configuration](configuration.md)), delete and move also
+> skip an asset whose path is hard-coded into a configured class's rich-text/text fields — a
+> reference the dependency table does not track. The guard runs only on the assets being mutated
+> (not the listing) and fails closed (an unscannable asset is treated as referenced).
+
 > Note: the unused-asset cleanup cannot filter by file size. The Pimcore `assets` table has no
 > size column, and post-filtering after pagination would corrupt the count on a delete path, so
 > `minSize`/`maxSize` are rejected rather than silently ignored. Rule-level `filters.min_size` /

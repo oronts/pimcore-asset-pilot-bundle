@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Service\ConfidenceScorer;
+use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -152,19 +153,45 @@ class UnusedAssetFinderTest extends TestCase
         self::assertStringContainsString('referenced', $result['errors'][1]);
     }
 
+    #[Test]
+    public function deleteAssetsSkipsAnAssetReferencedInContent(): void
+    {
+        $scanner = $this->createMock(ContentUsageScanner::class);
+        $scanner->method('isReferencedInContent')->willReturn(true);
+
+        $result = $this->moveFinder([1 => $this->asset(true)], referenced: false, scanner: $scanner)->deleteAssets([1]);
+
+        self::assertSame(0, $result['deleted']);
+        self::assertSame(1, $result['failed']);
+        self::assertStringContainsString('content', $result['errors'][1]);
+    }
+
+    #[Test]
+    public function moveAssetsSkipsAnAssetReferencedInContent(): void
+    {
+        $scanner = $this->createMock(ContentUsageScanner::class);
+        $scanner->method('isReferencedInContent')->willReturn(true);
+
+        $result = $this->moveFinder([1 => $this->asset(true)], referenced: false, scanner: $scanner)->moveAssets([1], '/Archive');
+
+        self::assertSame(0, $result['moved']);
+        self::assertSame(1, $result['failed']);
+        self::assertStringContainsString('content', $result['errors'][1]);
+    }
+
     /**
      * @param array<int, Asset> $assetsById
      */
-    private function moveFinder(array $assetsById, bool $referenced, bool $folderAllowed = true): UnusedAssetFinder
+    private function moveFinder(array $assetsById, bool $referenced, bool $folderAllowed = true, ?ContentUsageScanner $scanner = null): UnusedAssetFinder
     {
         $folder = $this->createMock(Asset\Folder::class);
         $folder->method('isAllowed')->willReturn($folderAllowed);
 
-        return new class ($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), $assetsById, $referenced, $folder) extends UnusedAssetFinder {
+        return new class ($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), $assetsById, $referenced, $folder, $scanner) extends UnusedAssetFinder {
             /** @param array<int, Asset> $assetsById */
-            public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, private array $assetsById, private bool $referenced, private Asset\Folder $folder)
+            public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, private array $assetsById, private bool $referenced, private Asset\Folder $folder, ?ContentUsageScanner $scanner)
             {
-                parent::__construct($c, $l, $s, $d);
+                parent::__construct($c, $l, $s, $d, contentScanner: $scanner);
             }
 
             protected function loadAsset(int $id): ?Asset

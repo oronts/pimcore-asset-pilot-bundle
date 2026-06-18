@@ -63,6 +63,10 @@ oronts_asset_pilot:
         enabled: true
         skip_extensions: [svg]
         on_unrecoverable: report   # report | quarantine
+
+    content_scan:
+        enabled: false
+        classes: []   # e.g. [Article, Page] — scan these classes' text fields before delete/move
 ```
 
 ## Configuration Reference
@@ -88,6 +92,8 @@ oronts_asset_pilot:
 | `integrity.enabled` | `bool` | `true` | Enable broken-asset detection (the `findBroken` scan; explicit `--by-ids`/`?ids` checks ignore this) |
 | `integrity.skip_extensions` | `string[]` | `[svg]` | Extensions skipped during the integrity scan (e.g. `svg`, which the renderer flags noisily) |
 | `integrity.on_unrecoverable` | `enum` | `report` | A broken asset with no renderable version: `report` (log + heal-log row) or `quarantine` (also best-effort quarantine, only if still unused) |
+| `content_scan.enabled` | `bool` | `false` | Before deleting/moving an unused asset, also scan rich-text/text fields for a hard-coded reference to its path (which the dependency table misses). Opt-in delete/move guard |
+| `content_scan.classes` | `string[]` | `[]` | DataObject classes whose `wysiwyg`/`textarea`/`input` fields are scanned. Empty = the guard is inert |
 
 ## Rule Options
 

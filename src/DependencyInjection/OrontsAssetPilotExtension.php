@@ -62,6 +62,10 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.integrity.skip_extensions', $config['integrity']['skip_extensions']);
         $container->setParameter('oronts_asset_pilot.integrity.on_unrecoverable', $config['integrity']['on_unrecoverable']);
 
+        // Content-reference scan (delete/move guard)
+        $container->setParameter('oronts_asset_pilot.content_scan.enabled', $config['content_scan']['enabled']);
+        $container->setParameter('oronts_asset_pilot.content_scan.classes', $config['content_scan']['classes']);
+
         // Process rules into Rule objects
         $rules = [];
         foreach ($config['rules'] as $name => $ruleConfig) {
