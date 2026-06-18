@@ -54,6 +54,9 @@ oronts_asset_pilot:
     confidence:
         recently_uploaded_days: 30
         probably_unused_days: 90
+
+    quarantine:
+        folder: /Quarantine
 ```
 
 ## Configuration Reference
@@ -74,6 +77,7 @@ oronts_asset_pilot:
 | `protection.lock_property` | `string` | `asset_pilot_locked` | Custom property name used to lock assets |
 | `confidence.recently_uploaded_days` | `int` | `30` | Assets modified within this many days score `recently_uploaded` |
 | `confidence.probably_unused_days` | `int` | `90` | Below this (and past `recently_uploaded_days`) scores `probably_unused`; older scores `definitely_unused` |
+| `quarantine.folder` | `string` | `/Quarantine` | Folder quarantined assets are moved to instead of being deleted (reversible) |
 
 ## Rule Options
 

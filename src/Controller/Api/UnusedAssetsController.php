@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -20,6 +21,7 @@ class UnusedAssetsController
 
     public function __construct(
         private readonly UnusedAssetFinderInterface $unusedAssetFinder,
+        private readonly QuarantineService $quarantineService,
         private readonly LoggerInterface $logger,
     ) {}
 
@@ -117,5 +119,27 @@ class UnusedAssetsController
         $result = $this->unusedAssetFinder->moveAssets($assetIds, $targetFolder);
 
         return new JsonResponse($result);
+    }
+
+    #[Route('/unused-assets/bulk-quarantine', name: 'oronts_asset_pilot_unused_assets_bulk_quarantine', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function bulkQuarantine(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
+        }
+
+        $this->logger->info('Asset Pilot: bulk quarantine requested for {count} unused assets', [
+            'count' => count($assetIds),
+        ]);
+
+        return new JsonResponse($this->quarantineService->quarantine($assetIds));
     }
 }

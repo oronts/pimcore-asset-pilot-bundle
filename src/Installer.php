@@ -15,6 +15,7 @@ use Symfony\Component\HttpKernel\Bundle\BundleInterface;
 class Installer extends SettingsStoreAwareInstaller
 {
     public const string TABLE_AUDIT_LOG = 'asset_pilot_audit_log';
+    public const string TABLE_QUARANTINE = 'asset_pilot_quarantine';
 
     public function __construct(
         BundleInterface $bundle,
@@ -31,25 +32,8 @@ class Installer extends SettingsStoreAwareInstaller
 
         // Idempotent: create the table when absent, otherwise add only the missing columns/indexes
         // so a reinstall over a partial or older schema repairs it instead of being a no-op.
-        $table = $schema->hasTable(self::TABLE_AUDIT_LOG)
-            ? $schema->getTable(self::TABLE_AUDIT_LOG)
-            : $schema->createTable(self::TABLE_AUDIT_LOG);
-
-        foreach (self::auditColumns() as [$name, $type, $options]) {
-            if (!$table->hasColumn($name)) {
-                $table->addColumn($name, $type, $options);
-            }
-        }
-
-        if ($table->getPrimaryKey() === null) {
-            $table->setPrimaryKey(['id']);
-        }
-
-        foreach (self::auditIndexes() as $indexName => $columns) {
-            if (!$table->hasIndex($indexName)) {
-                $table->addIndex($columns, $indexName);
-            }
-        }
+        $this->ensureTable($schema, self::TABLE_AUDIT_LOG, self::auditColumns(), self::auditIndexes());
+        $this->ensureTable($schema, self::TABLE_QUARANTINE, self::quarantineColumns(), self::quarantineIndexes(), self::quarantineUniqueIndexes());
 
         $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
 
@@ -70,8 +54,10 @@ class Installer extends SettingsStoreAwareInstaller
         $currentSchema = $schemaManager->introspectSchema();
         $schema = clone $currentSchema;
 
-        if ($schema->hasTable(self::TABLE_AUDIT_LOG)) {
-            $schema->dropTable(self::TABLE_AUDIT_LOG);
+        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE] as $tableName) {
+            if ($schema->hasTable($tableName)) {
+                $schema->dropTable($tableName);
+            }
         }
 
         $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
@@ -86,6 +72,41 @@ class Installer extends SettingsStoreAwareInstaller
         }
 
         parent::uninstall();
+    }
+
+    /**
+     * Idempotently ensure a table has all desired columns and indexes (create when absent, add only
+     * what is missing), shared by every owned table.
+     *
+     * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $columns
+     * @param array<string, list<string>>                                $indexes
+     * @param array<string, list<string>>                                $uniqueIndexes
+     */
+    private function ensureTable(Schema $schema, string $name, array $columns, array $indexes, array $uniqueIndexes = []): void
+    {
+        $table = $schema->hasTable($name) ? $schema->getTable($name) : $schema->createTable($name);
+
+        foreach ($columns as [$column, $type, $options]) {
+            if (!$table->hasColumn($column)) {
+                $table->addColumn($column, $type, $options);
+            }
+        }
+
+        if ($table->getPrimaryKey() === null) {
+            $table->setPrimaryKey(['id']);
+        }
+
+        foreach ($indexes as $indexName => $indexColumns) {
+            if (!$table->hasIndex($indexName)) {
+                $table->addIndex($indexColumns, $indexName);
+            }
+        }
+
+        foreach ($uniqueIndexes as $indexName => $indexColumns) {
+            if (!$table->hasIndex($indexName)) {
+                $table->addUniqueIndex($indexColumns, $indexName);
+            }
+        }
     }
 
     private function applySchemaDiff(AbstractSchemaManager $schemaManager, Schema $current, Schema $target): void
@@ -138,6 +159,39 @@ class Installer extends SettingsStoreAwareInstaller
             'idx_audit_created_at' => ['created_at'],
             'idx_audit_asset_status' => ['asset_id', 'status'],
             'idx_audit_rule_status_created' => ['rule_name', 'status', 'created_at'],
+        ];
+    }
+
+    /**
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    protected static function quarantineColumns(): array
+    {
+        return [
+            ['id', 'integer', ['autoincrement' => true, 'notnull' => true]],
+            ['asset_id', 'integer', ['notnull' => true]],
+            ['original_path', 'string', ['length' => 765, 'notnull' => true]],
+            ['quarantined_at', 'datetime', ['notnull' => true]],
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    protected static function quarantineIndexes(): array
+    {
+        return [
+            'idx_quarantine_at' => ['quarantined_at'],
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    protected static function quarantineUniqueIndexes(): array
+    {
+        return [
+            'uniq_quarantine_asset' => ['asset_id'],
         ];
     }
 

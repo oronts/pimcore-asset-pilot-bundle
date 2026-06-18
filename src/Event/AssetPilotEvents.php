@@ -19,4 +19,6 @@ class AssetPilotEvents
     public const string UNUSED_DELETED = 'oronts_asset_pilot.unused_deleted';
     public const string UNUSED_MOVED = 'oronts_asset_pilot.unused_moved';
     public const string REVERTED = 'oronts_asset_pilot.reverted';
+    public const string QUARANTINED = 'oronts_asset_pilot.quarantined';
+    public const string RESTORED = 'oronts_asset_pilot.restored';
 }

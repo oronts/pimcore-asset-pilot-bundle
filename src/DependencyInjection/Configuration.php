@@ -42,6 +42,7 @@ class Configuration implements ConfigurationInterface
         $this->addAuditSection($rootNode);
         $this->addProtectionSection($rootNode);
         $this->addConfidenceSection($rootNode);
+        $this->addQuarantineSection($rootNode);
 
         return $treeBuilder;
     }
@@ -224,6 +225,24 @@ class Configuration implements ConfigurationInterface
                         ->scalarNode('lock_property')
                             ->defaultValue(AssetProtection::DEFAULT_LOCK_PROPERTY)
                             ->info('Custom property name that locks an asset from organization.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addQuarantineSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('quarantine')
+                    ->addDefaultsIfNotSet()
+                    ->info('Quarantine (soft-delete) settings for the unused-asset cleanup path.')
+                    ->children()
+                        ->scalarNode('folder')
+                            ->defaultValue('/Quarantine')
+                            ->cannotBeEmpty()
+                            ->info('Asset folder quarantined assets are moved to instead of being deleted.')
                         ->end()
                     ->end()
                 ->end()

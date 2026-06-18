@@ -15,6 +15,9 @@ interface UnusedAssetFinderInterface
     /** @param array<string, mixed> $filters */
     public function countUnused(array $filters = []): int;
 
+    /** Whether any tracked dependency still targets this asset (re-verify before a destructive op). */
+    public function isReferenced(int $assetId): bool;
+
     /** @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: array<int, array{type: string, count: int, total_size: int}>} */
     public function getUnusedStats(): array;
 

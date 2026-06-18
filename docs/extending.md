@@ -464,3 +464,5 @@ asset change outside the move pipeline (CDN purge, search reindex, DAM sync):
 | `oronts_asset_pilot.unused_deleted` | `AssetPilotEvents::UNUSED_DELETED` | Unused assets were deleted |
 | `oronts_asset_pilot.unused_moved` | `AssetPilotEvents::UNUSED_MOVED` | Unused assets were moved |
 | `oronts_asset_pilot.reverted` | `AssetPilotEvents::REVERTED` | A move was reverted |
+| `oronts_asset_pilot.quarantined` | `AssetPilotEvents::QUARANTINED` | Unused assets were quarantined (soft-deleted) |
+| `oronts_asset_pilot.restored` | `AssetPilotEvents::RESTORED` | An asset was restored from quarantine |

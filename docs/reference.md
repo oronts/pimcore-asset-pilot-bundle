@@ -36,6 +36,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `protection.lock_property` | string | `asset_pilot_locked` | Property that locks an asset |
 | `confidence.recently_uploaded_days` | int | `30` | Upper bound (days) for the `recently_uploaded` confidence bucket |
 | `confidence.probably_unused_days` | int | `90` | Upper bound (days) for `probably_unused`; older scores `definitely_unused` |
+| `quarantine.folder` | string | `/Quarantine` | Folder quarantined assets are moved to instead of being deleted |
 
 ### Rule options
 
@@ -90,7 +91,9 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 | GET | `/audit`, `/audit/stats`, `/audit/export`, `/audit/by-rule/{ruleName}/assets` | View |
 | POST | `/audit/{id}/revert` | Admin |
 | GET | `/unused-assets`, `/unused-assets/stats` | View |
-| POST | `/unused-assets/bulk-delete`, `/unused-assets/bulk-move` | Operate |
+| POST | `/unused-assets/bulk-delete`, `/unused-assets/bulk-move`, `/unused-assets/bulk-quarantine` | Operate |
+| GET | `/quarantine` | View |
+| POST | `/quarantine/{assetId}/restore` | Operate |
 | GET | `/assets/search`, `/assets/by-object/{objectId}`, `/assets/tags`, `/assets/{id}/tags` | View |
 | POST | `/assets/bulk-tag`, `/assets/bulk-property` | Operate |
 | POST / DELETE | `/assets/{id}/lock` | Operate |
@@ -102,7 +105,8 @@ Constants on `AssetPilotEvents`. Details in [DX](dx.md#events) and
 [Extending](extending.md#events).
 
 `PRE_MOVE`, `POST_MOVE`, `MOVE_FAILED`, `BULK_STARTED`, `BULK_COMPLETED`, `ASSET_LOCKED`,
-`ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED`.
+`ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED`,
+`QUARANTINED`, `RESTORED`.
 
 ## Enums
 

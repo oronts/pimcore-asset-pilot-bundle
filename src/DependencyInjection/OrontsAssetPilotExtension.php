@@ -53,6 +53,9 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.confidence.recently_uploaded_days', $config['confidence']['recently_uploaded_days']);
         $container->setParameter('oronts_asset_pilot.confidence.probably_unused_days', $config['confidence']['probably_unused_days']);
 
+        // Quarantine
+        $container->setParameter('oronts_asset_pilot.quarantine.folder', $config['quarantine']['folder']);
+
         // Process rules into Rule objects
         $rules = [];
         foreach ($config['rules'] as $name => $ruleConfig) {

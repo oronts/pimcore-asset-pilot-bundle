@@ -348,7 +348,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             ->setParameter('assetType', PimcoreSchema::ELEMENT_TYPE_ASSET);
     }
 
-    protected function isReferenced(int $assetId): bool
+    public function isReferenced(int $assetId): bool
     {
         $count = (int) $this->connection->createQueryBuilder()
             ->select('COUNT(*)')

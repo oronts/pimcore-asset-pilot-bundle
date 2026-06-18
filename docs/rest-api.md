@@ -175,6 +175,9 @@ Supported types: `text`, `bool`, `select`.
 | `GET` | `/unused-assets/stats` | View | Unused asset statistics by type |
 | `POST` | `/unused-assets/bulk-delete` | Operate | Delete unused assets |
 | `POST` | `/unused-assets/bulk-move` | Operate | Move unused assets to folder |
+| `POST` | `/unused-assets/bulk-quarantine` | Operate | Soft-delete unused assets to the quarantine folder (reversible) |
+| `GET` | `/quarantine` | View | List quarantined assets with their original path |
+| `POST` | `/quarantine/{assetId}/restore` | Operate | Move a quarantined asset back to its original path |
 
 #### Unused assets parameters
 

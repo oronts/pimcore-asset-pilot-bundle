@@ -182,7 +182,7 @@ class UnusedAssetFinderTest extends TestCase
                 return $this->folder;
             }
 
-            protected function isReferenced(int $assetId): bool
+            public function isReferenced(int $assetId): bool
             {
                 return $this->referenced;
             }

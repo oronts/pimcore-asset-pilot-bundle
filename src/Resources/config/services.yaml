@@ -151,6 +151,12 @@ services:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    # -- Quarantine -------------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Service\QuarantineService:
+        arguments:
+            $quarantineFolder: '%oronts_asset_pilot.quarantine.folder%'
+
     # -- Rule actions (post-move) -----------------------------------------------
 
     Oronts\AssetPilotBundle\Action\RuleActionResolver:
