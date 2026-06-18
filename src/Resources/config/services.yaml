@@ -16,6 +16,9 @@ services:
         Oronts\AssetPilotBundle\Engine\RuleProviderInterface:
             tags: ['oronts_asset_pilot.rule_provider']
 
+        Oronts\AssetPilotBundle\Health\HealthCheckInterface:
+            tags: ['oronts_asset_pilot.health_check']
+
     # -- Core services ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\:
@@ -145,6 +148,21 @@ services:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    # -- Health checks ----------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Health\HealthChecker:
+        arguments:
+            $checks: !tagged_iterator oronts_asset_pilot.health_check
+
+    Oronts\AssetPilotBundle\Health\Check\SharedCacheHealthCheck:
+        arguments:
+            $cache: '@cache.app'
+
+    Oronts\AssetPilotBundle\Health\Check\AsyncTransportHealthCheck:
+        arguments:
+            $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
+            $batchSize: '%oronts_asset_pilot.async.batch_size%'
+
     # -- Loop guard (Redis-backed for horizontal scaling) ----------------------
 
     Oronts\AssetPilotBundle\Service\LoopGuard:
@@ -202,6 +220,10 @@ services:
             - { name: 'console.command' }
 
     Oronts\AssetPilotBundle\Command\RulesDiffCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\HealthCommand:
         tags:
             - { name: 'console.command' }
 

@@ -10,6 +10,7 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 |--------|----------|------------|-------------|
 | `GET` | `/dashboard` | View | Dashboard statistics |
 | `GET` | `/dashboard/class-stats` | View | Per-class breakdown |
+| `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
 | `GET` | `/permissions` | — | Current user's permission set |
 
 ### Operations

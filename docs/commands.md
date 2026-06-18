@@ -58,6 +58,20 @@ bin/console asset-pilot:rules-diff rules.yaml --fail-on-diff
 The diff classifies each rule as added, removed, changed, or unchanged. `rules-diff` first validates
 the imported rules (reusing `validate-config`) and aborts if any are invalid.
 
+### Health Check
+
+```bash
+# Run all health checks; exits non-zero if any check is CRITICAL (CI/monitoring gate)
+bin/console asset-pilot:health
+```
+
+Built-in checks (extensible via the `oronts_asset_pilot.health_check` tag):
+- `audit_table` — the audit table exists when audit logging is enabled (CRITICAL if missing).
+- `rule_config` — the loaded rules pass `validate-config` (CRITICAL on a failure, WARNING on a warning).
+- `shared_cache` — `cache.app` is not a per-process store, so LoopGuard idempotency holds across
+  workers (WARNING for a non-shared adapter; see [Architecture](architecture.md)).
+- `async_transport` — reports the async configuration and reminds you to run a messenger worker.
+
 ### Debug Rules
 
 ```bash
