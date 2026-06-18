@@ -58,6 +58,19 @@ bin/console asset-pilot:rules-diff rules.yaml --fail-on-diff
 The diff classifies each rule as added, removed, changed, or unchanged. `rules-diff` first validates
 the imported rules (reusing `validate-config`) and aborts if any are invalid.
 
+### Verify Locations (Drift)
+
+```bash
+# Report assets no longer at the path the current rules expect (organization drift)
+bin/console asset-pilot:verify-locations --class=Product --limit=100
+```
+
+After a rule change, already-organized assets stay in their old location. This dry-runs the current
+rules over a bounded, paged set of objects of `--class` and lists each asset whose actual path
+differs from the rule-expected path (asset, rule, current path, expected path). It is read-only;
+re-organize via `asset-pilot:organize` or the Operations tab. A whole-catalog sweep should page
+through with `--page` (or run async) rather than one blocking pass.
+
 ### Rule Overlap
 
 ```bash

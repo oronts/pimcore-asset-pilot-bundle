@@ -109,6 +109,7 @@ Or with explicit IDs:
 | `GET` | `/rules/export` | View | Export the rule set as a portable artifact (`{format_version, rules}`) |
 | `POST` | `/rules/diff` | View | Diff a posted rule-set artifact against the current rules (`added`/`removed`/`changed`/`unchanged`) |
 | `GET` | `/rules/overlap` | View | Rules that compete for the same assets (`{overlaps[]}`) |
+| `GET` | `/rules/drift?class=Product` | View | Assets not at their rule-expected path (paged, bounded; `{items[], objectsScanned, page, limit}`) |
 | `GET` | `/rules/{name}` | View | Rule details with statistics |
 | `GET` | `/rules/{name}/preview?objectId=42` | View | Preview rule against an object |
 | `POST` | `/rules/{name}/apply` | Operate | Apply a single rule to an object (`{objectId}`) |

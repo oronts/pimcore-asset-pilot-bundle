@@ -8,9 +8,11 @@ use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Model\DriftItem;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleOverlap;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\LocationDriftService;
 use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
 use Oronts\AssetPilotBundle\Service\RulePortability;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -28,8 +30,45 @@ class RulesController
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly RulePortability $portability,
         protected readonly RuleOverlapAnalyzer $overlapAnalyzer,
+        protected readonly LocationDriftService $driftService,
         protected readonly LoggerInterface $logger,
     ) {}
+
+    #[Route('/rules/drift', name: 'oronts_asset_pilot_rules_drift', methods: ['GET'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function drift(Request $request): JsonResponse
+    {
+        $className = trim((string) $request->query->get('class', ''));
+        if ($className === '') {
+            return new JsonResponse(['error' => 'Query parameter "class" is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        $page = max(1, $request->query->getInt('page', 1));
+        $limit = min(200, max(1, $request->query->getInt('limit', 50)));
+
+        try {
+            $result = $this->driftService->driftForClass($className, $page, $limit);
+
+            return new JsonResponse([
+                'items' => array_map(static fn (DriftItem $item): array => [
+                    'assetId' => $item->assetId,
+                    'currentPath' => $item->currentPath,
+                    'expectedPath' => $item->expectedPath,
+                    'ruleName' => $item->ruleName,
+                ], $result['items']),
+                'objectsScanned' => $result['objectsScanned'],
+                'page' => $result['page'],
+                'limit' => $result['limit'],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to compute location drift.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to compute location drift.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
 
     #[Route('/rules/overlap', name: 'oronts_asset_pilot_rules_overlap', methods: ['GET'], priority: 1)]
     #[IsGranted(AssetPilotPermission::View->value)]

@@ -200,10 +200,11 @@ class AssetOrganizer
             }
         }
 
+        $pendingMoves = array_filter($operations, static fn (MoveOperation $op): bool => $op->status === OperationStatus::Pending);
         $this->logger->info('Asset Pilot: dry run for {class}:{id} found {count} pending moves', [
             'class' => $this->resolveObjectClass($object),
             'id' => $object->getId(),
-            'count' => count($operations),
+            'count' => count($pendingMoves),
         ]);
 
         return $operations;
