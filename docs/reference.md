@@ -64,6 +64,12 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:cleanup-unused` | Delete or move unused assets (`--dry-run`, `--action`, `--move-to`) |
 | `asset-pilot:validate-config` | Validate rules, conditions, templates, callbacks, filters |
 | `asset-pilot:debug-rule` | Per-rule evaluation trace for an object/asset |
+| `asset-pilot:rules-export` | Export the rule set as a portable JSON/YAML artifact |
+| `asset-pilot:rules-diff` | Diff an artifact against the current rules (`--fail-on-diff`) |
+| `asset-pilot:rule-overlap` | Report rules competing for the same assets |
+| `asset-pilot:verify-locations` | Report assets not at their rule-expected path (`--class`) |
+| `asset-pilot:replay-failures` | Re-run failed objects (`--since`, `--rule`, `--class`, `--async`) |
+| `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
 
 ## REST endpoints
 
@@ -72,11 +78,13 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/dashboard`, `/dashboard/class-stats` | View |
-| GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview` | View |
+| GET | `/dashboard`, `/dashboard/class-stats`, `/health` | View |
+| GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
+| POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |
 | POST | `/organize`, `/organize/bulk` | Operate |
 | POST | `/organize/preview`, `/organize/explain`, `/operations/bulk-preview` | View |
+| POST | `/operations/replay` | Operate |
 | GET | `/operations/status` | View |
 | GET | `/audit`, `/audit/stats`, `/audit/export`, `/audit/by-rule/{ruleName}/assets` | View |
 | POST | `/audit/{id}/revert` | Admin |
@@ -121,6 +129,7 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.context_provider` | `ContextProviderInterface` |
 | `oronts_asset_pilot.twig_extension` | Twig `ExtensionInterface` |
 | `oronts_asset_pilot.expression_function_provider` | `ExpressionFunctionProviderInterface` |
+| `oronts_asset_pilot.health_check` | `HealthCheckInterface` |
 
 The default path resolver is a single replaceable service (`PathResolverInterface`, below), not a
 tagged chain.

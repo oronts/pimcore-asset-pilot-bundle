@@ -323,6 +323,41 @@ class TenantRuleProvider implements RuleProviderInterface
 
 No service config is needed beyond autowiring; the interface tag is applied automatically.
 
+### Add a Health Check
+
+Contribute your own production-readiness probe to `asset-pilot:health` and `GET /health`. Implement
+`HealthCheckInterface`; services implementing it are auto-tagged `oronts_asset_pilot.health_check`
+and the `HealthChecker` runs each one (isolating a throwing check as a Critical result) and rolls
+them up to the worst overall status.
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Enum\HealthStatus;
+use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
+use Oronts\AssetPilotBundle\Model\HealthCheckResult;
+
+class ConverterBinaryHealthCheck implements HealthCheckInterface
+{
+    public function name(): string
+    {
+        return 'converter_binary';
+    }
+
+    public function run(): HealthCheckResult
+    {
+        if (is_executable('/usr/bin/convert')) {
+            return new HealthCheckResult($this->name(), HealthStatus::Ok, 'ImageMagick is available.');
+        }
+
+        return new HealthCheckResult($this->name(), HealthStatus::Warning, 'ImageMagick (convert) was not found.');
+    }
+}
+```
+
+No service config is needed beyond autowiring; the interface tag is applied automatically. Keep the
+public message free of secrets or internals (it is returned by the REST endpoint).
+
 ### Events
 
 Subscribe to asset move events for custom logic:
