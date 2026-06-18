@@ -180,6 +180,16 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         return AssetStorageSize::bytes($fullPath);
     }
 
+    protected function loadAsset(int $id): ?Asset
+    {
+        return Asset::getById($id);
+    }
+
+    protected function createTargetFolder(string $path): Asset\Folder
+    {
+        return Asset\Service::createFolderByPath($path);
+    }
+
     /**
      * @param int[] $assetIds
      * @return array{deleted: int, failed: int, errors: array<int, string>}
@@ -192,7 +202,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
         foreach ($assetIds as $id) {
             try {
-                $asset = Asset::getById($id);
+                $asset = $this->loadAsset($id);
                 if ($asset === null) {
                     $errors[$id] = 'Asset not found';
                     $failed++;
@@ -251,7 +261,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         $errors = [];
 
         try {
-            $folder = Asset\Service::createFolderByPath($targetFolder);
+            $folder = $this->createTargetFolder($targetFolder);
         } catch (\Throwable $e) {
             return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Failed to create folder: ' . $e->getMessage()]];
         }
@@ -264,7 +274,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
         foreach ($assetIds as $id) {
             try {
-                $asset = Asset::getById($id);
+                $asset = $this->loadAsset($id);
                 if ($asset === null) {
                     $errors[$id] = 'Asset not found';
                     $failed++;
@@ -330,7 +340,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             ->setParameter('assetType', PimcoreSchema::ELEMENT_TYPE_ASSET);
     }
 
-    private function isReferenced(int $assetId): bool
+    protected function isReferenced(int $assetId): bool
     {
         $count = (int) $this->connection->createQueryBuilder()
             ->select('COUNT(*)')

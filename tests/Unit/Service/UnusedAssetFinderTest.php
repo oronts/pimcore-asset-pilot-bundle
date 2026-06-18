@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Pimcore\Model\Asset;
 use Psr\Log\NullLogger;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 
@@ -102,5 +103,93 @@ class UnusedAssetFinderTest extends TestCase
                 return $this->aggregateStats($rows);
             }
         };
+    }
+
+    #[Test]
+    public function moveAssetsSkipsAnAssetThatBecameReferenced(): void
+    {
+        $result = $this->moveFinder([1 => $this->asset(true)], referenced: true)->moveAssets([1], '/Archive');
+
+        self::assertSame(0, $result['moved']);
+        self::assertSame(1, $result['failed']);
+        self::assertStringContainsString('referenced', $result['errors'][1]);
+    }
+
+    #[Test]
+    public function moveAssetsMovesAnUnreferencedAllowedAsset(): void
+    {
+        $result = $this->moveFinder([1 => $this->asset(true)], referenced: false)->moveAssets([1], '/Archive');
+
+        self::assertSame(1, $result['moved']);
+        self::assertSame(0, $result['failed']);
+    }
+
+    #[Test]
+    public function moveAssetsSkipsWhenPerAssetAclDenies(): void
+    {
+        $result = $this->moveFinder([1 => $this->asset(false)], referenced: false)->moveAssets([1], '/Archive');
+
+        self::assertSame(0, $result['moved']);
+        self::assertSame(1, $result['failed']);
+    }
+
+    #[Test]
+    public function moveAssetsAbortsWhenTargetFolderAclDenies(): void
+    {
+        $result = $this->moveFinder([1 => $this->asset(true)], referenced: false, folderAllowed: false)->moveAssets([1], '/Archive');
+
+        self::assertSame(0, $result['moved']);
+        self::assertSame(1, $result['failed']);
+    }
+
+    #[Test]
+    public function deleteAssetsSkipsAnAssetThatBecameReferenced(): void
+    {
+        $result = $this->moveFinder([1 => $this->asset(true)], referenced: true)->deleteAssets([1]);
+
+        self::assertSame(0, $result['deleted']);
+        self::assertSame(1, $result['failed']);
+        self::assertStringContainsString('referenced', $result['errors'][1]);
+    }
+
+    /**
+     * @param array<int, Asset> $assetsById
+     */
+    private function moveFinder(array $assetsById, bool $referenced, bool $folderAllowed = true): UnusedAssetFinder
+    {
+        $folder = $this->createMock(Asset\Folder::class);
+        $folder->method('isAllowed')->willReturn($folderAllowed);
+
+        return new class ($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), $assetsById, $referenced, $folder) extends UnusedAssetFinder {
+            /** @param array<int, Asset> $assetsById */
+            public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, private array $assetsById, private bool $referenced, private Asset\Folder $folder)
+            {
+                parent::__construct($c, $l, $s, $d);
+            }
+
+            protected function loadAsset(int $id): ?Asset
+            {
+                return $this->assetsById[$id] ?? null;
+            }
+
+            protected function createTargetFolder(string $path): Asset\Folder
+            {
+                return $this->folder;
+            }
+
+            protected function isReferenced(int $assetId): bool
+            {
+                return $this->referenced;
+            }
+        };
+    }
+
+    private function asset(bool $allowed): Asset
+    {
+        $asset = $this->createMock(Asset::class);
+        $asset->method('isAllowed')->willReturn($allowed);
+        $asset->method('getRealFullPath')->willReturn('/p/x.jpg');
+
+        return $asset;
     }
 }
