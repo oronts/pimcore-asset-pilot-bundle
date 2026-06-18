@@ -66,7 +66,9 @@ bin/console asset-pilot:audit --cleanup
 
 In the Studio UI the Audit Log tab adds CSV export and a per-row **Revert** that moves an asset back
 to its original path. Revert re-verifies state and is loop-guarded, so it is not undone by the async
-pipeline. Revert requires the `asset_pilot_admin` permission (see [Permissions](permissions.md)).
+pipeline. Revert requires the `asset_pilot_admin` permission (see [Permissions](permissions.md)). A
+revert records the acting user in the audit row's `user_id`; rule-driven moves have no human actor and
+leave it null (the rule is the actor, in `rule_name`).
 
 ## Finding and cleaning up unused assets
 

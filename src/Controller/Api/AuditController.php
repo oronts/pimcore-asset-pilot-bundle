@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Pimcore\Model\Asset;
+use Pimcore\Tool\Admin;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -170,7 +171,8 @@ class AuditController
             $asset->setFilename($sourceFilename);
             $this->saveReverted($asset, $assetId);
 
-            // Log the revert as a new audit entry
+            // Record who performed the revert: a revert is a deliberate human action, unlike the
+            // rule-driven moves whose actor is the rule (so they stay null).
             $revertOperation = new MoveOperation(
                 assetId: $assetId,
                 sourcePath: $targetPath,
@@ -180,6 +182,7 @@ class AuditController
                 ruleName: 'revert:' . ($entry['rule_name'] ?? ''),
                 status: OperationStatus::Completed,
                 triggerType: TriggerType::Manual,
+                userId: Admin::getCurrentUser()?->getId(),
             );
             $this->auditLogger->log($revertOperation);
 

@@ -20,6 +20,7 @@ readonly class MoveOperation
         public TriggerType $triggerType,
         public ?string $errorMessage = null,
         public ?int $durationMs = null,
+        public ?int $userId = null,
         public \DateTimeImmutable $createdAt = new \DateTimeImmutable(),
     ) {}
 }

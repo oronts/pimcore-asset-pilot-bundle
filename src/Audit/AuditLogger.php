@@ -63,6 +63,7 @@ class AuditLogger implements AuditLoggerInterface
                 'status' => $operation->status->value,
                 'error_message' => $operation->errorMessage,
                 'duration_ms' => $operation->durationMs,
+                'user_id' => $operation->userId,
                 'created_at' => $operation->createdAt->format('Y-m-d H:i:s'),
             ]);
 
