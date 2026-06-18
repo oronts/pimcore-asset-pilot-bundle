@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useToast } from '../../hooks/use-toast'
 
 type ElementType = 'asset' | 'data-object'
@@ -16,6 +17,7 @@ interface OpenButtonProps {
 }
 
 export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
+  const { t } = useTranslation()
   const toast = useToast()
   const [opening, setOpening] = useState(false)
 
@@ -32,11 +34,11 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
           await api.element.openDataObject(id)
         }
       } else {
-        toast.warning(`Pimcore Studio API not available — cannot open ${type} #${id}`)
+        toast.warning(t('asset-pilot.open.api-unavailable', { type, id }))
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      toast.error(`Failed to open ${type} #${id}: ${msg}`)
+      toast.error(t('asset-pilot.open.failed', { type, id, message: msg }))
     } finally {
       setOpening(false)
     }
@@ -47,7 +49,7 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
       onClick={() => { void handleClick() }}
       disabled={opening}
       style={{ ...linkStyle, opacity: opening ? 0.5 : 1 }}
-      title={`Open ${type} #${id}`}
+      title={t('asset-pilot.open.title', { type, id })}
     >
       {id}
     </button>
