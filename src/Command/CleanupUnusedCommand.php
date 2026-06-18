@@ -192,7 +192,7 @@ HELP
      * @param array<string, mixed> $filters
      * @return list<int>
      */
-    private function collectUnusedIds(array $filters, int $batchSize, int $totalCount): array
+    protected function collectUnusedIds(array $filters, int $batchSize, int $totalCount): array
     {
         $ids = [];
         $page = 1;

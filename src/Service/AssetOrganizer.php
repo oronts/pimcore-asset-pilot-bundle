@@ -472,7 +472,7 @@ class AssetOrganizer
         }
     }
 
-    private function skip(
+    protected function skip(
         int $assetId,
         string $sourcePath,
         string $targetPath,

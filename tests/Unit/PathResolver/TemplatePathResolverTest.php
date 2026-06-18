@@ -53,6 +53,26 @@ class TemplatePathResolverTest extends TestCase
     }
 
     #[Test]
+    public function builtInFiltersWinNameCollisionsWithConsumerExtensions(): void
+    {
+        $consumer = new class () extends AbstractExtension {
+            public function getFilters(): array
+            {
+                return [new TwigFilter('safe_key', static fn (mixed $v): string => 'CONSUMER')];
+            }
+        };
+
+        $resolver = new class (new \Psr\Log\NullLogger(), [$consumer]) extends TemplatePathResolver {
+            public function renderTemplate(string $template): string
+            {
+                return $this->render($template, []);
+            }
+        };
+
+        self::assertSame('a-b', $resolver->renderTemplate('{{ "a b"|safe_key }}'));
+    }
+
+    #[Test]
     public function coreContextHasNoConsumerSpecificVariables(): void
     {
         $context = $this->contextResolver()->context($this->createMock(AbstractObject::class), $this->createMock(Asset::class));
