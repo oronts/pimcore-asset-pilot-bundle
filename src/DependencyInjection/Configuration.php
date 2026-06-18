@@ -43,6 +43,7 @@ class Configuration implements ConfigurationInterface
         $this->addProtectionSection($rootNode);
         $this->addConfidenceSection($rootNode);
         $this->addQuarantineSection($rootNode);
+        $this->addIntegritySection($rootNode);
 
         return $treeBuilder;
     }
@@ -225,6 +226,28 @@ class Configuration implements ConfigurationInterface
                         ->scalarNode('lock_property')
                             ->defaultValue(AssetProtection::DEFAULT_LOCK_PROPERTY)
                             ->info('Custom property name that locks an asset from organization.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addIntegritySection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('integrity')
+                    ->addDefaultsIfNotSet()
+                    ->info('Asset integrity / self-heal settings (broken-binary detection).')
+                    ->children()
+                        ->booleanNode('enabled')
+                            ->defaultTrue()
+                            ->info('Enable integrity detection.')
+                        ->end()
+                        ->arrayNode('skip_extensions')
+                            ->scalarPrototype()->end()
+                            ->defaultValue(['svg'])
+                            ->info('Extensions skipped during integrity scans (e.g. svg, which render tools handle inconsistently).')
                         ->end()
                     ->end()
                 ->end()

@@ -12,6 +12,7 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | `GET` | `/dashboard/class-stats` | View | Per-class breakdown |
 | `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
 | `GET` | `/metrics` | View | Operation metrics (`{operations, total, failureRate, durationMs}`) |
+| `GET` | `/integrity` | View | Broken assets. Bounded scan (`?folder`, `?type`, `?extension`, `?page`, `?limit`) or check specific ids (`?ids=1,2,3`, max 50). Returns `{items[], scanned, broken, page, limit}` |
 | `GET` | `/permissions` | — | Current user's permission set |
 
 ### Operations

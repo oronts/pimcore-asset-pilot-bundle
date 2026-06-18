@@ -358,6 +358,60 @@ class ConverterBinaryHealthCheck implements HealthCheckInterface
 No service config is needed beyond autowiring; the interface tag is applied automatically. Keep the
 public message free of secrets or internals (it is returned by the REST endpoint).
 
+### Add an Integrity Checker
+
+`asset-pilot:check-integrity` and `GET /integrity` detect assets whose binary no longer renders.
+Detection runs the tagged checkers through `CompositeIntegrityChecker`, which picks the
+highest-`priority()` checker whose `supports()` matches (the same composite-resolver pattern used by
+filters and strategies). Implement `IntegrityCheckerInterface`; the service is auto-tagged
+`oronts_asset_pilot.integrity_checker`. Built-ins: `StreamExistsChecker` (priority 0, universal),
+`ImageIntegrityChecker` and `DocumentIntegrityChecker` (priority 20, Imagick-backed).
+
+Return `IntegrityStatus::Unverifiable` (not `Broken`) when your tool is unavailable, so a missing
+binary never causes a checker outage to be read as a broken asset. `check()` inspects the live
+asset; `checkBinary()` inspects a candidate binary in memory (used by a future version-rollback heal,
+and the natural place to share the verdict logic). Extending `AbstractBinaryIntegrityChecker` gives
+you the stream-to-string bridge so you only implement `checkBinary()` plus `supports()`/`priority()`.
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Enum\IntegrityStatus;
+use Oronts\AssetPilotBundle\Integrity\Check\AbstractBinaryIntegrityChecker;
+use Oronts\AssetPilotBundle\Model\IntegrityResult;
+use Pimcore\Model\Asset;
+
+class SvgIntegrityChecker extends AbstractBinaryIntegrityChecker
+{
+    public function priority(): int
+    {
+        return 30;
+    }
+
+    public function supports(Asset $asset): bool
+    {
+        return str_ends_with(strtolower((string) $asset->getFilename()), '.svg');
+    }
+
+    protected function name(): string
+    {
+        return 'svg';
+    }
+
+    public function checkBinary(string $binary, string $extension): IntegrityResult
+    {
+        $xml = @simplexml_load_string($binary);
+        if ($xml === false) {
+            return new IntegrityResult(IntegrityStatus::Broken, $this->name(), 'SVG is not well-formed XML.');
+        }
+
+        return new IntegrityResult(IntegrityStatus::Renderable, $this->name(), null);
+    }
+}
+```
+
+No service config is needed beyond autowiring; the interface tag is applied automatically.
+
 ### Rule Actions (do more than move)
 
 A rule can run post-move actions on the organized asset via its `actions` config. Each entry has a

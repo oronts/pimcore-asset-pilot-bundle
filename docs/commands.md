@@ -112,6 +112,22 @@ Reads the distinct failed objects from the audit log (bounded by `--limit`, grou
 flood of failures is not an unbounded scan) and re-organizes each. `--async` queues an organize
 message per object instead of running inline. Exits non-zero if any inline re-organize fails again.
 
+### Check Integrity
+
+```bash
+# Scan for assets whose binary no longer renders (filter by folder/type; bounded by --limit)
+bin/console asset-pilot:check-integrity --folder=/Products --limit=200
+
+# Check specific assets only, instead of scanning
+bin/console asset-pilot:check-integrity --by-ids=1024,1025
+```
+
+Runs the tagged integrity checkers (built-in: missing/empty binary, broken image, broken document).
+A checker reports `unverifiable` rather than `broken` when its tool (e.g. Imagick) is absent, so the
+feature never flags an asset broken just because a tool was missing. Each scanned asset is loaded and
+render-tested, so the scan is bounded (`--limit`); use `--by-ids` to check exactly the assets you
+care about. Detection only — rolling back to a working version is a separate, guarded heal.
+
 ### Quarantine Purge
 
 ```bash

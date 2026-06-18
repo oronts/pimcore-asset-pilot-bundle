@@ -58,6 +58,10 @@ oronts_asset_pilot:
     quarantine:
         folder: /Quarantine
         grace_days: 30
+
+    integrity:
+        enabled: true
+        skip_extensions: [svg]
 ```
 
 ## Configuration Reference
@@ -80,6 +84,8 @@ oronts_asset_pilot:
 | `confidence.probably_unused_days` | `int` | `90` | Below this (and past `recently_uploaded_days`) scores `probably_unused`; older scores `definitely_unused` |
 | `quarantine.folder` | `string` | `/Quarantine` | Folder quarantined assets are moved to instead of being deleted (reversible) |
 | `quarantine.grace_days` | `int` | `30` | Days a quarantined asset is kept before the purge task may hard-delete it (if still unused) |
+| `integrity.enabled` | `bool` | `true` | Enable broken-asset detection (the `findBroken` scan; explicit `--by-ids`/`?ids` checks ignore this) |
+| `integrity.skip_extensions` | `string[]` | `[svg]` | Extensions skipped during the integrity scan (e.g. `svg`, which the renderer flags noisily) |
 
 ## Rule Options
 

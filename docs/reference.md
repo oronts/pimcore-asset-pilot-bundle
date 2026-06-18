@@ -38,6 +38,8 @@ Full tree and defaults in [Configuration](configuration.md).
 | `confidence.probably_unused_days` | int | `90` | Upper bound (days) for `probably_unused`; older scores `definitely_unused` |
 | `quarantine.folder` | string | `/Quarantine` | Folder quarantined assets are moved to instead of being deleted |
 | `quarantine.grace_days` | int | `30` | Days before the purge task may hard-delete a quarantined asset (if still unused) |
+| `integrity.enabled` | bool | `true` | Enable broken-asset integrity detection |
+| `integrity.skip_extensions` | list | `[svg]` | Extensions skipped during integrity scans |
 
 ### Rule options
 
@@ -75,6 +77,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
 | `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder (`--folder`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
+| `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
 
 ## REST endpoints
 
@@ -83,7 +86,7 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics` | View |
+| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity` | View |
 | GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
 | POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |
@@ -139,6 +142,7 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.expression_function_provider` | `ExpressionFunctionProviderInterface` |
 | `oronts_asset_pilot.health_check` | `HealthCheckInterface` |
 | `oronts_asset_pilot.rule_action` | `RuleActionInterface` (post-move actions, built-in `set_property`) |
+| `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` (broken-asset detection; built-ins stream/image/document) |
 
 The default path resolver is a single replaceable service (`PathResolverInterface`, below), not a
 tagged chain.

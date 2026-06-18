@@ -22,6 +22,9 @@ services:
         Oronts\AssetPilotBundle\Action\RuleActionInterface:
             tags: ['oronts_asset_pilot.rule_action']
 
+        Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface:
+            tags: ['oronts_asset_pilot.integrity_checker']
+
     # -- Core services ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\:
@@ -151,6 +154,17 @@ services:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    # -- Integrity (broken-asset detection) -------------------------------------
+
+    Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker:
+        arguments:
+            $checkers: !tagged_iterator oronts_asset_pilot.integrity_checker
+
+    Oronts\AssetPilotBundle\Service\AssetIntegrityService:
+        arguments:
+            $enabled: '%oronts_asset_pilot.integrity.enabled%'
+            $skipExtensions: '%oronts_asset_pilot.integrity.skip_extensions%'
+
     # -- Quarantine -------------------------------------------------------------
 
     Oronts\AssetPilotBundle\Service\QuarantineService:
@@ -274,6 +288,10 @@ services:
             - { name: 'console.command' }
 
     Oronts\AssetPilotBundle\Command\QuarantinePurgeCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\CheckIntegrityCommand:
         tags:
             - { name: 'console.command' }
 
