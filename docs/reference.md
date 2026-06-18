@@ -78,6 +78,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:verify-locations` | Report assets not at their rule-expected path (`--class` or `--object-id`) |
 | `asset-pilot:replay-failures` | Re-run failed objects (`--object-id`, `--since`, `--rule`, `--class`, `--async`) |
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
+| `asset-pilot:metrics` | Output metrics as Prometheus text exposition or JSON (`--format`) |
 | `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:sweep-empty-folders` | Find / `--delete` empty asset folders (`--folder`, `--limit`) |

@@ -215,6 +215,22 @@ re-verifies each is still unused before deleting (an asset referenced again whil
 skipped). It also runs automatically as a Pimcore maintenance task (`QuarantinePurgeTask`), so the
 hard-delete is scheduled without a dedicated cron.
 
+### Metrics (Prometheus / JSON)
+
+```bash
+# Prometheus text exposition (default) — for a node_exporter textfile collector or a pushgateway
+bin/console asset-pilot:metrics > /var/lib/node_exporter/textfile/asset_pilot.prom
+
+# Or JSON, for ad-hoc scripting
+bin/console asset-pilot:metrics --format=json
+```
+
+Emits the same audit-derived metrics as `GET /metrics` (operation counts per status, total, failure
+rate, completed-move duration aggregate). It is a command rather than an HTTP endpoint because every
+REST route here is permission-gated and a Prometheus scraper carries no Studio session; run it from
+cron into a textfile collector (or pipe to a pushgateway) to scrape. Output is unstyled so it pipes
+cleanly.
+
 ### Health Check
 
 ```bash
