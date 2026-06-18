@@ -11,6 +11,7 @@ use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetStorageSize;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
@@ -192,18 +193,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
     protected function nearestExistingFolder(string $path): ?Asset\Folder
     {
-        $candidate = '/' . trim($path, '/');
-        while ($candidate !== '/') {
-            $element = Asset::getByPath($candidate);
-            if ($element instanceof Asset\Folder) {
-                return $element;
-            }
-            $candidate = '/' . trim(dirname($candidate), '/');
-        }
-
-        $root = Asset::getByPath('/');
-
-        return $root instanceof Asset\Folder ? $root : null;
+        return AssetFolders::nearestExisting($path);
     }
 
     /**

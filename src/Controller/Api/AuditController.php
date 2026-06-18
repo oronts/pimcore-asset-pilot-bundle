@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Pimcore\Model\Asset;
 use Pimcore\Tool\Admin;
 use Psr\Log\LoggerInterface;
@@ -164,6 +165,13 @@ class AuditController
         $sourcePath = $entry['asset_path_from'] ?? '';
         $sourceDir = dirname($sourcePath);
         $sourceFilename = basename($sourcePath);
+
+        // Authorize before recreating the original folder tree (createFolderByPath is a side effect):
+        // check the create ACL on the nearest existing ancestor of the restore target.
+        $targetParent = AssetFolders::nearestExisting($sourceDir);
+        if ($targetParent !== null && !$targetParent->isAllowed('create')) {
+            return new JsonResponse(['error' => 'You are not permitted to restore this asset to its original folder'], Response::HTTP_FORBIDDEN);
+        }
 
         try {
             $folder = Asset\Service::createFolderByPath($sourceDir);
