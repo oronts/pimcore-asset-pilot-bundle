@@ -75,6 +75,25 @@ class ConfigurationTest extends TestCase
     }
 
     #[Test]
+    public function ruleAcceptsActionsAndKeepsTheirArbitraryKeys(): void
+    {
+        $config = $this->processRule(['actions' => [['type' => 'set_property', 'name' => 'cdn_ready', 'value' => 'yes']]]);
+
+        $action = $config['rules']['my_rule']['actions'][0];
+        self::assertSame('set_property', $action['type']);
+        self::assertSame('cdn_ready', $action['name']);
+        self::assertSame('yes', $action['value']);
+    }
+
+    #[Test]
+    public function ruleActionRequiresAType(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->processRule(['actions' => [['name' => 'cdn_ready']]]);
+    }
+
+    #[Test]
     public function confidenceThresholdsDefaultToThirtyAndNinety(): void
     {
         $config = (new Processor())->processConfiguration(new Configuration(), [[]]);

@@ -20,6 +20,7 @@ readonly class Rule
         public bool $enabled,
         public array $filters,
         public array $options = [],
+        public array $actions = [],
     ) {}
 
     public static function fromConfig(string $name, array $config): self
@@ -36,6 +37,7 @@ readonly class Rule
             enabled: $config['enabled'] ?? true,
             filters: $config['filters'] ?? [],
             options: $config['options'] ?? [],
+            actions: $config['actions'] ?? [],
         );
     }
 
@@ -58,6 +60,7 @@ readonly class Rule
             'enabled' => $this->enabled,
             'filters' => $this->filters,
             'options' => $this->options,
+            'actions' => $this->actions,
         ];
     }
 }

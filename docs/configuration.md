@@ -91,6 +91,8 @@ oronts_asset_pilot:
 | `filters.min_size` | `int` | no | `null` | Minimum file size in bytes |
 | `filters.max_size` | `int` | no | `null` | Maximum file size in bytes |
 | `filters.extensions` | `string[]` | no | `[]` | Allowed file extensions |
+| `options` | `map` | no | `{}` | Arbitrary per-rule data for custom filters/strategies |
+| `actions` | `list` | no | `[]` | Post-move actions (`{type, ...}`); built-in `set_property`. See [Extending](extending.md#rule-actions-do-more-than-move) |
 
 ## Removed keys
 

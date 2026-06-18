@@ -51,6 +51,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `enabled` | bool | `true` | Toggle the rule |
 | `filters` | map | `{}` | `types`, `min_size`, `max_size`, `extensions` |
 | `options` | map | `{}` | Arbitrary per-rule data for custom code |
+| `actions` | list | `[]` | Post-move actions (`{type, ...}`); built-in `set_property`. See [Extending](extending.md#rule-actions-do-more-than-move) |
 
 ## Commands
 
@@ -130,6 +131,7 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.twig_extension` | Twig `ExtensionInterface` |
 | `oronts_asset_pilot.expression_function_provider` | `ExpressionFunctionProviderInterface` |
 | `oronts_asset_pilot.health_check` | `HealthCheckInterface` |
+| `oronts_asset_pilot.rule_action` | `RuleActionInterface` (post-move actions, built-in `set_property`) |
 
 The default path resolver is a single replaceable service (`PathResolverInterface`, below), not a
 tagged chain.

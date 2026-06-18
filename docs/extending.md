@@ -358,6 +358,56 @@ class ConverterBinaryHealthCheck implements HealthCheckInterface
 No service config is needed beyond autowiring; the interface tag is applied automatically. Keep the
 public message free of secrets or internals (it is returned by the REST endpoint).
 
+### Rule Actions (do more than move)
+
+A rule can run post-move actions on the organized asset via its `actions` config. Each entry has a
+`type` resolved to a tagged `oronts_asset_pilot.rule_action` service, plus that action's own keys.
+Actions run only after a successful move, never in dry-run; a failing action is logged and isolated
+(it never undoes the move or aborts the others).
+
+The built-in `set_property` action sets an asset property from a static `value` or, for
+object-derived metadata, from the owning object via a `from` getter:
+
+```yaml
+oronts_asset_pilot:
+    rules:
+        product_images:
+            class: Product
+            target_path: '/Products/{{ object.getKey()|safe_key }}'
+            actions:
+                - { type: set_property, name: cdn_ready, property_type: bool, value: true }
+                - { type: set_property, name: product_code, from: productCode }   # $object->getProductCode()
+```
+
+Add your own action (e.g. assign a tag, derive any metadata, call an external system) by
+implementing `RuleActionInterface`; it is auto-tagged and selected by `getType()`:
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Action\RuleActionInterface;
+use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
+
+class AssignReviewTagAction implements RuleActionInterface
+{
+    public function getType(): string
+    {
+        return 'assign_review_tag';
+    }
+
+    public function apply(Asset $asset, AbstractObject $object, array $config): void
+    {
+        // $config carries this action's keys; $object is the owning DataObject for derived values.
+        // ... assign a tag / write metadata / notify ...
+    }
+}
+```
+
+Then reference it: `actions: [{ type: assign_review_tag }]`. An action that saves the asset must do
+so loop-safely (see [Architecture](architecture.md)); the built-in `set_property` writes the
+property directly, so it never re-enters the pipeline.
+
 ### Events
 
 Subscribe to asset move events for custom logic:

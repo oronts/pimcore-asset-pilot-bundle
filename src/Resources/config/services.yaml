@@ -19,6 +19,9 @@ services:
         Oronts\AssetPilotBundle\Health\HealthCheckInterface:
             tags: ['oronts_asset_pilot.health_check']
 
+        Oronts\AssetPilotBundle\Action\RuleActionInterface:
+            tags: ['oronts_asset_pilot.rule_action']
+
     # -- Core services ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\:
@@ -147,6 +150,16 @@ services:
     Oronts\AssetPilotBundle\Service\UnusedAssetFinder:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    # -- Rule actions (post-move) -----------------------------------------------
+
+    Oronts\AssetPilotBundle\Action\RuleActionResolver:
+        arguments:
+            $actions: !tagged_iterator oronts_asset_pilot.rule_action
+
+    Oronts\AssetPilotBundle\EventListener\RuleActionListener:
+        tags:
+            - { name: 'kernel.event_listener', event: !php/const Oronts\AssetPilotBundle\Event\AssetPilotEvents::POST_MOVE, method: 'onPostMove' }
 
     # -- Maintenance tasks ------------------------------------------------------
 

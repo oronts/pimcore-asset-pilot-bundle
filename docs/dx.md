@@ -30,6 +30,7 @@ no config edits.
 | `oronts_asset_pilot.twig_extension` | Twig `ExtensionInterface` | added to the path-template Twig env | [link](extending.md#add-twig-filtersfunctions-to-path-templates) |
 | `oronts_asset_pilot.expression_function_provider` | `ExpressionFunctionProviderInterface` | registered on the condition evaluator | [link](extending.md#add-functions-to-rule-conditions) |
 | `oronts_asset_pilot.health_check` | `HealthCheckInterface` | run by `asset-pilot:health` and `GET /health` | [link](extending.md#add-a-health-check) |
+| `oronts_asset_pilot.rule_action` | `RuleActionInterface` | post-move actions selected by a rule's `actions` | [link](extending.md#rule-actions-do-more-than-move) |
 
 The default path resolver is a single service, not a tagged chain; to change it, replace the
 `PathResolverInterface` alias (see below and [Overriding](overriding.md)).
