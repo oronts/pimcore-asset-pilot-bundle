@@ -37,6 +37,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `confidence.recently_uploaded_days` | int | `30` | Upper bound (days) for the `recently_uploaded` confidence bucket |
 | `confidence.probably_unused_days` | int | `90` | Upper bound (days) for `probably_unused`; older scores `definitely_unused` |
 | `quarantine.folder` | string | `/Quarantine` | Folder quarantined assets are moved to instead of being deleted |
+| `quarantine.grace_days` | int | `30` | Days before the purge task may hard-delete a quarantined asset (if still unused) |
 
 ### Rule options
 
@@ -72,6 +73,8 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:verify-locations` | Report assets not at their rule-expected path (`--class`) |
 | `asset-pilot:replay-failures` | Re-run failed objects (`--since`, `--rule`, `--class`, `--async`) |
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
+| `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder (`--folder`, `--async`) |
+| `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 
 ## REST endpoints
 

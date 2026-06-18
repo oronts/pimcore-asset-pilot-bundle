@@ -244,6 +244,11 @@ class Configuration implements ConfigurationInterface
                             ->cannotBeEmpty()
                             ->info('Asset folder quarantined assets are moved to instead of being deleted.')
                         ->end()
+                        ->integerNode('grace_days')
+                            ->defaultValue(30)
+                            ->min(0)
+                            ->info('Days a quarantined asset is kept before the purge task may hard-delete it (if still unused).')
+                        ->end()
                     ->end()
                 ->end()
             ->end();

@@ -156,6 +156,7 @@ services:
     Oronts\AssetPilotBundle\Service\QuarantineService:
         arguments:
             $quarantineFolder: '%oronts_asset_pilot.quarantine.folder%'
+            $graceDays: '%oronts_asset_pilot.quarantine.grace_days%'
 
     # -- Rule actions (post-move) -----------------------------------------------
 
@@ -172,6 +173,10 @@ services:
     Oronts\AssetPilotBundle\Maintenance\AuditRetentionTask:
         tags:
             - { name: 'pimcore.maintenance.task', type: 'assetPilotAuditRetention' }
+
+    Oronts\AssetPilotBundle\Maintenance\QuarantinePurgeTask:
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotQuarantinePurge' }
 
     # -- Health checks ----------------------------------------------------------
 
@@ -265,6 +270,10 @@ services:
             - { name: 'console.command' }
 
     Oronts\AssetPilotBundle\Command\ReorganizeAssetsCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\QuarantinePurgeCommand:
         tags:
             - { name: 'console.command' }
 

@@ -55,6 +55,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
 
         // Quarantine
         $container->setParameter('oronts_asset_pilot.quarantine.folder', $config['quarantine']['folder']);
+        $container->setParameter('oronts_asset_pilot.quarantine.grace_days', $config['quarantine']['grace_days']);
 
         // Process rules into Rule objects
         $rules = [];

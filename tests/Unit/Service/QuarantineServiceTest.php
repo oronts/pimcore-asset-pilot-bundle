@@ -28,6 +28,7 @@ class QuarantineServiceTest extends TestCase
         ?LoopGuard $loopGuard = null,
         bool $isReferenced = false,
         bool $allowCreate = true,
+        array $expiredIds = [],
     ): object {
         $finder = $this->createMock(UnusedAssetFinderInterface::class);
         $finder->method('isReferenced')->willReturn($isReferenced);
@@ -41,12 +42,14 @@ class QuarantineServiceTest extends TestCase
             $assetsById,
             $originalPaths,
             $allowCreate,
+            $expiredIds,
         ) extends QuarantineService {
             public array $recorded = [];
             public array $removed = [];
+            public array $deleted = [];
 
-            /** @param array<int, ?Asset> $assetsById @param array<int, ?string> $originalPaths */
-            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private bool $allowCreate)
+            /** @param array<int, ?Asset> $assetsById @param array<int, ?string> $originalPaths @param list<int> $expiredIds */
+            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private bool $allowCreate, private array $expiredIds)
             {
                 parent::__construct($c, $lg, $f, $ed, $log);
             }
@@ -54,6 +57,16 @@ class QuarantineServiceTest extends TestCase
             protected function loadAsset(int $id): ?Asset
             {
                 return $this->assetsById[$id] ?? null;
+            }
+
+            protected function findExpired(string $cutoff, int $limit): array
+            {
+                return $this->expiredIds;
+            }
+
+            protected function deleteAsset(Asset $asset): void
+            {
+                $this->deleted[] = $asset;
             }
 
             protected function resolveFolder(string $path): Asset\Folder
@@ -153,6 +166,42 @@ class QuarantineServiceTest extends TestCase
         $service = $this->service([5 => $this->asset('/x')], []);
 
         self::assertFalse($service->restore(5));
+        self::assertSame([], $service->removed);
+    }
+
+    #[Test]
+    public function purgeHardDeletesUnusedExpiredAssetsAndClearsTheRecord(): void
+    {
+        $service = $this->service([1 => $this->asset('/Quarantine/a.jpg')], expiredIds: [1]);
+
+        $result = $service->purgeExpired(30);
+
+        self::assertSame(1, $result['purged']);
+        self::assertCount(1, $service->deleted);
+        self::assertSame([1], $service->removed);
+    }
+
+    #[Test]
+    public function purgeSkipsAnEntryThatBecameReferenced(): void
+    {
+        $service = $this->service([1 => $this->asset('/Quarantine/a.jpg')], isReferenced: true, expiredIds: [1]);
+
+        $result = $service->purgeExpired(30);
+
+        self::assertSame(0, $result['purged']);
+        self::assertSame(1, $result['skipped']);
+        self::assertSame([], $service->deleted);
+    }
+
+    #[Test]
+    public function purgeDryRunCountsButDeletesNothing(): void
+    {
+        $service = $this->service([1 => $this->asset('/Quarantine/a.jpg')], expiredIds: [1]);
+
+        $result = $service->purgeExpired(30, dryRun: true);
+
+        self::assertSame(1, $result['purged']);
+        self::assertSame([], $service->deleted);
         self::assertSame([], $service->removed);
     }
 

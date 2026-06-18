@@ -112,6 +112,23 @@ Reads the distinct failed objects from the audit log (bounded by `--limit`, grou
 flood of failures is not an unbounded scan) and re-organizes each. `--async` queues an organize
 message per object instead of running inline. Exits non-zero if any inline re-organize fails again.
 
+### Quarantine Purge
+
+```bash
+# Hard-delete quarantined assets older than the grace period (only those still unused)
+bin/console asset-pilot:quarantine-purge
+
+# Preview what would be purged, or override the grace period
+bin/console asset-pilot:quarantine-purge --dry-run
+bin/console asset-pilot:quarantine-purge --grace-days=7
+```
+
+Quarantine (via `cleanup-unused` or the Studio bulk action) is a reversible soft-delete: assets are
+moved to `quarantine.folder`, not deleted. This purges entries past `quarantine.grace_days`, and
+re-verifies each is still unused before deleting (an asset referenced again while quarantined is
+skipped). It also runs automatically as a Pimcore maintenance task (`QuarantinePurgeTask`), so the
+hard-delete is scheduled without a dedicated cron.
+
 ### Health Check
 
 ```bash

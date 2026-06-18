@@ -22,6 +22,8 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  */
 class QuarantineService
 {
+    private const int PURGE_BATCH = 1000;
+
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoopGuard $loopGuard,
@@ -29,6 +31,7 @@ class QuarantineService
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly LoggerInterface $logger,
         protected readonly string $quarantineFolder = '/Quarantine',
+        protected readonly int $graceDays = 30,
     ) {}
 
     /**
@@ -178,6 +181,78 @@ class QuarantineService
         }
     }
 
+    /**
+     * Hard-delete quarantined assets older than the grace period, but only if they are still unused
+     * (an asset that gained a reference while quarantined is skipped, never deleted). Destructive, so
+     * each delete is per-asset ACL-gated; intended for the scheduled maintenance task / CLI.
+     *
+     * @return array{purged: int, skipped: int, failed: int}
+     */
+    public function purgeExpired(?int $graceDays = null, bool $dryRun = false): array
+    {
+        $graceDays = max(0, $graceDays ?? $this->graceDays);
+        $cutoff = (new \DateTimeImmutable())->modify(sprintf('-%d days', $graceDays))->format('Y-m-d H:i:s');
+
+        $purged = 0;
+        $skipped = 0;
+        $failed = 0;
+        $deletedIds = [];
+
+        // Bounded per run: a large backlog is chipped away across maintenance runs rather than
+        // hard-deleting an unbounded set in one pass.
+        foreach ($this->findExpired($cutoff, self::PURGE_BATCH) as $assetId) {
+            $assetId = (int) $assetId;
+            try {
+                if ($this->unusedAssetFinder->isReferenced($assetId)) {
+                    ++$skipped;
+                    $this->logger->warning('Asset Pilot: quarantined asset {id} is now referenced; not purging.', ['id' => $assetId]);
+                    continue;
+                }
+
+                $asset = $this->loadAsset($assetId);
+                if ($asset === null) {
+                    // The asset is already gone; drop the stale record.
+                    if (!$dryRun) {
+                        $this->deleteQuarantineRecord($assetId);
+                    }
+                    ++$purged;
+                    continue;
+                }
+
+                if (!$asset->isAllowed('delete')) {
+                    ++$skipped;
+                    continue;
+                }
+
+                if ($dryRun) {
+                    ++$purged;
+                    continue;
+                }
+
+                $this->deleteAsset($asset);
+                $this->deleteQuarantineRecord($assetId);
+                $deletedIds[] = $assetId;
+                ++$purged;
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('Asset Pilot: failed to purge quarantined asset {id}: {error}', [
+                    'id' => $assetId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+            }
+        }
+
+        if ($deletedIds !== []) {
+            $this->eventDispatcher->dispatch(
+                new AssetMutationEvent($deletedIds, 'purge', ['grace_days' => $graceDays]),
+                AssetPilotEvents::UNUSED_DELETED,
+            );
+        }
+
+        return ['purged' => $purged, 'skipped' => $skipped, 'failed' => $failed];
+    }
+
     protected function moveGuarded(Asset $asset, int $assetId, callable $mutate): void
     {
         $this->loopGuard->markAssetProcessing($assetId);
@@ -243,5 +318,28 @@ class QuarantineService
     protected function deleteQuarantineRecord(int $assetId): void
     {
         $this->connection->delete(Installer::TABLE_QUARANTINE, ['asset_id' => $assetId]);
+    }
+
+    /**
+     * @return list<int> oldest-first asset ids quarantined before the cutoff, capped at $limit
+     */
+    protected function findExpired(string $cutoff, int $limit): array
+    {
+        $rows = $this->connection->createQueryBuilder()
+            ->select('asset_id')
+            ->from(Installer::TABLE_QUARANTINE)
+            ->where('quarantined_at < :cutoff')
+            ->setParameter('cutoff', $cutoff)
+            ->orderBy('quarantined_at', 'ASC')
+            ->setMaxResults(max(1, $limit))
+            ->executeQuery()
+            ->fetchFirstColumn();
+
+        return array_map('intval', $rows);
+    }
+
+    protected function deleteAsset(Asset $asset): void
+    {
+        $asset->delete();
     }
 }
