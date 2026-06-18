@@ -9,7 +9,7 @@ use Pimcore\Model\DataObject\AbstractObject;
 
 /**
  * Contributes extra variables to the path-template context. Consumers tag an implementation with
- * `oronts_asset_pilot.context_provider` to expose their own domain values (e.g. sapId, categories)
+ * `oronts_asset_pilot.context_provider` to expose their own domain values (e.g. productCode, region)
  * to target_path templates, instead of the bundle hard-coding consumer-specific fields.
  */
 interface ContextProviderInterface

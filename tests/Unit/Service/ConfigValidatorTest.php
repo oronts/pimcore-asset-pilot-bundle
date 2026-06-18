@@ -102,7 +102,7 @@ class ConfigValidatorTest extends TestCase
     #[Test]
     public function validatePathTemplateUsingBundleFiltersPasses(): void
     {
-        $rule = $this->createRule(targetPath: '/Products/{{ object.getKey()|safe_key }}/{{ coalesce(object.getSapId(), "unknown") }}');
+        $rule = $this->createRule(targetPath: '/Products/{{ object.getKey()|safe_key }}/{{ coalesce(object.getProductCode(), "unknown") }}');
         $results = $this->validator->validate([$rule]);
 
         $pathResult = array_values(array_filter($results, static fn (ValidationResult $r) => $r->check === 'path_template'))[0];

@@ -79,8 +79,8 @@ class TemplatePathResolverTest extends TestCase
 
         self::assertArrayHasKey('object', $context);
         self::assertArrayHasKey('date', $context);
-        self::assertArrayNotHasKey('sapId', $context);
-        self::assertArrayNotHasKey('salesOrgs', $context);
+        self::assertArrayNotHasKey('productCode', $context);
+        self::assertArrayNotHasKey('region', $context);
     }
 
     #[Test]
@@ -89,7 +89,7 @@ class TemplatePathResolverTest extends TestCase
         $provider = new class () implements ContextProviderInterface {
             public function getContext(AbstractObject $object, Asset $asset, ?string $locale): array
             {
-                return ['sapId' => 'SAP1', 'region' => 'EU'];
+                return ['productCode' => 'A-100', 'region' => 'EU'];
             }
         };
 
@@ -102,7 +102,7 @@ class TemplatePathResolverTest extends TestCase
 
         $context = $resolver->context($this->createMock(AbstractObject::class), $this->createMock(Asset::class));
 
-        self::assertSame('SAP1', $context['sapId']);
+        self::assertSame('A-100', $context['productCode']);
         self::assertSame('EU', $context['region']);
     }
 

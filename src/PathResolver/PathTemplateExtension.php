@@ -28,8 +28,8 @@ class PathTemplateExtension extends AbstractExtension
             }),
 
             // |pluck('property') — extract a property/method from each item in an array
-            // Usage: {{ categories|pluck('sapId') }} → ['SAP001', 'SAP002']
-            // Usage: {{ categories|pluck('getSapId') }} → same, calls method
+            // Usage: {{ categories|pluck('code') }} → ['A-100', 'A-200']
+            // Usage: {{ categories|pluck('getCode') }} → same, calls method
             new TwigFilter('pluck', static function (mixed $items, string $property): array {
                 if (!is_iterable($items)) {
                     return [];
@@ -62,7 +62,7 @@ class PathTemplateExtension extends AbstractExtension
             }),
 
             // |first_of('property') — get property from first item, or 'unknown'
-            // Usage: {{ categories|first_of('sapId') }} → 'SAP001'
+            // Usage: {{ categories|first_of('code') }} → 'A-100'
             new TwigFilter('first_of', static function (mixed $items, string $property, string $fallback = 'unknown'): string {
                 if (!is_iterable($items)) {
                     return $fallback;

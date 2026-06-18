@@ -103,7 +103,7 @@ class TemplatePathResolver implements PathResolverInterface
 
     protected function buildContext(AbstractObject $object, Asset $asset, ?string $locale = null): array
     {
-        // Consumer-specific variables (sapId, categories, ...) come from tagged context providers,
+        // Consumer-specific variables (productCode, region, ...) come from tagged context providers,
         // keeping this generic bundle free of any one consumer's domain fields. Core keys win over
         // provider keys so a provider can never shadow object/asset/date/locale/className.
         $context = [];

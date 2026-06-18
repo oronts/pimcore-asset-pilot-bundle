@@ -20,8 +20,8 @@ class RuleTest extends TestCase
             name: 'test_rule',
             class: 'Product',
             fields: ['productImages'],
-            condition: 'object.getSapId() != null',
-            targetPath: '/Products/{{ sapId }}/Images',
+            condition: 'object.getProductCode() != null',
+            targetPath: '/Products/{{ productCode }}/Images',
             strategy: MoveStrategy::Always,
             callback: null,
             priority: 100,
@@ -32,8 +32,8 @@ class RuleTest extends TestCase
         self::assertSame('test_rule', $rule->name);
         self::assertSame('Product', $rule->class);
         self::assertSame(['productImages'], $rule->fields);
-        self::assertSame('object.getSapId() != null', $rule->condition);
-        self::assertSame('/Products/{{ sapId }}/Images', $rule->targetPath);
+        self::assertSame('object.getProductCode() != null', $rule->condition);
+        self::assertSame('/Products/{{ productCode }}/Images', $rule->targetPath);
         self::assertSame(MoveStrategy::Always, $rule->strategy);
         self::assertNull($rule->callback);
         self::assertSame(100, $rule->priority);
@@ -46,14 +46,14 @@ class RuleTest extends TestCase
     {
         $rule = Rule::fromConfig('my_rule', [
             'class' => 'Product',
-            'target_path' => '/Assets/{{ sapId }}',
+            'target_path' => '/Assets/{{ productCode }}',
         ]);
 
         self::assertSame('my_rule', $rule->name);
         self::assertSame('Product', $rule->class);
         self::assertSame([], $rule->fields);
         self::assertNull($rule->condition);
-        self::assertSame('/Assets/{{ sapId }}', $rule->targetPath);
+        self::assertSame('/Assets/{{ productCode }}', $rule->targetPath);
         self::assertSame(MoveStrategy::Always, $rule->strategy);
         self::assertNull($rule->callback);
         self::assertSame(10, $rule->priority);

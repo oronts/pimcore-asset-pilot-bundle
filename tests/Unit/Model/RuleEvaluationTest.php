@@ -19,7 +19,7 @@ class RuleEvaluationTest extends TestCase
             ruleName: 'product_images',
             matched: true,
             rejectionReason: null,
-            conditionExpression: 'object.getSapId() != null',
+            conditionExpression: 'object.getProductCode() != null',
             conditionResult: true,
             conditionError: null,
             filterDetails: null,
@@ -31,7 +31,7 @@ class RuleEvaluationTest extends TestCase
         self::assertSame('product_images', $eval->ruleName);
         self::assertTrue($eval->matched);
         self::assertNull($eval->rejectionReason);
-        self::assertSame('object.getSapId() != null', $eval->conditionExpression);
+        self::assertSame('object.getProductCode() != null', $eval->conditionExpression);
         self::assertTrue($eval->conditionResult);
         self::assertNull($eval->conditionError);
         self::assertNull($eval->filterDetails);
