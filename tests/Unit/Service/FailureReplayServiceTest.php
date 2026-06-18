@@ -138,4 +138,34 @@ class FailureReplayServiceTest extends TestCase
         self::assertSame(0, $result->organized);
         self::assertSame(0, $result->dispatched);
     }
+
+    #[Test]
+    public function replayObjectsReplaysTheGivenIdsWithoutConsultingTheAuditLog(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::once())->method('organize')->willReturn([]);
+
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects(self::never())->method('getDistinctFailedObjects');
+
+        $object = $this->createMock(AbstractObject::class);
+        $service = new class ($audit, $organizer, $this->createMock(MessageBusInterface::class), [1 => $object]) extends FailureReplayService {
+            /** @param array<int, ?AbstractObject> $objectsById */
+            public function __construct(AuditLoggerInterface $a, AssetOrganizer $o, MessageBusInterface $b, private array $objectsById)
+            {
+                parent::__construct($a, $o, $b, new NullLogger());
+            }
+
+            protected function loadObject(int $objectId): ?AbstractObject
+            {
+                return $this->objectsById[$objectId] ?? null;
+            }
+        };
+
+        $result = $service->replayObjects([1, 2]);
+
+        self::assertSame(2, $result->candidates);
+        self::assertSame(1, $result->organized);
+        self::assertSame(1, $result->skipped);
+    }
 }

@@ -27,6 +27,7 @@ class VerifyLocationsCommand extends Command
     protected function configure(): void
     {
         $this
+            ->addOption('object-id', null, InputOption::VALUE_REQUIRED, 'Check drift for a single object id instead of scanning a class')
             ->addOption('class', null, InputOption::VALUE_REQUIRED, 'DataObject class to scan')
             ->addOption('page', null, InputOption::VALUE_REQUIRED, 'Page of objects to scan', '1')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Objects per page', '50');
@@ -36,20 +37,40 @@ class VerifyLocationsCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
 
+        $objectId = $input->getOption('object-id');
         $className = $input->getOption('class');
-        if ($className === null || $className === '') {
-            $io->error('The --class option is required.');
+
+        if ($objectId !== null && $className !== null && $className !== '') {
+            $io->error('Provide either --object-id or --class, not both.');
 
             return Command::INVALID;
         }
 
-        $result = $this->drift->driftForClass(
-            (string) $className,
-            max(1, (int) $input->getOption('page')),
-            max(1, (int) $input->getOption('limit')),
-        );
+        if ($objectId !== null) {
+            if (!ctype_digit((string) $objectId) || (int) $objectId <= 0) {
+                $io->error('--object-id must be a positive integer.');
 
-        $io->title(sprintf('Asset Pilot — Location Drift (%s)', $className));
+                return Command::INVALID;
+            }
+            $result = $this->drift->driftForObjectId((int) $objectId);
+            if ($result === null) {
+                $io->error(sprintf('Object %d was not found.', (int) $objectId));
+
+                return Command::INVALID;
+            }
+            $io->title(sprintf('Asset Pilot — Location Drift (object %d)', (int) $objectId));
+        } elseif ($className !== null && $className !== '') {
+            $result = $this->drift->driftForClass(
+                (string) $className,
+                max(1, (int) $input->getOption('page')),
+                max(1, (int) $input->getOption('limit')),
+            );
+            $io->title(sprintf('Asset Pilot — Location Drift (%s)', $className));
+        } else {
+            $io->error('Provide either --object-id or --class.');
+
+            return Command::INVALID;
+        }
 
         if ($result['items'] === []) {
             $io->success(sprintf('No drift across %d scanned object(s).', $result['objectsScanned']));

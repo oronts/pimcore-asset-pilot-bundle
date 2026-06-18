@@ -37,14 +37,30 @@ class FailureReplayService
     public function replay(array $filters = [], bool $async = false, ?int $limit = null): ReplayResult
     {
         $candidates = $this->auditLogger->getDistinctFailedObjects($filters, $limit ?? $this->defaultLimit);
+        $objectIds = array_map(static fn (array $row): int => (int) ($row['object_id'] ?? 0), $candidates);
+
+        return $this->replayObjects($objectIds, $async);
+    }
+
+    /**
+     * Re-organize an explicit set of object ids (the targeted counterpart to replay(), for "re-run
+     * just this object" rather than every failed object in the audit log). Same idempotent,
+     * LoopGuard-safe organize as replay().
+     *
+     * @param int[] $objectIds
+     */
+    public function replayObjects(array $objectIds, bool $async = false): ReplayResult
+    {
+        // Distinct ids only: re-organizing one object twice is wasted work (the audit-driven path is
+        // already distinct; this also de-dupes an explicit --object-id=42,42).
+        $objectIds = array_values(array_unique(array_map('intval', $objectIds)));
 
         $organized = 0;
         $dispatched = 0;
         $skipped = 0;
         $failed = 0;
 
-        foreach ($candidates as $row) {
-            $objectId = (int) ($row['object_id'] ?? 0);
+        foreach ($objectIds as $objectId) {
             if ($objectId <= 0) {
                 ++$skipped;
                 continue;
@@ -86,7 +102,7 @@ class FailureReplayService
             $objectFailed ? ++$failed : ++$organized;
         }
 
-        return new ReplayResult(count($candidates), $organized, $dispatched, $skipped, $failed);
+        return new ReplayResult(count($objectIds), $organized, $dispatched, $skipped, $failed);
     }
 
     protected function dispatch(int $objectId): void

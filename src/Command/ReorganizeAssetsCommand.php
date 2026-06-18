@@ -27,6 +27,7 @@ class ReorganizeAssetsCommand extends Command
     protected function configure(): void
     {
         $this
+            ->addOption('by-ids', null, InputOption::VALUE_REQUIRED, 'Re-organize the owners of these specific asset ids (comma-separated), instead of scanning a folder')
             ->addOption('folder', null, InputOption::VALUE_REQUIRED, 'Source asset folder to scan (e.g. /Staging)')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max assets to scan', '100')
             ->addOption('async', null, InputOption::VALUE_NONE, 'Queue each owner via Messenger instead of running inline');
@@ -36,18 +37,35 @@ class ReorganizeAssetsCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
 
+        $async = (bool) $input->getOption('async');
+        $byIds = $input->getOption('by-ids');
         $folder = $input->getOption('folder');
-        if ($folder === null || $folder === '') {
-            $io->error('The --folder option is required.');
+
+        if ($byIds !== null && $folder !== null && $folder !== '') {
+            $io->error('Provide either --by-ids or --folder, not both.');
 
             return Command::INVALID;
         }
 
-        $result = $this->reorganizer->reorganizeFolder(
-            (string) $folder,
-            max(1, (int) $input->getOption('limit')),
-            (bool) $input->getOption('async'),
-        );
+        if ($byIds !== null) {
+            $ids = array_values(array_filter(array_map('intval', explode(',', (string) $byIds)), static fn (int $id): bool => $id > 0));
+            if ($ids === []) {
+                $io->error('--by-ids must list one or more positive asset ids.');
+
+                return Command::INVALID;
+            }
+            $result = $this->reorganizer->reorganizeAssets($ids, $async);
+        } elseif ($folder !== null && $folder !== '') {
+            $result = $this->reorganizer->reorganizeFolder(
+                (string) $folder,
+                max(1, (int) $input->getOption('limit')),
+                $async,
+            );
+        } else {
+            $io->error('Provide either --by-ids or --folder.');
+
+            return Command::INVALID;
+        }
 
         $io->title('Asset Pilot — Reorganize Assets');
         $io->definitionList(

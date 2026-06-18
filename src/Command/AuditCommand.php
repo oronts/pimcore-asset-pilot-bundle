@@ -30,6 +30,8 @@ class AuditCommand extends Command
     {
         $this
             ->addOption('since', null, InputOption::VALUE_REQUIRED, 'Show entries since (e.g., "1 week ago")')
+            ->addOption('asset-id', null, InputOption::VALUE_REQUIRED, 'Filter to a single asset id')
+            ->addOption('object-id', null, InputOption::VALUE_REQUIRED, 'Filter to a single object id')
             ->addOption('class', null, InputOption::VALUE_REQUIRED, 'Filter by DataObject class')
             ->addOption('status', null, InputOption::VALUE_REQUIRED, 'Filter by status (completed, failed, skipped)')
             ->addOption('rule', null, InputOption::VALUE_REQUIRED, 'Filter by rule name')
@@ -57,6 +59,18 @@ class AuditCommand extends Command
         }
         if ($rule = $input->getOption('rule')) {
             $filters['rule_name'] = $rule;
+        }
+        foreach (['asset-id' => 'asset_id', 'object-id' => 'object_id'] as $option => $filterKey) {
+            $raw = $input->getOption($option);
+            if ($raw === null) {
+                continue;
+            }
+            if (!ctype_digit((string) $raw) || (int) $raw <= 0) {
+                $io->error(sprintf('--%s must be a positive integer.', $option));
+
+                return Command::INVALID;
+            }
+            $filters[$filterKey] = (int) $raw;
         }
         if ($since = $input->getOption('since')) {
             $filters['since'] = (new \DateTimeImmutable($since))->format('Y-m-d H:i:s');

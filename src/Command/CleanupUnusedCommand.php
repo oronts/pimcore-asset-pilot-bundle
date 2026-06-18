@@ -29,6 +29,7 @@ class CleanupUnusedCommand extends Command
     protected function configure(): void
     {
         $this
+            ->addOption('by-ids', null, InputOption::VALUE_REQUIRED, 'Act on these specific asset ids (comma-separated) instead of scanning. Each is still re-verified as unused and permission-checked.')
             ->addOption('before', null, InputOption::VALUE_REQUIRED, 'Assets modified before this date (e.g. "2024-01-01", "-90 days", "-6 months")')
             ->addOption('after', null, InputOption::VALUE_REQUIRED, 'Assets modified after this date')
             ->addOption('type', null, InputOption::VALUE_REQUIRED, 'Filter by asset type, comma-separated (e.g. "image,document")')
@@ -62,9 +63,8 @@ HELP
     {
         $io = new SymfonyStyle($input, $output);
 
-        $filters = $this->buildFilters($input);
         $action = $input->getOption('action');
-        $batchSize = (int) $input->getOption('batch-size');
+        $batchSize = max(1, (int) $input->getOption('batch-size'));
         $moveTo = (string) $input->getOption('move-to');
 
         if ($action === 'move' && empty($moveTo)) {
@@ -77,6 +77,19 @@ HELP
             return Command::FAILURE;
         }
 
+        if (($byIds = $input->getOption('by-ids')) !== null) {
+            foreach (['before', 'after', 'type', 'extension', 'folder'] as $scanFilter) {
+                if ($input->getOption($scanFilter) !== null) {
+                    $io->error(sprintf('--%s cannot be combined with --by-ids (which names the assets explicitly).', $scanFilter));
+
+                    return Command::FAILURE;
+                }
+            }
+
+            return $this->runForIds($io, $output, (string) $byIds, $action, $moveTo, $batchSize, (bool) $input->getOption('dry-run'));
+        }
+
+        $filters = $this->buildFilters($input);
         $totalCount = $this->unusedAssetFinder->countUnused($filters);
 
         if ($totalCount === 0) {
@@ -143,18 +156,25 @@ HELP
      */
     protected function processBatches(OutputInterface $output, array $filters, string $action, string $moveTo, int $batchSize, int $totalCount): array
     {
-        $progressBar = new ProgressBar($output, $totalCount);
+        // Snapshot the candidate ids first: deleting shrinks the listing and moving leaves the asset
+        // unused (just relocated), so re-querying mid-run would reprocess the same first page and skip
+        // later assets. A fixed id list chunked into batches is correct for both actions.
+        return $this->processIds($output, $this->collectUnusedIds($filters, $batchSize, $totalCount), $action, $moveTo, $batchSize);
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array{succeeded: int, failed: int, processed: int, errors: array<int, string>}
+     */
+    protected function processIds(OutputInterface $output, array $ids, string $action, string $moveTo, int $batchSize): array
+    {
+        $progressBar = new ProgressBar($output, count($ids));
         $progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%');
         $progressBar->start();
 
         $succeeded = 0;
         $failed = 0;
         $errors = [];
-
-        // Snapshot the candidate ids first: deleting shrinks the listing and moving leaves the asset
-        // unused (just relocated), so re-querying mid-run would reprocess the same first page and skip
-        // later assets. A fixed id list chunked into batches is correct for both actions.
-        $ids = $this->collectUnusedIds($filters, $batchSize, $totalCount);
 
         foreach (array_chunk($ids, $batchSize) as $batch) {
             if ($action === 'delete') {
@@ -173,6 +193,37 @@ HELP
         $progressBar->finish();
 
         return ['succeeded' => $succeeded, 'failed' => $failed, 'processed' => count($ids), 'errors' => $errors];
+    }
+
+    /**
+     * The --by-ids path: act on a caller-named id set instead of a filter scan. deleteAssets() /
+     * moveAssets() re-verify each asset is still unused and permission-check it, so naming a
+     * referenced or locked asset is safely skipped, not force-deleted.
+     */
+    private function runForIds(SymfonyStyle $io, OutputInterface $output, string $byIds, string $action, string $moveTo, int $batchSize, bool $dryRun): int
+    {
+        $ids = array_values(array_filter(array_map('intval', explode(',', $byIds)), static fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            $io->error('--by-ids must list one or more positive asset ids.');
+
+            return Command::INVALID;
+        }
+
+        $io->title('Asset Pilot — Unused Asset Cleanup (by ids)');
+        $io->text(sprintf('Targeting <info>%d</info> asset id(s); each is re-verified as unused and permission-checked before %s.', count($ids), $action));
+
+        if ($dryRun) {
+            $io->note('DRY RUN — no changes will be made.');
+            $io->text(sprintf('Would %s: %s', $action, implode(', ', $ids)));
+
+            return Command::SUCCESS;
+        }
+
+        $result = $this->processIds($output, $ids, $action, $moveTo, $batchSize);
+        $io->newLine(2);
+        $this->renderSummary($io, $action, $result);
+
+        return $result['failed'] > 0 ? Command::FAILURE : Command::SUCCESS;
     }
 
     /**

@@ -70,6 +70,21 @@ class LocationDriftService
     }
 
     /**
+     * Drift for a single object, in the same shape as driftForClass so callers render it identically.
+     *
+     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int}|null null when the object does not exist
+     */
+    public function driftForObjectId(int $objectId): ?array
+    {
+        $object = $this->loadObject($objectId);
+        if ($object === null) {
+            return null;
+        }
+
+        return ['items' => $this->driftForObject($object), 'objectsScanned' => 1, 'page' => 1, 'limit' => 1];
+    }
+
+    /**
      * @return list<int>
      */
     protected function listObjectIds(string $className, int $offset, int $limit): array

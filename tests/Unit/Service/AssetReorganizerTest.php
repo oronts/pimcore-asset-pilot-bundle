@@ -103,4 +103,43 @@ class AssetReorganizerTest extends TestCase
         self::assertSame(1, $result->skipped);
         self::assertSame(0, $result->organized);
     }
+
+    #[Test]
+    public function reorganizeAssetsOrganizesTheOwnersOfTheGivenAssetIds(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        // assets 1,2 owned by 10; asset 2 also owned by 20 -> organize 10 and 20 once each.
+        $organizer->expects(self::exactly(2))->method('organize')->willReturn([]);
+
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects(self::never())->method('dispatch');
+
+        $object = $this->createMock(AbstractObject::class);
+        $result = $this->reorganizer(
+            [],
+            [1 => [10], 2 => [10, 20]],
+            $organizer,
+            $bus,
+            [10 => $object, 20 => $object],
+        )->reorganizeAssets([1, 2]);
+
+        self::assertSame(2, $result->assetsScanned);
+        self::assertSame(2, $result->ownerObjects);
+        self::assertSame(2, $result->organized);
+    }
+
+    #[Test]
+    public function reorganizeAssetsDedupesAndDropsNonPositiveIds(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::once())->method('organize')->willReturn([]);
+
+        $object = $this->createMock(AbstractObject::class);
+        $result = $this->reorganizer([], [5 => [10]], $organizer, $this->createMock(MessageBusInterface::class), [10 => $object])
+            ->reorganizeAssets([5, 5, 0, -3]);
+
+        self::assertSame(1, $result->assetsScanned);
+        self::assertSame(1, $result->ownerObjects);
+        self::assertSame(1, $result->organized);
+    }
 }

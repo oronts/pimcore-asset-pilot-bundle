@@ -98,6 +98,12 @@ class AuditLogger implements AuditLoggerInterface
             if (!empty($filters['rule_name'])) {
                 $qb->andWhere('rule_name = :rule')->setParameter('rule', $filters['rule_name']);
             }
+            if (!empty($filters['asset_id'])) {
+                $qb->andWhere('asset_id = :assetId')->setParameter('assetId', (int) $filters['asset_id']);
+            }
+            if (!empty($filters['object_id'])) {
+                $qb->andWhere('object_id = :objectId')->setParameter('objectId', (int) $filters['object_id']);
+            }
             if (!empty($filters['since'])) {
                 $qb->andWhere('created_at >= :since')->setParameter('since', $filters['since']);
             }

@@ -64,25 +64,32 @@ the imported rules (reusing `validate-config`) and aborts if any are invalid.
 # Re-organize the objects that own the assets sitting in a staging folder
 bin/console asset-pilot:reorganize-assets --folder=/Staging --limit=200
 
+# Re-organize the owners of specific assets only (e.g. the ids a just-finished import returned)
+bin/console asset-pilot:reorganize-assets --by-ids=1024,1025,1026
+
 # Queue each owner via the messenger worker instead of running inline
 bin/console asset-pilot:reorganize-assets --folder=/Staging --async
 ```
 
-Asset-centric counterpart to `organize` (which is object-first): for assets in `--folder`, it resolves
-the owning DataObjects (reverse dependencies) and re-organizes each, relocating the assets to their
-rule-derived paths. The scan is bounded by `--limit` and each owner is organized once; re-organizing
-is idempotent.
+Asset-centric counterpart to `organize` (which is object-first): for assets in `--folder` (or the
+explicit `--by-ids` set), it resolves the owning DataObjects (reverse dependencies) and re-organizes
+each, relocating the assets to their rule-derived paths. The scan is bounded by `--limit` and each
+owner is organized once; re-organizing is idempotent.
 
 ### Verify Locations (Drift)
 
 ```bash
 # Report assets no longer at the path the current rules expect (organization drift)
 bin/console asset-pilot:verify-locations --class=Product --limit=100
+
+# Check drift for a single object instead of scanning a whole class
+bin/console asset-pilot:verify-locations --object-id=42
 ```
 
 After a rule change, already-organized assets stay in their old location. This dry-runs the current
-rules over a bounded, paged set of objects of `--class` and lists each asset whose actual path
-differs from the rule-expected path (asset, rule, current path, expected path). It is read-only;
+rules over a bounded, paged set of objects of `--class` (or a single `--object-id`) and lists each
+asset whose actual path differs from the rule-expected path (asset, rule, current path, expected
+path). It is read-only;
 re-organize via `asset-pilot:organize` or the Operations tab. A whole-catalog sweep should page
 through with `--page` (or run async) rather than one blocking pass.
 
@@ -106,11 +113,15 @@ bin/console asset-pilot:replay-failures
 
 # Scope by time, rule, or class; queue via Messenger; cap the candidate set
 bin/console asset-pilot:replay-failures --since="-7 days" --rule=product_images --async --limit=200
+
+# Replay specific objects only, instead of every failed object
+bin/console asset-pilot:replay-failures --object-id=42,43
 ```
 
 Reads the distinct failed objects from the audit log (bounded by `--limit`, grouped per object so a
-flood of failures is not an unbounded scan) and re-organizes each. `--async` queues an organize
-message per object instead of running inline. Exits non-zero if any inline re-organize fails again.
+flood of failures is not an unbounded scan) and re-organizes each. With `--object-id` it re-organizes
+exactly those objects and never touches the audit log. `--async` queues an organize message per
+object instead of running inline. Exits non-zero if any inline re-organize fails again.
 
 ### Check Integrity
 
@@ -199,6 +210,10 @@ bin/console asset-pilot:audit --class=Product --status=completed --since="1 week
 # Filter by rule
 bin/console asset-pilot:audit --rule=product_images
 
+# Trace a single asset or object (e.g. "what happened to this asset?")
+bin/console asset-pilot:audit --asset-id=1024
+bin/console asset-pilot:audit --object-id=42
+
 # Clean up old entries (respects retention_days config)
 bin/console asset-pilot:audit --cleanup
 ```
@@ -217,6 +232,9 @@ bin/console asset-pilot:cleanup-unused --action=move --move-to="/Archive/Unused"
 
 # Filter by extension and folder
 bin/console asset-pilot:cleanup-unused --extension=jpg,png --folder=/uploads/temp --dry-run
+
+# Act on specific asset ids only (each is still re-verified as unused + permission-checked)
+bin/console asset-pilot:cleanup-unused --by-ids=1024,1025 --action=delete
 ```
 
 > Note: the unused-asset cleanup cannot filter by file size. The Pimcore `assets` table has no

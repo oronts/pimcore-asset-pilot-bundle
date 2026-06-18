@@ -60,4 +60,53 @@ class LocationDriftServiceTest extends TestCase
 
         self::assertSame([], $service->driftForObject($this->createMock(AbstractObject::class)));
     }
+
+    #[Test]
+    public function driftForObjectIdReturnsTheSameShapeAsAClassScan(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('dryRun')->willReturn([
+            $this->op(1, '/old/a.jpg', '/new/a.jpg', OperationStatus::Pending),
+        ]);
+
+        $service = new class ($organizer, $this->createMock(AbstractObject::class)) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer, private readonly AbstractObject $object)
+            {
+                parent::__construct($organizer, new NullLogger());
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->object;
+            }
+        };
+
+        $result = $service->driftForObjectId(42);
+
+        self::assertNotNull($result);
+        self::assertCount(1, $result['items']);
+        self::assertSame(1, $result['objectsScanned']);
+        self::assertSame(1, $result['items'][0]->assetId);
+    }
+
+    #[Test]
+    public function driftForObjectIdReturnsNullWhenTheObjectIsMissing(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::never())->method('dryRun');
+
+        $service = new class ($organizer) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer)
+            {
+                parent::__construct($organizer, new NullLogger());
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return null;
+            }
+        };
+
+        self::assertNull($service->driftForObjectId(999));
+    }
 }

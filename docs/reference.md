@@ -65,17 +65,17 @@ Full flags in [Commands](commands.md).
 |---------|---------|
 | `asset-pilot:organize` | Organize objects (`--class`, `--object-id`, `--dry-run`, `--async`, `--batch-size`) |
 | `asset-pilot:status` | Configured rules and statistics (`--json`) |
-| `asset-pilot:audit` | Browse / filter / `--cleanup` the audit log |
-| `asset-pilot:cleanup-unused` | Delete or move unused assets (`--dry-run`, `--action`, `--move-to`) |
+| `asset-pilot:audit` | Browse / filter / `--cleanup` the audit log (`--asset-id`, `--object-id`, `--class`, `--rule`, `--status`) |
+| `asset-pilot:cleanup-unused` | Delete or move unused assets (`--by-ids`, `--dry-run`, `--action`, `--move-to`) |
 | `asset-pilot:validate-config` | Validate rules, conditions, templates, callbacks, filters |
 | `asset-pilot:debug-rule` | Per-rule evaluation trace for an object/asset |
 | `asset-pilot:rules-export` | Export the rule set as a portable JSON/YAML artifact |
 | `asset-pilot:rules-diff` | Diff an artifact against the current rules (`--fail-on-diff`) |
 | `asset-pilot:rule-overlap` | Report rules competing for the same assets |
-| `asset-pilot:verify-locations` | Report assets not at their rule-expected path (`--class`) |
-| `asset-pilot:replay-failures` | Re-run failed objects (`--since`, `--rule`, `--class`, `--async`) |
+| `asset-pilot:verify-locations` | Report assets not at their rule-expected path (`--class` or `--object-id`) |
+| `asset-pilot:replay-failures` | Re-run failed objects (`--object-id`, `--since`, `--rule`, `--class`, `--async`) |
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
-| `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder (`--folder`, `--async`) |
+| `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
 

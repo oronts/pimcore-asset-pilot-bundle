@@ -36,6 +36,42 @@ class AssetReorganizer
         $limit = $limit > 0 ? $limit : $this->defaultLimit;
         $assetIds = $this->listAssetIdsInFolder($folderPath, $limit);
 
+        return $this->reorganizeOwnersOf($assetIds, $async);
+    }
+
+    /**
+     * Re-organize the owners of an explicit set of asset ids (the targeted counterpart to
+     * reorganizeFolder, for "fix just these imported assets" rather than a whole staging folder).
+     *
+     * @param int[] $assetIds
+     */
+    public function reorganizeAssets(array $assetIds, bool $async = false): ReorganizeResult
+    {
+        $assetIds = array_values(array_unique(array_filter(
+            array_map('intval', $assetIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+
+        return $this->reorganizeOwnersOf($assetIds, $async);
+    }
+
+    /**
+     * @param list<int> $assetIds
+     */
+    private function reorganizeOwnersOf(array $assetIds, bool $async): ReorganizeResult
+    {
+        $ownerIds = $this->ownerIdsFor($assetIds);
+        $counts = $this->organizeOwners($ownerIds, $async);
+
+        return new ReorganizeResult(count($assetIds), count($ownerIds), $counts['organized'], $counts['dispatched'], $counts['skipped'], $counts['failed']);
+    }
+
+    /**
+     * @param list<int> $assetIds
+     * @return list<int> the distinct object ids that own any of the assets
+     */
+    private function ownerIdsFor(array $assetIds): array
+    {
         $ownerIds = [];
         $seen = [];
         foreach ($assetIds as $assetId) {
@@ -47,6 +83,15 @@ class AssetReorganizer
             }
         }
 
+        return $ownerIds;
+    }
+
+    /**
+     * @param list<int> $ownerIds
+     * @return array{organized: int, dispatched: int, skipped: int, failed: int}
+     */
+    private function organizeOwners(array $ownerIds, bool $async): array
+    {
         $organized = 0;
         $dispatched = 0;
         $skipped = 0;
@@ -87,7 +132,7 @@ class AssetReorganizer
             $objectFailed ? ++$failed : ++$organized;
         }
 
-        return new ReorganizeResult(count($assetIds), count($ownerIds), $organized, $dispatched, $skipped, $failed);
+        return ['organized' => $organized, 'dispatched' => $dispatched, 'skipped' => $skipped, 'failed' => $failed];
     }
 
     protected function dispatch(int $objectId): void

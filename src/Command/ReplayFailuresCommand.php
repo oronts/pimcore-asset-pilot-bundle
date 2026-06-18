@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Model\ReplayResult;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -27,6 +28,7 @@ class ReplayFailuresCommand extends Command
     protected function configure(): void
     {
         $this
+            ->addOption('object-id', null, InputOption::VALUE_REQUIRED, 'Replay only these specific object ids (comma-separated), instead of every failed object')
             ->addOption('since', null, InputOption::VALUE_REQUIRED, 'Only failures at or after this date (e.g. "-7 days")')
             ->addOption('rule', null, InputOption::VALUE_REQUIRED, 'Only failures from this rule')
             ->addOption('class', null, InputOption::VALUE_REQUIRED, 'Only failures for this object class')
@@ -38,6 +40,20 @@ class ReplayFailuresCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
         $io->title('Asset Pilot — Replay Failures');
+
+        $async = (bool) $input->getOption('async');
+
+        $objectIds = $input->getOption('object-id');
+        if ($objectIds !== null) {
+            $ids = array_values(array_filter(array_map('intval', explode(',', (string) $objectIds)), static fn (int $id): bool => $id > 0));
+            if ($ids === []) {
+                $io->error('--object-id must list one or more positive object ids.');
+
+                return Command::INVALID;
+            }
+
+            return $this->report($io, $this->replay->replayObjects($ids, $async), $async);
+        }
 
         $since = $input->getOption('since');
         if ($since !== null) {
@@ -56,11 +72,13 @@ class ReplayFailuresCommand extends Command
             'object_class' => $input->getOption('class'),
         ], static fn ($value): bool => $value !== null);
 
-        $async = (bool) $input->getOption('async');
         $limit = max(1, (int) $input->getOption('limit'));
 
-        $result = $this->replay->replay($filters, $async, $limit);
+        return $this->report($io, $this->replay->replay($filters, $async, $limit), $async);
+    }
 
+    private function report(SymfonyStyle $io, ReplayResult $result, bool $async): int
+    {
         $io->definitionList(
             ['candidates' => (string) $result->candidates],
             ['organized' => (string) $result->organized],
