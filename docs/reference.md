@@ -78,7 +78,7 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/dashboard`, `/dashboard/class-stats`, `/health` | View |
+| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics` | View |
 | GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
 | POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |

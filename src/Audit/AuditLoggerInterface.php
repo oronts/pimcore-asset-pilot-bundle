@@ -24,6 +24,13 @@ interface AuditLoggerInterface
     public function getStats(): array;
 
     /**
+     * Duration aggregate over completed operations, for metrics.
+     *
+     * @return array{count: int, avgMs: float|null, minMs: int|null, maxMs: int|null}
+     */
+    public function getDurationStats(): array;
+
+    /**
      * @param array<string, mixed> $filters
      * @return array{items: array<int, array<string, mixed>>, total: int, page: int, pages: int}
      */

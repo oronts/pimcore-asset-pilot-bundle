@@ -152,6 +152,34 @@ class AuditLogger implements AuditLoggerInterface
         }
     }
 
+    public function getDurationStats(): array
+    {
+        try {
+            $row = $this->connection->createQueryBuilder()
+                ->select('COUNT(*) as cnt', 'AVG(duration_ms) as avg_ms', 'MIN(duration_ms) as min_ms', 'MAX(duration_ms) as max_ms')
+                ->from(self::TABLE_NAME)
+                ->where('status = :status')
+                ->andWhere('duration_ms IS NOT NULL')
+                ->setParameter('status', OperationStatus::Completed->value)
+                ->executeQuery()
+                ->fetchAssociative();
+
+            return [
+                'count' => (int) ($row['cnt'] ?? 0),
+                'avgMs' => isset($row['avg_ms']) ? round((float) $row['avg_ms'], 1) : null,
+                'minMs' => isset($row['min_ms']) ? (int) $row['min_ms'] : null,
+                'maxMs' => isset($row['max_ms']) ? (int) $row['max_ms'] : null,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to read duration stats: {error}', [
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            return ['count' => 0, 'avgMs' => null, 'minMs' => null, 'maxMs' => null];
+        }
+    }
+
     public function getPaginated(int $page = 1, int $limit = 20, array $filters = [], ?string $sort = null, ?string $order = null): array
     {
         $offset = ($page - 1) * $limit;
