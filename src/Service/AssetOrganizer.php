@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\OperationResult;
+use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Strategy\StrategyResolver;
 use Pimcore\Model\Asset;
@@ -327,7 +328,7 @@ class AssetOrganizer
         string $targetPath,
         string $targetFilename,
         AbstractObject $object,
-        \Oronts\AssetPilotBundle\Model\Rule $rule,
+        Rule $rule,
         TriggerType $triggerType,
     ): OperationResult {
         $startTime = hrtime(true);
@@ -339,27 +340,11 @@ class AssetOrganizer
 
         // Skip if already at target
         if ($sourcePath === $fullTargetPath) {
-            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
             $this->logger->debug('Asset Pilot: asset {id} already at target path, skipping', [
                 'id' => $assetId,
             ]);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Skipped,
-                triggerType: $triggerType,
-                errorMessage: 'Asset already at target path',
-                durationMs: $durationMs,
-            );
-
-            $this->auditLogger->log($operation);
-
-            return OperationResult::skipped('Asset already at target path', $operation);
+            return $this->skip($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset already at target path');
         }
 
         // Dispatch pre-move event (cancellable)
@@ -367,105 +352,41 @@ class AssetOrganizer
         $this->eventDispatcher->dispatch($preMoveEvent, AssetPilotEvents::PRE_MOVE);
 
         if ($preMoveEvent->isCancelled()) {
-            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
             $this->logger->info('Asset Pilot: move cancelled by event listener for asset {id}', [
                 'id' => $assetId,
             ]);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Skipped,
-                triggerType: $triggerType,
-                errorMessage: 'Cancelled by event listener',
-                durationMs: $durationMs,
-            );
-
-            $this->auditLogger->log($operation);
-
-            return OperationResult::skipped('Cancelled by event listener', $operation);
+            return $this->skip($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Cancelled by event listener');
         }
 
         // Check if asset is locked via custom property
         if ($asset->hasProperty($this->lockProperty) && $asset->getProperty($this->lockProperty)) {
-            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
             $this->logger->info('Asset Pilot: asset {id} is locked (property: {prop}), skipping move', [
                 'id' => $assetId,
                 'prop' => $this->lockProperty,
             ]);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Skipped,
-                triggerType: $triggerType,
-                errorMessage: 'Asset is locked',
-                durationMs: $durationMs,
-            );
-
-            $this->auditLogger->log($operation);
-
-            return OperationResult::skipped('Asset is locked', $operation);
+            return $this->skip($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset is locked');
         }
 
         // Check if asset is in an excluded folder
         $excludedFolder = $this->matchingExcludeFolder($sourcePath);
         if ($excludedFolder !== null) {
-            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
             $this->logger->info('Asset Pilot: asset {id} is in excluded folder "{folder}", skipping move', [
                 'id' => $assetId,
                 'folder' => $excludedFolder,
             ]);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Skipped,
-                triggerType: $triggerType,
-                errorMessage: 'Asset is in excluded folder: ' . $excludedFolder,
-                durationMs: $durationMs,
-            );
-
-            $this->auditLogger->log($operation);
-
-            return OperationResult::skipped('Asset is in excluded folder: ' . $excludedFolder, $operation);
+            return $this->skip($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset is in excluded folder: ' . $excludedFolder);
         }
 
         // Serialize the actual move: a second job sharing this asset must not mutate it concurrently.
         if (!$this->loopGuard->acquireAsset($assetId)) {
-            $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
             $this->logger->info('Asset Pilot: asset {id} is being moved by another job, skipping', [
                 'id' => $assetId,
             ]);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Skipped,
-                triggerType: $triggerType,
-                errorMessage: 'Asset is being processed by another job',
-                durationMs: $durationMs,
-            );
-
-            $this->auditLogger->log($operation);
-
-            return OperationResult::skipped('Asset is being processed by another job', $operation);
+            return $this->skip($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset is being processed by another job');
         }
 
         try {
@@ -549,6 +470,35 @@ class AssetOrganizer
         } finally {
             $this->loopGuard->releaseAsset($assetId);
         }
+    }
+
+    private function skip(
+        int $assetId,
+        string $sourcePath,
+        string $targetPath,
+        int $objectId,
+        string $objectClass,
+        Rule $rule,
+        TriggerType $triggerType,
+        int $startTime,
+        string $reason,
+    ): OperationResult {
+        $operation = new MoveOperation(
+            assetId: $assetId,
+            sourcePath: $sourcePath,
+            targetPath: $targetPath,
+            objectId: $objectId,
+            objectClass: $objectClass,
+            ruleName: $rule->name,
+            status: OperationStatus::Skipped,
+            triggerType: $triggerType,
+            errorMessage: $reason,
+            durationMs: (int) ((hrtime(true) - $startTime) / 1_000_000),
+        );
+
+        $this->auditLogger->log($operation);
+
+        return OperationResult::skipped($reason, $operation);
     }
 
     private function resolveObjectClass(AbstractObject $object): string
