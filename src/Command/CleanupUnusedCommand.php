@@ -64,9 +64,8 @@ HELP
 
         $filters = $this->buildFilters($input);
         $action = $input->getOption('action');
-        $dryRun = $input->getOption('dry-run');
         $batchSize = (int) $input->getOption('batch-size');
-        $moveTo = $input->getOption('move-to');
+        $moveTo = (string) $input->getOption('move-to');
 
         if ($action === 'move' && empty($moveTo)) {
             $io->error('The --move-to option is required when action=move.');
@@ -78,7 +77,6 @@ HELP
             return Command::FAILURE;
         }
 
-        // Count matching assets
         $totalCount = $this->unusedAssetFinder->countUnused($filters);
 
         if ($totalCount === 0) {
@@ -93,52 +91,65 @@ HELP
             $io->text('Filters: ' . json_encode($filters, JSON_UNESCAPED_SLASHES));
         }
 
-        if ($dryRun) {
-            $io->note('DRY RUN — no changes will be made.');
-
-            // Show preview table (first 50)
-            $result = $this->unusedAssetFinder->findUnused($filters, 1, min($totalCount, 50));
-            $table = new Table($output);
-            $table->setHeaders(['ID', 'Path', 'Type', 'Size', 'Modified']);
-
-            foreach ($result['items'] as $item) {
-                $table->addRow([
-                    $item['id'],
-                    $item['full_path'],
-                    $item['type'],
-                    $this->formatBytes((int) $item['file_size']),
-                    $item['modified_at'] ?? '-',
-                ]);
-            }
-
-            $table->render();
-
-            if ($totalCount > 50) {
-                $io->text(sprintf('... and %d more.', $totalCount - 50));
-            }
-
-            $io->newLine();
-            $io->text(sprintf(
-                'Would %s %d asset(s)%s.',
-                $action,
-                $totalCount,
-                $action === 'move' ? ' to ' . $moveTo : '',
-            ));
-
+        if ($input->getOption('dry-run')) {
+            $this->renderDryRunPreview($io, $output, $filters, $action, $moveTo, $totalCount);
             return Command::SUCCESS;
         }
 
-        // Process in batches
         $io->text(sprintf('Action: <comment>%s</comment> | Batch size: %d', $action, $batchSize));
         $io->newLine();
 
+        $result = $this->processBatches($output, $filters, $action, $moveTo, $batchSize, $totalCount);
+        $io->newLine(2);
+        $this->renderSummary($io, $action, $result);
+
+        return $result['failed'] > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    protected function renderDryRunPreview(SymfonyStyle $io, OutputInterface $output, array $filters, string $action, string $moveTo, int $totalCount): void
+    {
+        $io->note('DRY RUN — no changes will be made.');
+
+        $result = $this->unusedAssetFinder->findUnused($filters, 1, min($totalCount, 50));
+        $table = new Table($output);
+        $table->setHeaders(['ID', 'Path', 'Type', 'Size', 'Modified']);
+
+        foreach ($result['items'] as $item) {
+            $table->addRow([
+                $item['id'],
+                $item['full_path'],
+                $item['type'],
+                $this->formatBytes((int) $item['file_size']),
+                $item['modified_at'] ?? '-',
+            ]);
+        }
+
+        $table->render();
+
+        if ($totalCount > 50) {
+            $io->text(sprintf('... and %d more.', $totalCount - 50));
+        }
+
+        $io->newLine();
+        $io->text(sprintf('Would %s %d asset(s)%s.', $action, $totalCount, $action === 'move' ? ' to ' . $moveTo : ''));
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @return array{succeeded: int, failed: int, processed: int, errors: array<int, string>}
+     */
+    protected function processBatches(OutputInterface $output, array $filters, string $action, string $moveTo, int $batchSize, int $totalCount): array
+    {
         $progressBar = new ProgressBar($output, $totalCount);
         $progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%');
         $progressBar->start();
 
-        $totalSucceeded = 0;
-        $totalFailed = 0;
-        $allErrors = [];
+        $succeeded = 0;
+        $failed = 0;
+        $errors = [];
 
         // Snapshot the candidate ids first: deleting shrinks the listing and moving leaves the asset
         // unused (just relocated), so re-querying mid-run would reprocess the same first page and skip
@@ -148,42 +159,47 @@ HELP
         foreach (array_chunk($ids, $batchSize) as $batch) {
             if ($action === 'delete') {
                 $batchResult = $this->unusedAssetFinder->deleteAssets($batch);
-                $totalSucceeded += $batchResult['deleted'];
+                $succeeded += $batchResult['deleted'];
             } else {
                 $batchResult = $this->unusedAssetFinder->moveAssets($batch, $moveTo);
-                $totalSucceeded += $batchResult['moved'];
+                $succeeded += $batchResult['moved'];
             }
 
-            $totalFailed += $batchResult['failed'];
-            $allErrors += $batchResult['errors'];
+            $failed += $batchResult['failed'];
+            $errors += $batchResult['errors'];
             $progressBar->advance(count($batch));
         }
 
-        $totalProcessed = count($ids);
         $progressBar->finish();
-        $io->newLine(2);
 
-        // Summary
+        return ['succeeded' => $succeeded, 'failed' => $failed, 'processed' => count($ids), 'errors' => $errors];
+    }
+
+    /**
+     * @param array{succeeded: int, failed: int, processed: int, errors: array<int, string>} $result
+     */
+    protected function renderSummary(SymfonyStyle $io, string $action, array $result): void
+    {
         $actionPast = $action === 'delete' ? 'deleted' : 'moved';
         $io->success(sprintf(
             'Cleanup complete: %d %s, %d failed out of %d total.',
-            $totalSucceeded,
+            $result['succeeded'],
             $actionPast,
-            $totalFailed,
-            $totalProcessed,
+            $result['failed'],
+            $result['processed'],
         ));
 
-        if (!empty($allErrors)) {
-            $io->warning(sprintf('%d error(s):', count($allErrors)));
-            foreach (array_slice($allErrors, 0, 20, true) as $id => $error) {
-                $io->text(sprintf('  Asset %d: %s', $id, $error));
-            }
-            if (count($allErrors) > 20) {
-                $io->text(sprintf('  ... and %d more errors.', count($allErrors) - 20));
-            }
+        if (empty($result['errors'])) {
+            return;
         }
 
-        return $totalFailed > 0 ? Command::FAILURE : Command::SUCCESS;
+        $io->warning(sprintf('%d error(s):', count($result['errors'])));
+        foreach (array_slice($result['errors'], 0, 20, true) as $id => $error) {
+            $io->text(sprintf('  Asset %d: %s', $id, $error));
+        }
+        if (count($result['errors']) > 20) {
+            $io->text(sprintf('  ... and %d more errors.', count($result['errors']) - 20));
+        }
     }
 
     /**

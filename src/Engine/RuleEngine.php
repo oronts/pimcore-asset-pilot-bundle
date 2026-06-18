@@ -130,50 +130,17 @@ class RuleEngine implements RuleEngineInterface
 
         foreach ($this->sortedRules as $rule) {
             if (!$rule->enabled) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'disabled',
-                    conditionExpression: $rule->condition,
-                    conditionResult: null,
-                    conditionError: null,
-                    filterDetails: null,
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: false,
-                );
+                $evaluations[] = $this->rejected($rule, 'disabled', enabled: false);
                 continue;
             }
 
             if (!$this->matchesClass($rule, $object)) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'class_mismatch',
-                    conditionExpression: $rule->condition,
-                    conditionResult: null,
-                    conditionError: null,
-                    filterDetails: 'expected ' . $rule->class . ', got ' . ($this->objectClassName($object) ?? 'Folder'),
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'class_mismatch', filterDetails: 'expected ' . $rule->class . ', got ' . ($this->objectClassName($object) ?? 'Folder'));
                 continue;
             }
 
             if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'field_mismatch',
-                    conditionExpression: $rule->condition,
-                    conditionResult: null,
-                    conditionError: null,
-                    filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']',
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'field_mismatch', filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']');
                 continue;
             }
 
@@ -191,34 +158,12 @@ class RuleEngine implements RuleEngineInterface
             }
 
             if (!$conditionResult) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'condition_failed',
-                    conditionExpression: $rule->condition,
-                    conditionResult: false,
-                    conditionError: $conditionError,
-                    filterDetails: null,
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'condition_failed', conditionResult: false, conditionError: $conditionError);
                 continue;
             }
 
             if (!$this->filter->accept($asset, $object, $rule)) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'filter_rejected',
-                    conditionExpression: $rule->condition,
-                    conditionResult: true,
-                    conditionError: null,
-                    filterDetails: 'asset rejected by filter',
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'filter_rejected', filterDetails: 'asset rejected by filter', conditionResult: true);
                 continue;
             }
 
@@ -247,6 +192,28 @@ class RuleEngine implements RuleEngineInterface
         }
 
         return ['matches' => $matches, 'evaluations' => $evaluations];
+    }
+
+    protected function rejected(
+        Rule $rule,
+        string $reason,
+        ?string $filterDetails = null,
+        ?bool $conditionResult = null,
+        ?string $conditionError = null,
+        bool $enabled = true,
+    ): RuleEvaluation {
+        return new RuleEvaluation(
+            ruleName: $rule->name,
+            matched: false,
+            rejectionReason: $reason,
+            conditionExpression: $rule->condition,
+            conditionResult: $conditionResult,
+            conditionError: $conditionError,
+            filterDetails: $filterDetails,
+            resolvedPath: null,
+            priority: $rule->priority,
+            enabled: $enabled,
+        );
     }
 
     /** @return Rule[] */

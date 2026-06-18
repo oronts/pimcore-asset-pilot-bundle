@@ -101,16 +101,7 @@ class AssetOrganizer
                     $strategy = $this->strategyResolver->resolve($match->rule);
 
                     if (!$strategy->resolve($asset, $object, $match->rule)) {
-                        $operation = new MoveOperation(
-                            assetId: $assetId,
-                            sourcePath: $asset->getRealFullPath(),
-                            targetPath: $match->resolvedPath,
-                            objectId: $objectId,
-                            objectClass: $this->resolveObjectClass($object),
-                            ruleName: $match->rule->name,
-                            status: OperationStatus::Skipped,
-                            triggerType: $triggerType,
-                        );
+                        $operation = $this->operation($assetId, $asset->getRealFullPath(), $match->resolvedPath, $objectId, $this->resolveObjectClass($object), $match->rule, $triggerType, OperationStatus::Skipped);
                         $this->auditLogger->log($operation);
                         $results[] = OperationResult::skipped('Strategy rejected move', $operation);
                         continue;
@@ -175,17 +166,7 @@ class AssetOrganizer
                 // skip reason matches what the move would actually report.
                 $strategy = $this->strategyResolver->resolve($match->rule);
                 if (!$strategy->resolve($asset, $object, $match->rule)) {
-                    $operations[] = new MoveOperation(
-                        assetId: $assetId,
-                        sourcePath: $assetPath,
-                        targetPath: $match->resolvedPath,
-                        objectId: $objectId,
-                        objectClass: $objectClass,
-                        ruleName: $match->rule->name,
-                        status: OperationStatus::Skipped,
-                        triggerType: $triggerType,
-                        errorMessage: 'Strategy rejected move',
-                    );
+                    $operations[] = $this->operation($assetId, $assetPath, $match->resolvedPath, $objectId, $objectClass, $match->rule, $triggerType, OperationStatus::Skipped, 'Strategy rejected move');
                     continue;
                 }
 
@@ -193,78 +174,29 @@ class AssetOrganizer
                 $fullTargetPath = rtrim($match->resolvedPath, '/') . '/' . $targetFilename;
 
                 if ($assetPath === $fullTargetPath) {
-                    $operations[] = new MoveOperation(
-                        assetId: $assetId,
-                        sourcePath: $assetPath,
-                        targetPath: $fullTargetPath,
-                        objectId: $objectId,
-                        objectClass: $objectClass,
-                        ruleName: $match->rule->name,
-                        status: OperationStatus::Skipped,
-                        triggerType: $triggerType,
-                        errorMessage: 'Asset already at target path',
-                    );
+                    $operations[] = $this->operation($assetId, $assetPath, $fullTargetPath, $objectId, $objectClass, $match->rule, $triggerType, OperationStatus::Skipped, 'Asset already at target path');
                     continue;
                 }
 
                 $preMoveEvent = new AssetMoveEvent($asset, $assetPath, $fullTargetPath, $object, $match->rule, $triggerType, dryRun: true);
                 $this->eventDispatcher->dispatch($preMoveEvent, AssetPilotEvents::PRE_MOVE);
                 if ($preMoveEvent->isCancelled()) {
-                    $operations[] = new MoveOperation(
-                        assetId: $assetId,
-                        sourcePath: $assetPath,
-                        targetPath: $fullTargetPath,
-                        objectId: $objectId,
-                        objectClass: $objectClass,
-                        ruleName: $match->rule->name,
-                        status: OperationStatus::Skipped,
-                        triggerType: $triggerType,
-                        errorMessage: 'Cancelled by event listener',
-                    );
+                    $operations[] = $this->operation($assetId, $assetPath, $fullTargetPath, $objectId, $objectClass, $match->rule, $triggerType, OperationStatus::Skipped, 'Cancelled by event listener');
                     continue;
                 }
 
                 if ($asset->hasProperty($this->lockProperty) && $asset->getProperty($this->lockProperty)) {
-                    $operations[] = new MoveOperation(
-                        assetId: $assetId,
-                        sourcePath: $assetPath,
-                        targetPath: $fullTargetPath,
-                        objectId: $objectId,
-                        objectClass: $objectClass,
-                        ruleName: $match->rule->name,
-                        status: OperationStatus::Skipped,
-                        triggerType: $triggerType,
-                        errorMessage: 'Asset is locked',
-                    );
+                    $operations[] = $this->operation($assetId, $assetPath, $fullTargetPath, $objectId, $objectClass, $match->rule, $triggerType, OperationStatus::Skipped, 'Asset is locked');
                     continue;
                 }
 
                 $excludedFolder = $this->matchingExcludeFolder($assetPath);
                 if ($excludedFolder !== null) {
-                    $operations[] = new MoveOperation(
-                        assetId: $assetId,
-                        sourcePath: $assetPath,
-                        targetPath: $fullTargetPath,
-                        objectId: $objectId,
-                        objectClass: $objectClass,
-                        ruleName: $match->rule->name,
-                        status: OperationStatus::Skipped,
-                        triggerType: $triggerType,
-                        errorMessage: 'Asset is in excluded folder: ' . $excludedFolder,
-                    );
+                    $operations[] = $this->operation($assetId, $assetPath, $fullTargetPath, $objectId, $objectClass, $match->rule, $triggerType, OperationStatus::Skipped, 'Asset is in excluded folder: ' . $excludedFolder);
                     continue;
                 }
 
-                $operations[] = new MoveOperation(
-                    assetId: $assetId,
-                    sourcePath: $assetPath,
-                    targetPath: $fullTargetPath,
-                    objectId: $objectId,
-                    objectClass: $objectClass,
-                    ruleName: $match->rule->name,
-                    status: OperationStatus::Pending,
-                    triggerType: $triggerType,
-                );
+                $operations[] = $this->operation($assetId, $assetPath, $fullTargetPath, $objectId, $objectClass, $match->rule, $triggerType, OperationStatus::Pending);
             }
         }
 
@@ -410,17 +342,7 @@ class AssetOrganizer
 
             $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Completed,
-                triggerType: $triggerType,
-                durationMs: $durationMs,
-            );
+            $operation = $this->operation($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, OperationStatus::Completed, durationMs: $durationMs);
 
             // Log audit entry
             $this->auditLogger->log($operation);
@@ -442,18 +364,7 @@ class AssetOrganizer
         } catch (\Throwable $e) {
             $durationMs = (int) ((hrtime(true) - $startTime) / 1_000_000);
 
-            $operation = new MoveOperation(
-                assetId: $assetId,
-                sourcePath: $sourcePath,
-                targetPath: $fullTargetPath,
-                objectId: $objectId,
-                objectClass: $objectClass,
-                ruleName: $rule->name,
-                status: OperationStatus::Failed,
-                triggerType: $triggerType,
-                errorMessage: $e->getMessage(),
-                durationMs: $durationMs,
-            );
+            $operation = $this->operation($assetId, $sourcePath, $fullTargetPath, $objectId, $objectClass, $rule, $triggerType, OperationStatus::Failed, $e->getMessage(), $durationMs);
 
             $this->auditLogger->log($operation);
 
@@ -483,22 +394,37 @@ class AssetOrganizer
         int $startTime,
         string $reason,
     ): OperationResult {
-        $operation = new MoveOperation(
+        $operation = $this->operation($assetId, $sourcePath, $targetPath, $objectId, $objectClass, $rule, $triggerType, OperationStatus::Skipped, $reason, (int) ((hrtime(true) - $startTime) / 1_000_000));
+
+        $this->auditLogger->log($operation);
+
+        return OperationResult::skipped($reason, $operation);
+    }
+
+    protected function operation(
+        int $assetId,
+        string $sourcePath,
+        string $targetPath,
+        int $objectId,
+        string $objectClass,
+        Rule $rule,
+        TriggerType $triggerType,
+        OperationStatus $status,
+        ?string $errorMessage = null,
+        ?int $durationMs = null,
+    ): MoveOperation {
+        return new MoveOperation(
             assetId: $assetId,
             sourcePath: $sourcePath,
             targetPath: $targetPath,
             objectId: $objectId,
             objectClass: $objectClass,
             ruleName: $rule->name,
-            status: OperationStatus::Skipped,
+            status: $status,
             triggerType: $triggerType,
-            errorMessage: $reason,
-            durationMs: (int) ((hrtime(true) - $startTime) / 1_000_000),
+            errorMessage: $errorMessage,
+            durationMs: $durationMs,
         );
-
-        $this->auditLogger->log($operation);
-
-        return OperationResult::skipped($reason, $operation);
     }
 
     private function resolveObjectClass(AbstractObject $object): string
