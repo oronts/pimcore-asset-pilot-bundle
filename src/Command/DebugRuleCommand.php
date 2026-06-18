@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
-use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
@@ -25,8 +25,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class DebugRuleCommand extends Command
 {
     public function __construct(
-        private readonly RuleEngine $ruleEngine,
-        private readonly AssetFieldExtractor $fieldExtractor,
+        private readonly RuleEngineInterface $ruleEngine,
+        private readonly AssetFieldExtractorInterface $fieldExtractor,
         private readonly NamingStrategyInterface $namingStrategy,
     ) {
         parent::__construct();

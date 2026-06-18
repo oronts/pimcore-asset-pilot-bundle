@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
-use Oronts\AssetPilotBundle\Service\AssetSearchService;
+use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\LoggerInterface;
@@ -28,7 +28,7 @@ class AssetManagementController
     private const int MAX_TAGS = 500;
 
     public function __construct(
-        private readonly AssetSearchService $searchService,
+        private readonly AssetSearchServiceInterface $searchService,
         private readonly AssetPropertyService $propertyService,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,

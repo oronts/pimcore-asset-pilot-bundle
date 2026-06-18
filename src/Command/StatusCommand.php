@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -21,8 +21,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class StatusCommand extends Command
 {
     public function __construct(
-        protected readonly RuleEngine $ruleEngine,
-        protected readonly AuditLogger $auditLogger,
+        protected readonly RuleEngineInterface $ruleEngine,
+        protected readonly AuditLoggerInterface $auditLogger,
         protected readonly LoggerInterface $logger,
     ) {
         parent::__construct();

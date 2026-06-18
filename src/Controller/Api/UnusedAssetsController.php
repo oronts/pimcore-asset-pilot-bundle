@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
-use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
+use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -19,7 +19,7 @@ class UnusedAssetsController
     use HandlesBulkIds;
 
     public function __construct(
-        private readonly UnusedAssetFinder $unusedAssetFinder,
+        private readonly UnusedAssetFinderInterface $unusedAssetFinder,
         private readonly LoggerInterface $logger,
     ) {}
 

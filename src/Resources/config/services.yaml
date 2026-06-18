@@ -7,9 +7,6 @@ services:
             int $defaultBatchSize: '%oronts_asset_pilot.async.batch_size%'
 
     _instanceof:
-        Oronts\AssetPilotBundle\PathResolver\PathResolverInterface:
-            tags: ['oronts_asset_pilot.path_resolver']
-
         Oronts\AssetPilotBundle\Filter\AssetFilterInterface:
             tags: ['oronts_asset_pilot.filter']
 
@@ -67,8 +64,6 @@ services:
         arguments:
             $twigExtensions: !tagged_iterator oronts_asset_pilot.twig_extension
             $contextProviders: !tagged_iterator oronts_asset_pilot.context_provider
-        tags:
-            - { name: 'oronts_asset_pilot.path_resolver', priority: 0 }
 
     Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator:
         arguments:

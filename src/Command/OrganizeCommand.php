@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
-use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -33,8 +33,8 @@ class OrganizeCommand extends Command
     public function __construct(
         protected readonly AssetOrganizer $organizer,
         protected readonly MessageBusInterface $messageBus,
-        protected readonly RuleEngine $ruleEngine,
-        protected readonly AssetFieldExtractor $fieldExtractor,
+        protected readonly RuleEngineInterface $ruleEngine,
+        protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly NamingStrategyInterface $namingStrategy,
         protected readonly LoggerInterface $logger,
         protected readonly int $defaultBatchSize = 50,

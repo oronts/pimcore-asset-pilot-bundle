@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,7 +20,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class AuditCommand extends Command
 {
     public function __construct(
-        protected readonly AuditLogger $auditLogger,
+        protected readonly AuditLoggerInterface $auditLogger,
         protected readonly LoggerInterface $logger,
     ) {
         parent::__construct();

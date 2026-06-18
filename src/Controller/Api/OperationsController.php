@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
-use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -33,9 +33,9 @@ class OperationsController
     public function __construct(
         protected readonly AssetOrganizer $organizer,
         protected readonly MessageBusInterface $messageBus,
-        protected readonly AuditLogger $auditLogger,
-        protected readonly RuleEngine $ruleEngine,
-        protected readonly AssetFieldExtractor $fieldExtractor,
+        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly RuleEngineInterface $ruleEngine,
+        protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly LoggerInterface $logger,
         protected readonly int $defaultBatchSize = 50,
     ) {}

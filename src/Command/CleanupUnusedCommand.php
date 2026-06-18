@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
+use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\ProgressBar;
@@ -21,7 +21,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class CleanupUnusedCommand extends Command
 {
     public function __construct(
-        private readonly UnusedAssetFinder $unusedAssetFinder,
+        private readonly UnusedAssetFinderInterface $unusedAssetFinder,
     ) {
         parent::__construct();
     }

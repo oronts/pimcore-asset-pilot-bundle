@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -27,7 +27,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 class AuditController
 {
     public function __construct(
-        protected readonly AuditLogger $auditLogger,
+        protected readonly AuditLoggerInterface $auditLogger,
         protected readonly LoggerInterface $logger,
         protected readonly LoopGuard $loopGuard,
         protected readonly EventDispatcherInterface $eventDispatcher,

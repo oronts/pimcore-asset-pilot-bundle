@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetMoveEvent;
@@ -25,11 +25,11 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 class AssetOrganizer
 {
     public function __construct(
-        protected readonly RuleEngine $ruleEngine,
-        protected readonly AssetFieldExtractor $fieldExtractor,
+        protected readonly RuleEngineInterface $ruleEngine,
+        protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly StrategyResolver $strategyResolver,
         protected readonly NamingStrategyInterface $namingStrategy,
-        protected readonly AuditLogger $auditLogger,
+        protected readonly AuditLoggerInterface $auditLogger,
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,

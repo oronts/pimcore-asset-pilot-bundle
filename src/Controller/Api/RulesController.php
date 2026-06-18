@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\Rule;
@@ -20,9 +20,9 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class RulesController
 {
     public function __construct(
-        protected readonly RuleEngine $ruleEngine,
+        protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetOrganizer $assetOrganizer,
-        protected readonly AuditLogger $auditLogger,
+        protected readonly AuditLoggerInterface $auditLogger,
         protected readonly LoggerInterface $logger,
     ) {}
 
