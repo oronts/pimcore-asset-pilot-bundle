@@ -1,13 +1,11 @@
 <p align="center">
   <a href="https://oronts.com">
-    <img src="https://oronts.com/_next/image?url=%2Fimages%2Flogo%2FLogo-white.png&w=256&q=75" alt="Oronts">
+    <img src="docs/images/asset-pilot-logo.svg" alt="Asset Pilot — by Oronts" width="560">
   </a>
 </p>
 
-<h1 align="center">oronts/asset-pilot-bundle</h1>
-
 <p align="center">
-  <strong>Intelligent Rule-Based Asset Organization for Pimcore 12</strong>
+  <strong><code>oronts/asset-pilot-bundle</code> — intelligent rule-based asset organization for Pimcore 12</strong>
 </p>
 
 <p align="center">
@@ -18,8 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> &bull;
-  <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#quick-start">Quick start</a> &bull;
   <a href="#example">Example</a> &bull;
   <a href="#documentation">Documentation</a> &bull;
   <a href="docs/index.md">Full docs</a>
@@ -31,30 +28,27 @@
   <img src="docs/images/studio-ui-preview.png" alt="Asset Pilot — Studio UI" width="800">
 </p>
 
-Asset Pilot automates the organization of Pimcore assets based on configurable rules. When a DataObject is saved, Asset Pilot evaluates its asset fields against a priority-ordered rule set, resolves target paths from Twig templates, and moves files into a structured folder hierarchy. It handles localized fields, supports async processing via Symfony Messenger, logs every operation to an audit trail, and ships with a full Studio UI dashboard.
-
----
+Asset Pilot automates how Pimcore assets are filed. When a DataObject is saved, it evaluates the
+object's asset fields against a priority-ordered rule set, resolves a target path from a Twig template,
+and moves the files into a structured folder hierarchy, handling localized fields, async processing,
+a full audit trail, and a Studio UI dashboard.
 
 ## Features
 
-- **Rule Engine** — Priority-based rule matching with class filtering, field targeting, expression conditions, and asset filters (type, size, extension).
-- **Twig Path Templates** — Target paths use full Twig syntax with pre-resolved context variables and custom filters (`safe_key`, `pluck`, `first_of`, `slug`, `fallback`).
-- **Expression Language Conditions** — Symfony ExpressionLanguage conditions with 9 built-in functions (`asset_type`, `asset_size`, `is_image`, `has_property`, `path_matches`, and more).
-- **Move Strategies** — `always`, `first_assignment`, and `callback` conflict resolution, the last delegating to a custom service.
-- **Async Processing** — Moves dispatch to Symfony Messenger with transport-level deduplication via `DeduplicateStamp`; bulk runs in configurable batches.
-- **Localized Field Support** — Detects localized asset fields and includes the locale in path resolution for per-language folder structures.
-- **Audit Log** — Every move is logged with source/target paths, duration, status, and trigger; supports CSV export, reversal, and per-rule history.
-- **Unused Asset Detection** — Finds assets not referenced by any DataObject or Document, filtered by type, extension, date range, folder, and confidence.
-- **Confidence Scoring** — Classifies unused assets into five levels (definitely/probably/recently/historically/protected) with color-coded badges.
-- **Asset Protection** — Lock individual assets via the `asset_pilot_locked` property, or exclude entire folder trees from organization.
-- **Search by Related Object** — Find all assets referenced by a DataObject via the Pimcore dependencies table, or browse assets moved by a rule.
-- **Permissions Model** — Three granular levels (`asset_pilot_view`, `asset_pilot_operate`, `asset_pilot_admin`) registered natively in Pimcore.
-- **Idempotency & Loop Prevention** — Lock-backed loop guard, stale-job detection, already-at-target skip, and Messenger deduplication keep the pipeline safe under async.
-- **Config Validation** — A CLI command validates classes, fields, condition syntax, Twig templates, callback registration, and filter values.
-- **Rule Debugger** — Step-by-step evaluation trace per object/asset pair, showing why each rule matched or was skipped.
-- **Studio UI Integration** — Full React dashboard in Pimcore Studio via Module Federation: Dashboard, Rules, Operations, Audit Log, Unused Assets, Asset Management.
-
----
+- **Rule engine** — priority-ordered rules with class and field targeting, ExpressionLanguage
+  conditions, and type/size/extension filters.
+- **Twig target paths** — full Twig templates with custom filters and functions, and per-locale paths
+  for localized fields.
+- **Safe under async** — Symfony Messenger + Lock, a loop guard, transport deduplication, and an
+  already-at-target skip keep the move pipeline idempotent.
+- **Audit & revert** — every move is logged with source, target, duration, and trigger; CSV export and
+  a loop-guarded revert are built in.
+- **Unused-asset cleanup** — confidence-scored detection with bulk delete or archive, and per-asset or
+  per-folder protection.
+- **Studio UI** — a six-tab React dashboard (Dashboard, Rules, Operations, Audit, Unused, Asset
+  Management) mounted in Pimcore Studio via Module Federation.
+- **Built to extend** — an interface behind every seam (a service tag or a replaceable alias), plus a
+  typed event on every mutation. See [Extending](docs/extending.md) and [Overriding](docs/overriding.md).
 
 ## Quick Start
 
@@ -71,12 +65,12 @@ return [
 ];
 ```
 
-Install the database table and permissions, then build the Studio UI assets:
+Install the database table and permissions, then build the Studio UI:
 
 ```bash
 bin/console pimcore:bundle:install OrontsAssetPilotBundle
 
-# Build the Studio UI (Module Federation remote; ships as source, not prebuilt)
+# Studio UI ships as source (Module Federation remote), not prebuilt
 npm --prefix assets/studio ci
 npm --prefix assets/studio run build
 
@@ -84,13 +78,12 @@ bin/console assets:install
 bin/console cache:clear
 ```
 
-Full setup, including Messenger and Lock configuration (both required for async deduplication), is in [docs/installation.md](docs/installation.md).
-
----
+Full setup, including the required Messenger and Lock configuration for async deduplication, is in
+[docs/installation.md](docs/installation.md).
 
 ## Example
 
-Define rules under `oronts_asset_pilot`. This organizes product images and localized documents into folders named by item number:
+Organize product images into a folder named by item number:
 
 ```yaml
 oronts_asset_pilot:
@@ -105,48 +98,25 @@ oronts_asset_pilot:
             filters:
                 types: [image]
                 extensions: [jpg, png, webp]
-
-        product_documents:
-            class: Product
-            fields: [datasheet, manual]
-            condition: 'object.getItemNumber() != null'
-            target_path: '/Products/{{ object.getItemNumber() }}/Documents{{ locale ? "/" ~ locale : "" }}'
-            strategy: always
-            priority: 80
 ```
 
 Preview the moves, then run them:
 
 ```bash
-# Preview without moving anything
 bin/console asset-pilot:organize --class=Product --dry-run
-
-# Organize all Product objects asynchronously
 bin/console asset-pilot:organize --class=Product --async --batch-size=100
 ```
 
-More scenarios (category hierarchies, multi-class setups, move strategies, asset protection, date-based organization) are in [docs/scenarios.md](docs/scenarios.md).
-
----
+More recipes (category hierarchies, multi-class setups, move strategies, asset protection, date-based
+organization) are in [docs/scenarios.md](docs/scenarios.md).
 
 ## Documentation
 
-Full documentation lives in [docs/](docs/index.md).
+Everything lives in **[docs/](docs/index.md)**.
 
-- [Installation](docs/installation.md) — require, enable, install the table and permissions, configure Messenger and Lock, build the UI.
-- [Configuration](docs/configuration.md) — the full `oronts_asset_pilot` tree, rule reference, and per-rule options.
-- [Configuration Scenarios](docs/scenarios.md) — worked recipes for common asset-organization setups.
-- [Commands](docs/commands.md) — every `asset-pilot:*` console command, with cron examples.
-- [REST API](docs/rest-api.md) — the Studio backend endpoints.
-- [Path Templates](docs/path-templates.md) — Twig templates, context variables, custom filters and functions.
-- [Conditions](docs/conditions.md) — ExpressionLanguage condition syntax and built-in functions.
-- [Permissions](docs/permissions.md) — the three permission levels and what they gate.
-- [Studio UI](docs/studio-ui.md) — dashboard tabs, confidence badges, localization.
-- [Architecture](docs/architecture.md) — the rule-engine pipeline, idempotency and loop prevention, database schema.
-- [Extending](docs/extending.md) — every extension point: filters, strategies, resolvers, evaluators, naming, Twig and ExpressionLanguage hooks, context providers, events.
-- [Testing](docs/testing.md) — how to run the suite and how the kernel-free tests are structured.
-
----
+- **Getting started** — [Installation](docs/installation.md) &middot; [Usage](docs/usage.md) &middot; [Configuration](docs/configuration.md) &middot; [Scenarios](docs/scenarios.md)
+- **Reference** — [Reference](docs/reference.md) &middot; [Commands](docs/commands.md) &middot; [REST API](docs/rest-api.md) &middot; [Path Templates](docs/path-templates.md) &middot; [Conditions](docs/conditions.md) &middot; [Permissions](docs/permissions.md) &middot; [Studio UI](docs/studio-ui.md) &middot; [Architecture](docs/architecture.md)
+- **Extending & overriding** — [Developer Experience](docs/dx.md) &middot; [Extending](docs/extending.md) &middot; [Overriding](docs/overriding.md) &middot; [Testing](docs/testing.md)
 
 ## Requirements
 
@@ -158,13 +128,11 @@ Full documentation lives in [docs/](docs/index.md).
 | Symfony Messenger | ^7.3 |
 | Symfony Lock | ^7.3 |
 
----
-
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0), the same license used by Pimcore itself.
-
-You are free to use, modify, and distribute this bundle in both private and commercial projects. If you modify the source code and distribute it or run it as a service, you must make your modifications available under the same license.
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0), the same license as
+Pimcore. Use, modify, and distribute it in private and commercial projects; if you distribute a
+modified version or run it as a service, your modifications must be available under the same license.
 
 ---
 
@@ -172,21 +140,13 @@ You are free to use, modify, and distribute this bundle in both private and comm
 
 <p align="center">
   <a href="https://oronts.com">
-    <img src="https://oronts.com/_next/image?url=%2Fimages%2Flogo%2FLogo-white.png&w=256&q=75" alt="Oronts">
+    <img src="https://oronts.com/_next/image?url=%2Fimages%2Flogo%2FLogo-white.png&w=256&q=75" alt="Oronts" width="200">
   </a>
 </p>
 
-**Oronts** provides custom development and integration services:
+**Oronts** builds Pimcore bundles, PIM/DAM platforms, asset-workflow automation, and e-commerce
+implementations.
 
-- Pimcore bundle development and customization
-- PIM/DAM implementation and architecture
-- Asset workflow automation
-- E-commerce platform implementation
+**Contact:** office@oronts.com &middot; [oronts.com](https://oronts.com)
 
-**Contact:** office@oronts.com | [oronts.com](https://oronts.com)
-
----
-
-**Author:** [Oronts](https://oronts.com) - AI-powered automation, e-commerce platforms, cloud infrastructure.
-
-**Contributors:** Refaat Al Ktifan (Refaat@alktifan.com)
+**Author:** Refaat Al Ktifan (Refaat@alktifan.com)

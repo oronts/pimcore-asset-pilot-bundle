@@ -294,6 +294,35 @@ services:
         alias: App\AssetPilot\Naming\HashNamingStrategy
 ```
 
+### Programmatic Rules
+
+Contribute rules from code instead of (or alongside) YAML, for example to build rules from another
+config source. Implement `RuleProviderInterface`; services implementing it are auto-tagged
+`oronts_asset_pilot.rule_provider`, and the `RuleEngine` merges their rules with the configured ones
+and re-sorts by priority. `getRules()` may yield `Rule` objects or config arrays.
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Engine\RuleProviderInterface;
+use Oronts\AssetPilotBundle\Model\Rule;
+
+class TenantRuleProvider implements RuleProviderInterface
+{
+    public function getRules(): iterable
+    {
+        yield Rule::fromConfig('tenant_images', [
+            'class' => 'Product',
+            'fields' => ['images'],
+            'target_path' => '/Tenants/{{ object.getTenant() }}/Images',
+            'priority' => 50,
+        ]);
+    }
+}
+```
+
+No service config is needed beyond autowiring; the interface tag is applied automatically.
+
 ### Events
 
 Subscribe to asset move events for custom logic:
