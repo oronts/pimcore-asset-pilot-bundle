@@ -177,6 +177,11 @@ class UnusedAssetFinderTest extends TestCase
                 return $this->folder;
             }
 
+            protected function nearestExistingFolder(string $path): ?Asset\Folder
+            {
+                return $this->folder;
+            }
+
             protected function isReferenced(int $assetId): bool
             {
                 return $this->referenced;

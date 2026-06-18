@@ -190,6 +190,22 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         return Asset\Service::createFolderByPath($path);
     }
 
+    protected function nearestExistingFolder(string $path): ?Asset\Folder
+    {
+        $candidate = '/' . trim($path, '/');
+        while ($candidate !== '/') {
+            $element = Asset::getByPath($candidate);
+            if ($element instanceof Asset\Folder) {
+                return $element;
+            }
+            $candidate = '/' . trim(dirname($candidate), '/');
+        }
+
+        $root = Asset::getByPath('/');
+
+        return $root instanceof Asset\Folder ? $root : null;
+    }
+
     /**
      * @param int[] $assetIds
      * @return array{deleted: int, failed: int, errors: array<int, string>}
@@ -260,16 +276,18 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         $failed = 0;
         $errors = [];
 
+        // Authorize before creating anything: createFolderByPath would create the whole target tree as
+        // a side effect, so check the create ACL on the nearest existing ancestor first (Pimcore's
+        // workspace ACL for placing an element; isAllowed() returns true on CLI).
+        $parent = $this->nearestExistingFolder($targetFolder);
+        if ($parent !== null && !$parent->isAllowed('create')) {
+            return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Not permitted to move assets into the target folder']];
+        }
+
         try {
             $folder = $this->createTargetFolder($targetFolder);
         } catch (\Throwable $e) {
             return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Failed to create folder: ' . $e->getMessage()]];
-        }
-
-        // The current user must be allowed to create children in the target folder (Pimcore's
-        // workspace ACL for placing an element); isAllowed() returns true on CLI.
-        if (!$folder->isAllowed('create')) {
-            return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Not permitted to move assets into the target folder']];
         }
 
         foreach ($assetIds as $id) {
