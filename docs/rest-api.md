@@ -13,6 +13,8 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
 | `GET` | `/metrics` | View | Operation metrics (`{operations, total, failureRate, durationMs}`) |
 | `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`). Returns `{items[], total, page, limit}`. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
+| `GET` | `/folders/empty` | View | Empty asset folders (`?folder`, `?page`, `?limit`). Returns `{items[], page, limit}` |
+| `POST` | `/folders/empty/delete` | Operate | Delete empty folders (`{ids[]}`, max 200; each re-verified childless + permission-checked). Returns `{deleted, skipped, failed, errors}` |
 | `GET` | `/integrity` | View | Broken assets. Bounded scan (`?folder`, `?type`, `?extension`, `?page`, `?limit`) or check specific ids (`?ids=1,2,3`, max 50). Returns `{items[], scanned, broken, page, limit}` |
 | `POST` | `/integrity/heal` | Operate | Roll broken assets back to their last renderable version (`{ids[], dryRun?}`, max 50 ids). Returns `{dryRun, results[]}` |
 | `POST` | `/integrity/undo` | Admin | Reverse the most recent heal of one asset (`{assetId}`); 404 when there is no reversible heal |

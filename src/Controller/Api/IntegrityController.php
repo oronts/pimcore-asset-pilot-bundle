@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\BulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
@@ -80,10 +81,7 @@ class IntegrityController
             return new JsonResponse(['error' => 'Request body must be a JSON object.'], JsonResponse::HTTP_BAD_REQUEST);
         }
 
-        $ids = array_values(array_filter(
-            array_map('intval', is_array($body['ids'] ?? null) ? $body['ids'] : []),
-            static fn (int $id): bool => $id > 0,
-        ));
+        $ids = BulkIds::clean($body['ids'] ?? null);
         if ($ids === []) {
             return new JsonResponse(['error' => 'ids must list one or more positive asset ids.'], JsonResponse::HTTP_BAD_REQUEST);
         }
@@ -119,7 +117,8 @@ class IntegrityController
     public function undo(Request $request): JsonResponse
     {
         $body = json_decode($request->getContent(), true);
-        $assetId = is_array($body) ? (int) ($body['assetId'] ?? 0) : 0;
+        $rawId = is_array($body) ? ($body['assetId'] ?? null) : null;
+        $assetId = (is_int($rawId) || (is_string($rawId) && ctype_digit($rawId))) ? (int) $rawId : 0;
         if ($assetId <= 0) {
             return new JsonResponse(['error' => 'assetId must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
         }

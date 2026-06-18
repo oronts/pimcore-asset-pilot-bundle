@@ -182,6 +182,22 @@ the wrong content). An asset that is broken with no renderable version is report
 left. A missing/unsupported render tool yields `unverifiable` and the asset is never healed. Bound
 the run with `--by-ids` or the scan filters plus `--limit`; for a large catalog run it in batches.
 
+### Sweep Empty Folders
+
+```bash
+# Report empty asset folders (no children) under a subtree
+bin/console asset-pilot:sweep-empty-folders --folder=/Products
+
+# Delete them (re-verifies each is still empty + permission-checked first)
+bin/console asset-pilot:sweep-empty-folders --folder=/Products --delete
+```
+
+Cleanup leaves empty folders behind. This finds folders with no children via a paged `NOT EXISTS`
+query (no full-tree walk, never blocks) and, with `--delete`, removes them — re-verifying each is
+still childless and permission-checked at delete time, so a folder that gained content since the
+listing is skipped rather than recursively deleted. The asset tree root is never a candidate. One
+pass removes the current leaf-empty folders; a parent that only held those is swept on the next run.
+
 ### Quarantine Purge
 
 ```bash
