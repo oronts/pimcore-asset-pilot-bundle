@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\RulePortability;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -23,8 +24,59 @@ class RulesController
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetOrganizer $assetOrganizer,
         protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly RulePortability $portability,
         protected readonly LoggerInterface $logger,
     ) {}
+
+    #[Route('/rules/export', name: 'oronts_asset_pilot_rules_export', methods: ['GET'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function export(): JsonResponse
+    {
+        try {
+            return new JsonResponse($this->portability->export());
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to export rules.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to export rules.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+
+    #[Route('/rules/diff', name: 'oronts_asset_pilot_rules_diff', methods: ['POST'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function diff(Request $request): JsonResponse
+    {
+        try {
+            $artifact = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($artifact)) {
+            return new JsonResponse(['error' => 'Expected a rule-set artifact object.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $diff = $this->portability->diff($artifact);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to diff rules.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to diff rules.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+
+        return new JsonResponse([
+            'added' => $diff->added,
+            'removed' => $diff->removed,
+            'changed' => $diff->changed,
+            'unchanged' => $diff->unchanged,
+            'hasChanges' => $diff->hasChanges(),
+        ]);
+    }
 
     #[Route('/rules', name: 'oronts_asset_pilot_rules', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]

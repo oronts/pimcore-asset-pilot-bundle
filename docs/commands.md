@@ -37,6 +37,27 @@ Checks performed:
 - Filter type/extension values are valid
 - Warns on duplicate priorities for the same class
 
+### Export and Diff Rules
+
+Rules are config-only (see [Configuration](configuration.md)). These commands move a rule set
+between environments: export the current set to a portable artifact, then diff it against another
+environment's rules. Neither writes rules; the diff output is the config you commit.
+
+```bash
+# Export the current rule set as JSON (stdout) or YAML, optionally to a file
+bin/console asset-pilot:rules-export
+bin/console asset-pilot:rules-export --format=yaml --output=rules.yaml
+
+# Diff an exported artifact against the rules currently loaded (reads nothing into the DB)
+bin/console asset-pilot:rules-diff rules.yaml
+
+# Fail the command if the artifact differs from the current rules (CI drift gate)
+bin/console asset-pilot:rules-diff rules.yaml --fail-on-diff
+```
+
+The diff classifies each rule as added, removed, changed, or unchanged. `rules-diff` first validates
+the imported rules (reusing `validate-config`) and aborts if any are invalid.
+
 ### Debug Rules
 
 ```bash

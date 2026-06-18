@@ -103,4 +103,30 @@ class RuleTest extends TestCase
         self::assertSame(MoveStrategy::Callback, $rule->strategy);
         self::assertSame('my.service', $rule->callback);
     }
+
+    #[Test]
+    public function toConfigArrayOmitsTheNameAndRebuildsViaFromConfig(): void
+    {
+        $rule = Rule::fromConfig('full_rule', [
+            'class' => 'Category',
+            'fields' => ['images', 'documents'],
+            'condition' => 'object.getId() > 0',
+            'target_path' => '/Categories/{{ className }}',
+            'strategy' => 'first_assignment',
+            'callback' => 'app.my_callback',
+            'priority' => 50,
+            'enabled' => false,
+            'filters' => ['types' => ['image'], 'max_size' => 10485760],
+            'options' => ['threshold' => 5, 'mode' => 'strict'],
+        ]);
+
+        $config = $rule->toConfigArray();
+
+        self::assertArrayNotHasKey('name', $config, 'name is the rule-set key, not part of the per-rule config');
+        self::assertSame('first_assignment', $config['strategy'], 'strategy serializes to its enum value');
+
+        // Round-trip: rebuilding from the exported config reproduces an identical rule.
+        $rebuilt = Rule::fromConfig('full_rule', $config);
+        self::assertEquals($rule, $rebuilt);
+    }
 }
