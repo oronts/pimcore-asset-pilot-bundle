@@ -50,6 +50,10 @@ oronts_asset_pilot:
             - /Protected/
             - /Manual/
         lock_property: asset_pilot_locked
+
+    confidence:
+        recently_uploaded_days: 30
+        probably_unused_days: 90
 ```
 
 ## Configuration Reference
@@ -68,6 +72,8 @@ oronts_asset_pilot:
 | `audit.retention_days` | `int` | `90` | Days to retain audit entries |
 | `protection.exclude_folders` | `string[]` | `[]` | Folders excluded from organization (e.g., `["/Protected/"]`) |
 | `protection.lock_property` | `string` | `asset_pilot_locked` | Custom property name used to lock assets |
+| `confidence.recently_uploaded_days` | `int` | `30` | Assets modified within this many days score `recently_uploaded` |
+| `confidence.probably_unused_days` | `int` | `90` | Below this (and past `recently_uploaded_days`) scores `probably_unused`; older scores `definitely_unused` |
 
 ## Rule Options
 

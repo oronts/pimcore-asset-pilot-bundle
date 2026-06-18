@@ -25,6 +25,9 @@ Unused assets display color-coded confidence badges:
 | Historically Used | Orange | Was previously organized — investigate |
 | Protected | Gray | Locked asset, excluded from cleanup |
 
+The day thresholds shown above are defaults, configurable via `confidence.recently_uploaded_days`
+and `confidence.probably_unused_days` (see [Configuration](configuration.md)).
+
 ### Localization
 
 The Studio UI ships with English and German translations. All UI strings use the `asset-pilot.*` i18n namespace.

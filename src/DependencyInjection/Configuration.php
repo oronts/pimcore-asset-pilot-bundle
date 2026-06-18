@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\DependencyInjection;
 
 use Oronts\AssetPilotBundle\Enum\CollisionPattern;
 use Oronts\AssetPilotBundle\Service\AssetProtection;
+use Oronts\AssetPilotBundle\Service\ConfidenceScorer;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -40,6 +41,7 @@ class Configuration implements ConfigurationInterface
         $this->addAsyncSection($rootNode);
         $this->addAuditSection($rootNode);
         $this->addProtectionSection($rootNode);
+        $this->addConfidenceSection($rootNode);
 
         return $treeBuilder;
     }
@@ -214,6 +216,33 @@ class Configuration implements ConfigurationInterface
                             ->defaultValue(AssetProtection::DEFAULT_LOCK_PROPERTY)
                             ->info('Custom property name that locks an asset from organization.')
                         ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addConfidenceSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('confidence')
+                    ->addDefaultsIfNotSet()
+                    ->info('Day thresholds for unused-asset confidence scoring.')
+                    ->children()
+                        ->integerNode('recently_uploaded_days')
+                            ->defaultValue(ConfidenceScorer::RECENTLY_UPLOADED_DAYS)
+                            ->min(1)
+                            ->info('Assets modified within this many days are classified "recently uploaded".')
+                        ->end()
+                        ->integerNode('probably_unused_days')
+                            ->defaultValue(ConfidenceScorer::PROBABLY_UNUSED_DAYS)
+                            ->min(1)
+                            ->info('Assets older than recently_uploaded_days but within this window are "probably unused"; older still are "definitely unused".')
+                        ->end()
+                    ->end()
+                    ->validate()
+                        ->ifTrue(static fn (array $c): bool => $c['probably_unused_days'] <= $c['recently_uploaded_days'])
+                        ->thenInvalid('confidence.probably_unused_days must be greater than confidence.recently_uploaded_days, otherwise the "probably unused" bucket can never be reached.')
                     ->end()
                 ->end()
             ->end();

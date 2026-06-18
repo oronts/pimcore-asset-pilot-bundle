@@ -18,7 +18,19 @@ class ConfidenceScorer implements ConfidenceScorerInterface
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoggerInterface $logger,
+        protected readonly int $recentlyUploadedDays = self::RECENTLY_UPLOADED_DAYS,
+        protected readonly int $probablyUnusedDays = self::PROBABLY_UNUSED_DAYS,
     ) {}
+
+    public function getRecentlyUploadedDays(): int
+    {
+        return $this->recentlyUploadedDays;
+    }
+
+    public function getProbablyUnusedDays(): int
+    {
+        return $this->probablyUnusedDays;
+    }
 
     /**
      * Enrich unused asset items with a confidence classification.
@@ -83,11 +95,11 @@ class ConfidenceScorer implements ConfidenceScorerInterface
 
         $daysAgo = (int) $now->diff($modified)->days;
 
-        if ($daysAgo < self::RECENTLY_UPLOADED_DAYS) {
+        if ($daysAgo < $this->recentlyUploadedDays) {
             return ConfidenceLevel::RecentlyUploaded->value;
         }
 
-        if ($daysAgo < self::PROBABLY_UNUSED_DAYS) {
+        if ($daysAgo < $this->probablyUnusedDays) {
             return ConfidenceLevel::ProbablyUnused->value;
         }
 

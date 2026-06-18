@@ -27,7 +27,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
     public function __construct(
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
-        private readonly ConfidenceScorer $scorer,
+        private readonly ConfidenceScorerInterface $scorer,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
@@ -428,8 +428,8 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             $this->lockProperty,
             AuditLogger::TABLE_NAME,
             time(),
-            ConfidenceScorer::RECENTLY_UPLOADED_DAYS,
-            ConfidenceScorer::PROBABLY_UNUSED_DAYS,
+            $this->scorer->getRecentlyUploadedDays(),
+            $this->scorer->getProbablyUnusedDays(),
         );
 
         foreach ($spec['conditions'] as $condition) {

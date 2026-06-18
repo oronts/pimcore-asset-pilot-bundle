@@ -17,9 +17,9 @@ class ConfidenceScorerTest extends TestCase
 {
     public const string NOW = '2026-06-17 12:00:00';
 
-    private function scorer(): object
+    private function scorer(int $recentlyUploadedDays = ConfidenceScorer::RECENTLY_UPLOADED_DAYS, int $probablyUnusedDays = ConfidenceScorer::PROBABLY_UNUSED_DAYS): object
     {
-        return new class ($this->createMock(Connection::class), new NullLogger()) extends ConfidenceScorer {
+        return new class ($this->createMock(Connection::class), new NullLogger(), $recentlyUploadedDays, $probablyUnusedDays) extends ConfidenceScorer {
             public bool $historyThrows = false;
             /** @var int[] */
             public array $history = [];
@@ -72,6 +72,27 @@ class ConfidenceScorerTest extends TestCase
         self::assertSame(ConfidenceLevel::RecentlyUploaded->value, $scorer->classifyExposed(['id' => 1, 'modified_at' => '2026-06-10 12:00:00']));
         self::assertSame(ConfidenceLevel::ProbablyUnused->value, $scorer->classifyExposed(['id' => 1, 'modified_at' => '2026-04-10 12:00:00']));
         self::assertSame(ConfidenceLevel::DefinitelyUnused->value, $scorer->classifyExposed(['id' => 1, 'modified_at' => '2026-01-01 12:00:00']));
+    }
+
+    #[Test]
+    public function configuredThresholdsOverrideTheDefaultBuckets(): void
+    {
+        // A 7-day "recent" / 14-day "probable" window: assets that would all be RecentlyUploaded under
+        // the default 30/90 instead split across all three levels.
+        $scorer = $this->scorer(recentlyUploadedDays: 7, probablyUnusedDays: 14);
+
+        self::assertSame(ConfidenceLevel::RecentlyUploaded->value, $scorer->classifyExposed(['id' => 1, 'modified_at' => '2026-06-13 12:00:00']));
+        self::assertSame(ConfidenceLevel::ProbablyUnused->value, $scorer->classifyExposed(['id' => 1, 'modified_at' => '2026-06-07 12:00:00']));
+        self::assertSame(ConfidenceLevel::DefinitelyUnused->value, $scorer->classifyExposed(['id' => 1, 'modified_at' => '2026-05-20 12:00:00']));
+    }
+
+    #[Test]
+    public function exposesTheResolvedThresholdsSoTheSqlFilterCanReuseThem(): void
+    {
+        $scorer = $this->scorer(recentlyUploadedDays: 7, probablyUnusedDays: 14);
+
+        self::assertSame(7, $scorer->getRecentlyUploadedDays());
+        self::assertSame(14, $scorer->getProbablyUnusedDays());
     }
 
     #[Test]

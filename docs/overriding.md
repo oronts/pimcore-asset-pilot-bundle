@@ -118,13 +118,15 @@ services:
 - `async.enabled`, `async.batch_size` — synchronous vs queued moves and bulk batch size.
 - `audit.retention_days` — how long audit rows are kept.
 - `locales` — the locales scanned for localized fields.
+- `confidence.recently_uploaded_days`, `confidence.probably_unused_days` — the day cutoffs for the
+  unused-asset confidence buckets (used by both scoring and the `?confidence=` filter).
 
 See [Configuration](configuration.md) for the full tree.
 
-Values that are **not** configuration (by design) are overridden by replacing the owning service:
+To change the scoring *logic* itself (not just the day cutoffs), replace the owning service:
 
-- Confidence windows (the 30 / 90-day cutoffs) live on `ConfidenceScorer`. Replace
-  `ConfidenceScorerInterface` to change them.
+- The confidence classification algorithm lives in `ConfidenceScorer`. Replace
+  `ConfidenceScorerInterface` to change how assets are scored beyond the configurable day windows.
 
 ## Override the Twig path-resolution behavior
 

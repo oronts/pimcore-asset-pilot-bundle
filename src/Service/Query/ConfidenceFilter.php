@@ -44,8 +44,8 @@ final class ConfidenceFilter
         $recent = $now - ($recentlyUploadedDays * 86400);
         $old = $now - ($probablyUnusedDays * 86400);
 
-        // Boundaries mirror ConfidenceScorer's strict day cutoffs (< 30, < 90): an asset modified
-        // exactly $recentDays ago must score the same here as in the scorer, not flip buckets.
+        // Boundaries mirror ConfidenceScorer's strict day cutoffs (strict `<`): an asset modified
+        // exactly $recentlyUploadedDays ago must score the same here as in the scorer, not flip buckets.
         if ($level === ConfidenceLevel::RecentlyUploaded) {
             $conditions[] = 'a.modificationDate > :conf_recent';
             $params['conf_recent'] = $recent;

@@ -73,4 +73,23 @@ class ConfigurationTest extends TestCase
             ['strategies' => ['default' => 'always']],
         ]);
     }
+
+    #[Test]
+    public function confidenceThresholdsDefaultToThirtyAndNinety(): void
+    {
+        $config = (new Processor())->processConfiguration(new Configuration(), [[]]);
+
+        self::assertSame(30, $config['confidence']['recently_uploaded_days']);
+        self::assertSame(90, $config['confidence']['probably_unused_days']);
+    }
+
+    #[Test]
+    public function confidenceRejectsAProbablyUnusedWindowThatCollapsesTheMiddleBucket(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['confidence' => ['recently_uploaded_days' => 30, 'probably_unused_days' => 30]],
+        ]);
+    }
 }

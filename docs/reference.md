@@ -34,6 +34,8 @@ Full tree and defaults in [Configuration](configuration.md).
 | `audit.retention_days` | int | `90` | Age at which `--cleanup` prunes rows |
 | `protection.exclude_folders` | list | `[]` | Folder trees never organized |
 | `protection.lock_property` | string | `asset_pilot_locked` | Property that locks an asset |
+| `confidence.recently_uploaded_days` | int | `30` | Upper bound (days) for the `recently_uploaded` confidence bucket |
+| `confidence.probably_unused_days` | int | `90` | Upper bound (days) for `probably_unused`; older scores `definitely_unused` |
 
 ### Rule options
 

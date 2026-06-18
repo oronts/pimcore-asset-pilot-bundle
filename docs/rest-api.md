@@ -192,6 +192,9 @@ Supported types: `text`, `bool`, `select`.
 | `historically_used` | No references, but has audit history of past moves | Investigate before deleting |
 | `protected` | Has `asset_pilot_locked` property | Excluded from cleanup |
 
+The 30/90-day cutoffs are defaults; tune them via `confidence.recently_uploaded_days` and
+`confidence.probably_unused_days` (see [Configuration](configuration.md)).
+
 ### Audit Log
 
 | Method | Endpoint | Permission | Description |

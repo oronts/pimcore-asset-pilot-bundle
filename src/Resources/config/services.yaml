@@ -132,6 +132,11 @@ services:
             $enabled: '%oronts_asset_pilot.audit.enabled%'
             $retentionDays: '%oronts_asset_pilot.audit.retention_days%'
 
+    Oronts\AssetPilotBundle\Service\ConfidenceScorer:
+        arguments:
+            $recentlyUploadedDays: '%oronts_asset_pilot.confidence.recently_uploaded_days%'
+            $probablyUnusedDays: '%oronts_asset_pilot.confidence.probably_unused_days%'
+
     # -- Asset organizer (with protection params) ------------------------------
 
     Oronts\AssetPilotBundle\Service\AssetOrganizer:
