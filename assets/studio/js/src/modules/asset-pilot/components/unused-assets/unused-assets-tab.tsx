@@ -14,6 +14,7 @@ import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { SortableHeader } from '../shared/sortable-header'
 import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
+import { useRowSelection } from '../../hooks/use-row-selection'
 import { useContainerWidth } from '../../hooks/use-container-width'
 import { formatBytes, formatDate, pageNumbers } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
@@ -39,26 +40,10 @@ export const UnusedAssetsTab: React.FC = () => {
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useUnusedAssets(mergedFilters)
   const { data: stats } = useUnusedStats()
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
   const [actionLoading, setActionLoading] = useState(false)
   const [containerRef, containerWidth] = useContainerWidth()
   const visible = getVisibleColumns(columns, containerWidth)
-
-  const allSelected = data != null && data.items.length > 0 && data.items.every(a => selected.has(a.id))
-
-  const toggleSelect = (id: number): void => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const toggleAll = (): void => {
-    if (data == null) return
-    setSelected(allSelected ? new Set() : new Set(data.items.map(a => a.id)))
-  }
 
   const handleBulkDelete = async (): Promise<void> => {
     if (selected.size === 0) return
@@ -68,7 +53,7 @@ export const UnusedAssetsTab: React.FC = () => {
       const msg = t('asset-pilot.unused.deleted-result', { deleted: result.deleted ?? 0, failed: result.failed })
       if (result.failed > 0) toast.warning(msg)
       else toast.success(msg)
-      setSelected(new Set())
+      clear()
       refetch()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Unknown error')
@@ -85,7 +70,7 @@ export const UnusedAssetsTab: React.FC = () => {
       const msg = t('asset-pilot.unused.moved-result', { moved: result.moved ?? 0, failed: result.failed })
       if (result.failed > 0) toast.warning(msg)
       else toast.success(msg)
-      setSelected(new Set())
+      clear()
       refetch()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Unknown error')
@@ -98,7 +83,7 @@ export const UnusedAssetsTab: React.FC = () => {
 
   const goToPage = (page: number) => {
     setFilters(f => ({ ...f, page }))
-    setSelected(new Set())
+    clear()
   }
 
   return (
@@ -113,7 +98,7 @@ export const UnusedAssetsTab: React.FC = () => {
         </div>
       )}
 
-      <UnusedAssetsFiltersBar filters={filters} onChange={f => { setFilters(f); setSelected(new Set()) }} />
+      <UnusedAssetsFiltersBar filters={filters} onChange={f => { setFilters(f); clear() }} />
 
       {selected.size > 0 && (
         <BulkActionBar
@@ -122,8 +107,8 @@ export const UnusedAssetsTab: React.FC = () => {
           assetIds={[...selected]}
           onDelete={handleBulkDelete}
           onMove={handleBulkMove}
-          onDeselect={() => setSelected(new Set())}
-          onLockDone={() => { setSelected(new Set()); refetch() }}
+          onDeselect={() => clear()}
+          onLockDone={() => { clear(); refetch() }}
         />
       )}
 

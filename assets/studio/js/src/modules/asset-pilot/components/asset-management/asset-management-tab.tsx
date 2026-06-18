@@ -12,6 +12,7 @@ import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { SortableHeader } from '../shared/sortable-header'
 import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
+import { useRowSelection } from '../../hooks/use-row-selection'
 import { useContainerWidth } from '../../hooks/use-container-width'
 import { formatBytes, formatDate, pageNumbers } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
@@ -39,41 +40,25 @@ export const AssetManagementTab: React.FC = () => {
   const [objectIdInput, setObjectIdInput] = useState('')
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useAssetSearch(mergedFilters)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
   const [containerRef, containerWidth] = useContainerWidth()
   const visible = getVisibleColumns(columns, containerWidth)
-
-  const allSelected = data != null && data.items.length > 0 && data.items.every(a => selected.has(a.id))
-
-  const toggleSelect = (id: number): void => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const toggleAll = (): void => {
-    if (data == null) return
-    setSelected(allSelected ? new Set() : new Set(data.items.map(a => a.id)))
-  }
 
   const handleSearch = (): void => {
     const objId = objectIdInput ? parseInt(objectIdInput, 10) : undefined
     setFilters(f => ({ ...f, q: searchInput || undefined, objectId: objId && objId > 0 ? objId : undefined, page: 1 }))
-    setSelected(new Set())
+    clear()
   }
 
   const handleResult = (msg: string): void => {
     toast.success(msg)
-    setSelected(new Set())
+    clear()
     refetch()
   }
 
   const goToPage = (page: number): void => {
     setFilters(f => ({ ...f, page }))
-    setSelected(new Set())
+    clear()
   }
 
   return (
@@ -104,7 +89,7 @@ export const AssetManagementTab: React.FC = () => {
         <FilterField label={t('asset-pilot.management.type-filter')}>
           <select
             value={filters.type ?? ''}
-            onChange={e => { setFilters(f => ({ ...f, type: e.target.value || undefined, page: 1 })); setSelected(new Set()) }}
+            onChange={e => { setFilters(f => ({ ...f, type: e.target.value || undefined, page: 1 })); clear() }}
             style={selectStyle}
           >
             {typeOptions.map(opt => <option key={opt} value={opt}>{opt || t('asset-pilot.management.all-types')}</option>)}
@@ -115,7 +100,7 @@ export const AssetManagementTab: React.FC = () => {
           <input
             type="text"
             value={filters.folder ?? ''}
-            onChange={e => { setFilters(f => ({ ...f, folder: e.target.value || undefined, page: 1 })); setSelected(new Set()) }}
+            onChange={e => { setFilters(f => ({ ...f, folder: e.target.value || undefined, page: 1 })); clear() }}
             placeholder={t('asset-pilot.management.folder-placeholder')}
             style={{ ...inputStyle, width: 150 }}
           />
@@ -125,7 +110,7 @@ export const AssetManagementTab: React.FC = () => {
       </div>
 
       {selected.size > 0 && (
-        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => setSelected(new Set())} />
+        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} />
       )}
 
       {loading && <TableSkeleton rows={5} columns={7} hasCheckbox />}
