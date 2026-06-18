@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 
-export function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
-  const ref = useRef<HTMLDivElement | null>(null)
+export function useContainerWidth(): [React.RefObject<HTMLDivElement>, number] {
+  const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
 
   useEffect(() => {

@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export function useModalDismiss<T extends HTMLElement>(onClose: () => void): React.RefObject<T | null> {
-  const ref = useRef<T | null>(null)
+export function useModalDismiss<T extends HTMLElement>(onClose: () => void): React.RefObject<T> {
+  const ref = useRef<T>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
 
