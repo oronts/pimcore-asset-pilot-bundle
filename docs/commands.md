@@ -58,6 +58,21 @@ bin/console asset-pilot:rules-diff rules.yaml --fail-on-diff
 The diff classifies each rule as added, removed, changed, or unchanged. `rules-diff` first validates
 the imported rules (reusing `validate-config`) and aborts if any are invalid.
 
+### Reorganize Assets (post-import)
+
+```bash
+# Re-organize the objects that own the assets sitting in a staging folder
+bin/console asset-pilot:reorganize-assets --folder=/Staging --limit=200
+
+# Queue each owner via the messenger worker instead of running inline
+bin/console asset-pilot:reorganize-assets --folder=/Staging --async
+```
+
+Asset-centric counterpart to `organize` (which is object-first): for assets in `--folder`, it resolves
+the owning DataObjects (reverse dependencies) and re-organizes each, relocating the assets to their
+rule-derived paths. The scan is bounded by `--limit` and each owner is organized once; re-organizing
+is idempotent.
+
 ### Verify Locations (Drift)
 
 ```bash

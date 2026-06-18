@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -38,9 +39,38 @@ class OperationsController
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly FailureReplayService $failureReplay,
+        protected readonly AssetReorganizer $reorganizer,
         protected readonly LoggerInterface $logger,
         protected readonly int $defaultBatchSize = 50,
     ) {}
+
+    #[Route('/operations/reorganize', name: 'oronts_asset_pilot_operations_reorganize', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function reorganize(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent() ?: '{}', true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+        if (!is_array($data) || trim((string) ($data['folder'] ?? '')) === '') {
+            return new JsonResponse(['error' => 'A non-empty "folder" is required.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $async = (bool) ($data['async'] ?? false);
+        $limit = isset($data['limit']) ? max(1, (int) $data['limit']) : 0;
+
+        $result = $this->reorganizer->reorganizeFolder(trim((string) $data['folder']), $limit, $async);
+
+        return new JsonResponse([
+            'assetsScanned' => $result->assetsScanned,
+            'ownerObjects' => $result->ownerObjects,
+            'organized' => $result->organized,
+            'dispatched' => $result->dispatched,
+            'skipped' => $result->skipped,
+            'failed' => $result->failed,
+        ], $async ? Response::HTTP_ACCEPTED : Response::HTTP_OK);
+    }
 
     #[Route('/operations/replay', name: 'oronts_asset_pilot_operations_replay', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
