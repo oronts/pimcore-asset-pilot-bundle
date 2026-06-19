@@ -44,6 +44,12 @@ class DuplicateMergeService
         return array_keys($this->strategies);
     }
 
+    /** The strategy name used when a merge does not request one explicitly. */
+    public function defaultStrategyName(): string
+    {
+        return $this->defaultStrategy;
+    }
+
     public function merge(DuplicateGroup $group, ?int $canonicalId = null, ?string $strategyName = null, bool $dryRun = false): MergeOutcome
     {
         $strategy = $this->resolveStrategy($strategyName ?? $this->defaultStrategy);

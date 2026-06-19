@@ -280,3 +280,36 @@ export interface ReplaySummary {
   skipped: number
   failed: number
 }
+
+// Duplicates
+export interface DuplicateGroup {
+  checksum: string
+  fileSize: number
+  count: number
+  assetIds: number[]
+}
+
+export interface DuplicatesResponse {
+  items: DuplicateGroup[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface MergeStrategies {
+  strategies: string[]
+  default: string
+}
+
+export interface MergeDisposition {
+  copyId: number
+  outcome: string
+  reason: string
+}
+
+export interface MergeResult {
+  checksum: string
+  canonicalId: number
+  dryRun: boolean
+  dispositions: MergeDisposition[]
+}

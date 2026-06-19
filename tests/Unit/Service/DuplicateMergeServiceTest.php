@@ -135,4 +135,12 @@ class DuplicateMergeServiceTest extends TestCase
 
         self::assertSame(['quarantine', 'delete', 'isolate'], $service->availableStrategies());
     }
+
+    #[Test]
+    public function reportsTheConfiguredDefaultStrategyName(): void
+    {
+        $service = $this->service($this->createMock(DuplicateReferenceRepointer::class), [$this->strategy('quarantine')]);
+
+        self::assertSame('quarantine', $service->defaultStrategyName());
+    }
 }

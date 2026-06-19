@@ -24,6 +24,9 @@ import type {
   RulesExportArtifact,
   ReplayParams,
   ReplaySummary,
+  DuplicatesResponse,
+  MergeStrategies,
+  MergeResult,
 } from '../types'
 
 const BASE_URL = '/pimcore-studio/api/asset-pilot'
@@ -208,6 +211,16 @@ export const assetPilotApi = {
     request<ExplainResponse>('/organize/explain', {
       method: 'POST',
       body: JSON.stringify({ objectId }),
+    }),
+
+  // Duplicates
+  getDuplicates: (page = 1, limit = 50) =>
+    request<DuplicatesResponse>(`/duplicates${buildQuery({ page, limit })}`),
+  getMergeStrategies: () => request<MergeStrategies>('/duplicates/strategies'),
+  mergeDuplicates: (checksum: string, canonicalId?: number, strategy?: string, dryRun = false) =>
+    request<MergeResult>('/duplicates/merge', {
+      method: 'POST',
+      body: JSON.stringify({ checksum, canonicalId, strategy, dryRun }),
     }),
 
   // Permissions

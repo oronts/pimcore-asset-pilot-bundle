@@ -6,10 +6,11 @@ import { RulesTab } from './rules/rules-tab'
 import { OperationsTab } from './operations/operations-tab'
 import { AuditTab } from './audit/audit-tab'
 import { UnusedAssetsTab } from './unused-assets/unused-assets-tab'
+import { DuplicatesTab } from './duplicates/duplicates-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
 import { PermissionContext, usePermissionsFetch } from '../hooks/use-permissions'
 
-const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'management'] as const
+const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'management'] as const
 type TabKey = typeof tabKeys[number]
 
 const tabLabelKeys: Record<TabKey, string> = {
@@ -18,6 +19,7 @@ const tabLabelKeys: Record<TabKey, string> = {
   operations: 'asset-pilot.tabs.operations',
   audit: 'asset-pilot.tabs.audit',
   unused: 'asset-pilot.tabs.unused',
+  duplicates: 'asset-pilot.tabs.duplicates',
   management: 'asset-pilot.tabs.management',
 }
 
@@ -88,6 +90,7 @@ export const AssetPilotDashboard: React.FC = () => {
         {activeTab === 'operations' && <OperationsTab />}
         {activeTab === 'audit' && <AuditTab />}
         {activeTab === 'unused' && <UnusedAssetsTab />}
+        {activeTab === 'duplicates' && <DuplicatesTab />}
         {activeTab === 'management' && <AssetManagementTab />}
       </div>
     </div>

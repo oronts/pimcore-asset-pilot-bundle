@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
-import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse } from '../types'
+import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, MergeStrategies } from '../types'
 
 interface AsyncState<T> {
   data: T | null
@@ -87,4 +87,12 @@ export function useAssetSearch(filters: AssetSearchFilters): AsyncState<Paginate
 
 export function useTags(): AsyncState<TagItem[]> {
   return useAsyncData(() => assetPilotApi.getAvailableTags())
+}
+
+export function useDuplicates(page: number, limit: number): AsyncState<DuplicatesResponse> {
+  return useAsyncData(() => assetPilotApi.getDuplicates(page, limit), [page, limit])
+}
+
+export function useMergeStrategies(): AsyncState<MergeStrategies> {
+  return useAsyncData(() => assetPilotApi.getMergeStrategies())
 }

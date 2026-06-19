@@ -56,6 +56,20 @@ class DuplicatesController
     }
 
     /**
+     * The selectable merge strategies (built-in plus any tagged custom ones) and the configured
+     * default, so the UI can offer them without hard-coding the list.
+     */
+    #[Route('/duplicates/strategies', name: 'oronts_asset_pilot_duplicates_strategies', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function strategies(): JsonResponse
+    {
+        return new JsonResponse([
+            'strategies' => $this->merge->availableStrategies(),
+            'default' => $this->merge->defaultStrategyName(),
+        ]);
+    }
+
+    /**
      * Consolidate one duplicate group (by content hash) onto a canonical asset and dispose of the
      * copies via the configured (or requested) strategy. Destructive, so Admin-only; pass
      * "dryRun": true to preview the plan without repointing or disposing anything.
