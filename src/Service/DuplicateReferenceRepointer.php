@@ -328,10 +328,12 @@ class DuplicateReferenceRepointer
     }
 
     /**
-     * Whether the object still requires the copy after the rewrite. Pimcore rewrites the dependencies
-     * table synchronously on save (including nested brick/block/fieldcollection refs), so a targeted
-     * LIMIT-1 lookup is equivalent to scanning getRequires() but short-circuits instead of materialising
-     * the object's whole outgoing dependency list.
+     * Whether the object still requires the copy after the rewrite. Pimcore flattens nested brick/block/
+     * fieldcollection/localizedfield refs into the dependencies table on save, so a targeted LIMIT-1
+     * lookup is equivalent to scanning getRequires() but short-circuits instead of materialising the whole
+     * outgoing dependency list. Under an async dependencies transport the table can lag, which only ever
+     * over-blocks (the pre-save rows still list the copy); the delete strategy's reverse-dependency
+     * re-check is the second guard.
      */
     protected function objectStillReferences(int $objectId, int $fromAssetId): bool
     {

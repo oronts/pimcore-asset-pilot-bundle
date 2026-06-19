@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\StorageTrendService;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -23,6 +24,7 @@ class UnusedAssetsController
         private readonly UnusedAssetFinderInterface $unusedAssetFinder,
         private readonly QuarantineService $quarantineService,
         private readonly LoggerInterface $logger,
+        private readonly StorageTrendService $storageTrend,
     ) {}
 
     #[Route('/unused-assets', name: 'oronts_asset_pilot_unused_assets', methods: ['GET'])]
@@ -63,7 +65,11 @@ class UnusedAssetsController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function stats(): JsonResponse
     {
-        return new JsonResponse($this->unusedAssetFinder->getUnusedStatsCached());
+        // Prefer the materialised snapshot (two indexed reads, no catalog scan); fall back to the
+        // cached live computation when nothing has been captured yet.
+        return new JsonResponse(
+            $this->storageTrend->latestUnusedStats() ?? $this->unusedAssetFinder->getUnusedStatsCached(),
+        );
     }
 
     #[Route('/unused-assets/bulk-delete', name: 'oronts_asset_pilot_unused_assets_bulk_delete', methods: ['POST'])]

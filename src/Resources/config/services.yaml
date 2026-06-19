@@ -142,7 +142,7 @@ services:
 
     Oronts\AssetPilotBundle\Cache\StatsCache:
         arguments:
-            $pool: '@cache.app'
+            $cache: '@cache.app'
 
     Oronts\AssetPilotBundle\Audit\AuditLogger:
         arguments:

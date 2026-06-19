@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 
 /**
  * Storage-cost trend reporting: periodically snapshots the current unused-asset count and byte size
@@ -59,6 +60,66 @@ class StorageTrendService
             ],
             $this->fetchTrendRows($type, max(1, $limit)),
         );
+    }
+
+    /**
+     * The most recent snapshot rendered as unused-asset stats (same shape as
+     * UnusedAssetFinderInterface::getUnusedStats), or null if nothing has been captured yet. Lets the
+     * web endpoint serve a materialised result (two indexed reads, no filesystem) instead of cold-scanning
+     * the catalog; keep the StorageSnapshotTask scheduled so it stays fresh.
+     *
+     * @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: list<array{type: string, count: int, total_size: int}>}|null
+     */
+    public function latestUnusedStats(): ?array
+    {
+        $rows = $this->fetchLatestSnapshotRows();
+        if ($rows === []) {
+            return null;
+        }
+
+        $byType = [];
+        $totalCount = 0;
+        $totalSize = 0;
+        foreach ($rows as $row) {
+            $count = (int) $row['unused_count'];
+            $size = (int) $row['unused_size'];
+            $byType[] = ['type' => (string) $row['type'], 'count' => $count, 'total_size' => $size];
+            $totalCount += $count;
+            $totalSize += $size;
+        }
+
+        usort($byType, static fn (array $a, array $b): int => $b['count'] <=> $a['count']);
+
+        return [
+            'totalCount' => $totalCount,
+            'totalSize' => $totalSize,
+            'totalSizeFormatted' => ByteFormat::human($totalSize),
+            'byType' => $byType,
+        ];
+    }
+
+    /**
+     * @return list<array{type: string, unused_count: int|string, unused_size: int|string}>
+     */
+    protected function fetchLatestSnapshotRows(): array
+    {
+        $latest = $this->connection->createQueryBuilder()
+            ->select('MAX(captured_at)')
+            ->from(self::TABLE)
+            ->executeQuery()
+            ->fetchOne();
+
+        if ($latest === null || $latest === false) {
+            return [];
+        }
+
+        return $this->connection->createQueryBuilder()
+            ->select('type', 'unused_count', 'unused_size')
+            ->from(self::TABLE)
+            ->where('captured_at = :capturedAt')
+            ->setParameter('capturedAt', $latest)
+            ->executeQuery()
+            ->fetchAllAssociative();
     }
 
     protected function insertSnapshot(string $capturedAt, string $type, int $count, int $size): void

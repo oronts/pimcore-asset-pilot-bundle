@@ -122,4 +122,41 @@ class StorageTrendServiceTest extends TestCase
             ['capturedAt' => '2026-06-18 00:00:00', 'count' => 3, 'size' => 150],
         ], $service->trend(null));
     }
+
+    #[Test]
+    public function latestUnusedStatsRendersTheMostRecentSnapshotInGetUnusedStatsShape(): void
+    {
+        $service = new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), $this->createMock(UnusedAssetFinderInterface::class)) extends StorageTrendService {
+            protected function fetchLatestSnapshotRows(): array
+            {
+                return [
+                    ['type' => 'image', 'unused_count' => 2, 'unused_size' => 150],
+                    ['type' => 'video', 'unused_count' => 1, 'unused_size' => 800],
+                ];
+            }
+        };
+
+        $stats = $service->latestUnusedStats();
+
+        self::assertNotNull($stats);
+        self::assertSame(3, $stats['totalCount']);
+        self::assertSame(950, $stats['totalSize']);
+        self::assertSame('image', $stats['byType'][0]['type'], 'ordered by count desc');
+        self::assertSame(150, $stats['byType'][0]['total_size']);
+        self::assertSame('video', $stats['byType'][1]['type']);
+        self::assertSame(800, $stats['byType'][1]['total_size']);
+    }
+
+    #[Test]
+    public function latestUnusedStatsIsNullWhenNothingHasBeenCaptured(): void
+    {
+        $service = new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), $this->createMock(UnusedAssetFinderInterface::class)) extends StorageTrendService {
+            protected function fetchLatestSnapshotRows(): array
+            {
+                return [];
+            }
+        };
+
+        self::assertNull($service->latestUnusedStats());
+    }
 }

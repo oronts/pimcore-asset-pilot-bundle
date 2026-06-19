@@ -4,16 +4,18 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Cache;
 
-use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Contracts\Cache\CacheInterface;
+use Symfony\Contracts\Cache\ItemInterface;
 
 /**
- * Cache-aside helper for the read-only stats endpoints: serve a value from the shared pool within a
- * short TTL, otherwise compute and store it. A non-positive TTL bypasses the cache, which keeps the
- * schedule/maintenance callers (and tests) on live data.
+ * Cache-aside helper for the read-only stats endpoints. Uses the Symfony Contracts cache get(), which
+ * provides built-in stampede protection (one worker recomputes a concurrent miss while the others wait
+ * or serve the stale value) across PHP-FPM, Messenger workers and multiple pods. A non-positive TTL
+ * bypasses the cache, which keeps the schedule/maintenance callers (and tests) on live data.
  */
 class StatsCache
 {
-    public function __construct(private readonly CacheItemPoolInterface $pool) {}
+    public function __construct(private readonly CacheInterface $cache) {}
 
     /**
      * @template T
@@ -28,20 +30,15 @@ class StatsCache
             return $compute();
         }
 
-        $item = $this->pool->getItem($key);
-        if ($item->isHit()) {
-            return $item->get();
-        }
+        return $this->cache->get($key, static function (ItemInterface $item) use ($ttl, $compute) {
+            $item->expiresAfter($ttl);
 
-        $value = $compute();
-        $item->set($value)->expiresAfter($ttl);
-        $this->pool->save($item);
-
-        return $value;
+            return $compute();
+        });
     }
 
     public function delete(string $key): void
     {
-        $this->pool->deleteItem($key);
+        $this->cache->delete($key);
     }
 }
