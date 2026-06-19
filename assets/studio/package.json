@@ -19,7 +19,7 @@
     "uuid": "^10.0.0"
   },
   "dependencies": {
-    "@pimcore/studio-ui-bundle": "file:../../../../vendor/pimcore/studio-ui-bundle/public/build/studio-npm-package.tgz",
+    "@pimcore/studio-ui-bundle": "2025.4.4",
     "i18next": "^23.16.8",
     "react": "18.3.x",
     "react-dom": "18.3.x",
