@@ -26,8 +26,7 @@ export const DriftTab: React.FC = () => {
     setPage(1)
   }
 
-  // driftForClass pages the SOURCE objects and filters to drifted ones, so an empty page is not the
-  // end: drive paging off objectsScanned, not the number of drift rows.
+  // Page off objectsScanned, not the filtered drift rows, or later pages get skipped.
   const hasNext = (data?.objectsScanned ?? 0) >= LIMIT
 
   return (

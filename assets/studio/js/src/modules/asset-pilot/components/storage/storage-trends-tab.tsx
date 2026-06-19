@@ -29,7 +29,6 @@ export const StorageTrendsTab: React.FC = () => {
     )
   }
 
-  // trend() returns newest-first, so items[0] is the latest snapshot and the last item is the oldest.
   const latest = data.items[0]
   const oldest = data.items[data.items.length - 1]
   const delta = latest.size - oldest.size

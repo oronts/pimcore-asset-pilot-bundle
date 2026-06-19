@@ -35,9 +35,7 @@ export const IntegrityTab: React.FC = () => {
 
   if (data == null) return null
 
-  // findBroken pages the SOURCE asset ids and filters to broken ones, so an empty page does not mean
-  // "done": there may be more broken assets further on. Drive paging off the scanned count, not the
-  // number of broken rows, and only show the global empty state when nothing was even scanned.
+  // Page off the scanned-source count, not the filtered broken rows, or later pages get skipped.
   const hasNext = data.scanned >= LIMIT
   if (data.items.length === 0 && page === 1 && !hasNext) {
     return <EmptyState variant="no-data" title={t('asset-pilot.integrity.empty')} description={t('asset-pilot.integrity.empty-desc')} />
