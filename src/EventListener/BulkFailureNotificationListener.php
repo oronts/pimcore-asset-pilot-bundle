@@ -17,13 +17,12 @@ class BulkFailureNotificationListener
 {
     public function __construct(
         private readonly NotificationDispatcher $dispatcher,
-        private readonly bool $enabled = false,
         private readonly float $failureRateThreshold = 0.5,
     ) {}
 
     public function onBulkCompleted(BulkOrganizeEvent $event): void
     {
-        if (!$this->enabled) {
+        if (!$this->dispatcher->isEnabled()) {
             return;
         }
 

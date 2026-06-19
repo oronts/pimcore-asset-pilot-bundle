@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
@@ -110,9 +111,11 @@ class DuplicateDetectionService
     public function countDuplicateGroups(): int
     {
         try {
+            // INNER JOIN assets so a deleted asset's stale index row is not counted (no ghost groups).
             $sql = sprintf(
-                'SELECT COUNT(*) FROM (SELECT checksum FROM %s GROUP BY checksum HAVING COUNT(*) > 1) AS grouped',
+                'SELECT COUNT(*) FROM (SELECT c.checksum FROM %s c INNER JOIN %s a ON a.id = c.asset_id GROUP BY c.checksum HAVING COUNT(*) > 1) AS grouped',
                 self::TABLE,
+                PimcoreSchema::TABLE_ASSETS,
             );
 
             return (int) $this->connection->fetchOne($sql);
@@ -175,13 +178,15 @@ class DuplicateDetectionService
      */
     protected function fetchDuplicateRows(int $offset, int $limit): array
     {
+        // INNER JOIN assets so a deleted asset's stale index row never forms a ghost duplicate group.
         return $this->connection->createQueryBuilder()
-            ->select('checksum', 'MIN(file_size) AS file_size', 'COUNT(*) AS cnt')
-            ->from(self::TABLE)
-            ->groupBy('checksum')
+            ->select('c.checksum', 'MIN(c.file_size) AS file_size', 'COUNT(*) AS cnt')
+            ->from(self::TABLE, 'c')
+            ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
+            ->groupBy('c.checksum')
             ->having('COUNT(*) > 1')
             ->orderBy('cnt', 'DESC')
-            ->addOrderBy('checksum', 'ASC')
+            ->addOrderBy('c.checksum', 'ASC')
             ->setFirstResult($offset)
             ->setMaxResults($limit)
             ->executeQuery()
@@ -194,11 +199,12 @@ class DuplicateDetectionService
     protected function assetIdsForChecksum(string $checksum, int $cap): array
     {
         $ids = $this->connection->createQueryBuilder()
-            ->select('asset_id')
-            ->from(self::TABLE)
-            ->where('checksum = :checksum')
+            ->select('c.asset_id')
+            ->from(self::TABLE, 'c')
+            ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
+            ->where('c.checksum = :checksum')
             ->setParameter('checksum', $checksum)
-            ->orderBy('asset_id', 'ASC')
+            ->orderBy('c.asset_id', 'ASC')
             ->setMaxResults($cap)
             ->executeQuery()
             ->fetchFirstColumn();

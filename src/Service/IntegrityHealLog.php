@@ -83,6 +83,34 @@ class IntegrityHealLog
         }
     }
 
+    /**
+     * The status of this asset's most recent heal-log entry, or null if it has none. Used to notify
+     * only on the transition into `unrecoverable`, so a repeated scan of a still-broken asset does
+     * not re-alert on every run.
+     */
+    public function latestStatus(int $assetId): ?string
+    {
+        try {
+            $status = $this->connection->createQueryBuilder()
+                ->select('status')
+                ->from(self::TABLE)
+                ->where('asset_id = :assetId')
+                ->setParameter('assetId', $assetId)
+                ->orderBy('id', 'DESC')
+                ->setMaxResults(1)
+                ->executeQuery()
+                ->fetchOne();
+
+            return $status === false ? null : (string) $status;
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to read latest integrity status: {error}', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     public function markUndone(int $id): void
     {
         try {

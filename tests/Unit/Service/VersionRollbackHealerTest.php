@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Event\AssetHealEvent;
 use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
+use Oronts\AssetPilotBundle\Notification\NotificationDispatcher;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
@@ -97,13 +98,14 @@ class VersionRollbackHealerTest extends TestCase
         string $onUnrecoverable = 'report',
         array $assetsById = [],
         array $versionsById = [],
+        ?NotificationDispatcher $notifier = null,
     ): VersionRollbackHealer {
         $dispatcher = new EventDispatcher();
         if ($cancelPreHeal) {
             $dispatcher->addListener('oronts_asset_pilot.integrity_pre_heal', static fn (AssetHealEvent $e) => $e->cancel());
         }
 
-        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById) extends VersionRollbackHealer {
+        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier) extends VersionRollbackHealer {
             /**
              * @param \ArrayObject<int, int> $restored
              * @param list<Version>          $versions
@@ -122,6 +124,7 @@ class VersionRollbackHealerTest extends TestCase
                 string $onUnrecoverable,
                 private readonly array $assetsById,
                 private readonly array $versionsById,
+                ?NotificationDispatcher $notifier,
             ) {
                 parent::__construct(
                     $checker,
@@ -131,6 +134,7 @@ class VersionRollbackHealerTest extends TestCase
                     new NullLogger(),
                     $quarantine,
                     $onUnrecoverable,
+                    $notifier,
                 );
             }
 
@@ -200,6 +204,41 @@ class VersionRollbackHealerTest extends TestCase
 
         self::assertSame(HealOutcome::Unrecoverable, $result->outcome);
         self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function unrecoverableDispatchesANotification(): void
+    {
+        $notifier = $this->createMock(NotificationDispatcher::class);
+        $notifier->expects(self::once())->method('dispatch');
+
+        $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['bad' => IntegrityStatus::Broken]),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+            [$this->version(1)],
+            [1 => 'bad'],
+            notifier: $notifier,
+        )->heal($this->asset());
+    }
+
+    #[Test]
+    public function repeatedUnrecoverableDoesNotReNotify(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('latestStatus')->willReturn(IntegrityHealLog::STATUS_UNRECOVERABLE);
+
+        $notifier = $this->createMock(NotificationDispatcher::class);
+        $notifier->expects(self::never())->method('dispatch');
+
+        $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['bad' => IntegrityStatus::Broken]),
+            $healLog,
+            new \ArrayObject(),
+            [$this->version(1)],
+            [1 => 'bad'],
+            notifier: $notifier,
+        )->heal($this->asset());
     }
 
     #[Test]

@@ -39,10 +39,11 @@ class BulkFailureNotificationListenerTest extends TestCase
     public function notifiesWhenTheFailureRateMeetsTheThreshold(): void
     {
         $dispatcher = $this->createMock(NotificationDispatcher::class);
+        $dispatcher->method('isEnabled')->willReturn(true);
         $dispatcher->expects(self::once())->method('dispatch');
 
         // 2 of 3 failed = 0.67 >= 0.5
-        (new BulkFailureNotificationListener($dispatcher, enabled: true, failureRateThreshold: 0.5))
+        (new BulkFailureNotificationListener($dispatcher, failureRateThreshold: 0.5))
             ->onBulkCompleted($this->event([
                 $this->operationResult(OperationStatus::Failed),
                 $this->operationResult(OperationStatus::Failed),
@@ -54,10 +55,11 @@ class BulkFailureNotificationListenerTest extends TestCase
     public function staysSilentBelowTheThreshold(): void
     {
         $dispatcher = $this->createMock(NotificationDispatcher::class);
+        $dispatcher->method('isEnabled')->willReturn(true);
         $dispatcher->expects(self::never())->method('dispatch');
 
         // 1 of 3 failed = 0.33 < 0.5
-        (new BulkFailureNotificationListener($dispatcher, enabled: true, failureRateThreshold: 0.5))
+        (new BulkFailureNotificationListener($dispatcher, failureRateThreshold: 0.5))
             ->onBulkCompleted($this->event([
                 $this->operationResult(OperationStatus::Failed),
                 $this->operationResult(OperationStatus::Completed),
@@ -66,12 +68,13 @@ class BulkFailureNotificationListenerTest extends TestCase
     }
 
     #[Test]
-    public function staysSilentWhenDisabled(): void
+    public function staysSilentWhenTheDispatcherIsDisabled(): void
     {
         $dispatcher = $this->createMock(NotificationDispatcher::class);
+        $dispatcher->method('isEnabled')->willReturn(false);
         $dispatcher->expects(self::never())->method('dispatch');
 
-        (new BulkFailureNotificationListener($dispatcher, enabled: false, failureRateThreshold: 0.5))
+        (new BulkFailureNotificationListener($dispatcher, failureRateThreshold: 0.5))
             ->onBulkCompleted($this->event([$this->operationResult(OperationStatus::Failed)]));
     }
 
@@ -79,9 +82,10 @@ class BulkFailureNotificationListenerTest extends TestCase
     public function staysSilentWhenThereAreNoResults(): void
     {
         $dispatcher = $this->createMock(NotificationDispatcher::class);
+        $dispatcher->method('isEnabled')->willReturn(true);
         $dispatcher->expects(self::never())->method('dispatch');
 
-        (new BulkFailureNotificationListener($dispatcher, enabled: true, failureRateThreshold: 0.5))
+        (new BulkFailureNotificationListener($dispatcher, failureRateThreshold: 0.5))
             ->onBulkCompleted($this->event([]));
     }
 }

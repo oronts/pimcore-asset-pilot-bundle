@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DriverManager;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -167,5 +168,28 @@ class DuplicateDetectionServiceTest extends TestCase
         self::assertSame(3, $groups[0]->count);
         self::assertSame([1, 2, 3], $groups[0]->assetIds);
         self::assertSame([7, 8], $groups[1]->assetIds);
+    }
+
+    #[Test]
+    public function findDuplicatesExcludesRowsForDeletedAssetsViaTheJoin(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_checksum (asset_id INTEGER, checksum TEXT, file_size INTEGER, indexed_at TEXT)');
+        // assets 1,2 exist and share "dup"; assets 3,4 share "ghost" but 4 was deleted (no assets row).
+        foreach ([1, 2, 3] as $id) {
+            $connection->insert('assets', ['id' => $id]);
+        }
+        foreach ([[1, 'dup'], [2, 'dup'], [3, 'ghost'], [4, 'ghost']] as [$assetId, $checksum]) {
+            $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => $checksum, 'file_size' => 100, 'indexed_at' => '2026-06-19 00:00:00']);
+        }
+
+        $service = new DuplicateDetectionService($connection, new NullLogger());
+
+        $groups = $service->findDuplicates();
+        self::assertCount(1, $groups, 'the "ghost" group has only one live asset and must not appear');
+        self::assertSame('dup', $groups[0]->checksum);
+        self::assertSame([1, 2], $groups[0]->assetIds);
+        self::assertSame(1, $service->countDuplicateGroups());
     }
 }

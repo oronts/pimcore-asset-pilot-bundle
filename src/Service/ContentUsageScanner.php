@@ -11,6 +11,7 @@ use Pimcore\Model\DataObject\ClassDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * Heuristic guard against deleting an asset that is referenced only inside rich-text / text fields.
@@ -26,9 +27,12 @@ use Psr\Log\LoggerInterface;
  * those live in separate tables). A scan that errors fails CLOSED (treats the asset as referenced),
  * so an opt-in safety check can never let a possibly-referenced asset be deleted on a scan failure.
  */
-class ContentUsageScanner
+class ContentUsageScanner implements ResetInterface
 {
     private const array TEXT_FIELD_TYPES = ['wysiwyg', 'textarea', 'input'];
+
+    /** @var array<string, list<array{0: string, 1: list<string>}>> per-batch per-class column cache */
+    private array $columnsByClass = [];
 
     /**
      * @param string[] $classes DataObject class names to scan (empty = feature inert)
@@ -39,6 +43,15 @@ class ContentUsageScanner
         protected readonly array $classes = [],
         protected readonly bool $enabled = false,
     ) {}
+
+    /**
+     * Drop the per-class column cache so a long-running worker that processes a fresh message picks
+     * up class-definition changes (a newly added text field) rather than scanning a stale column set.
+     */
+    public function reset(): void
+    {
+        $this->columnsByClass = [];
+    }
 
     public function isReferencedInContent(Asset $asset): bool
     {
@@ -52,7 +65,11 @@ class ContentUsageScanner
         }
 
         foreach ($this->classes as $className) {
-            foreach ($this->textColumnsFor((string) $className) as [$table, $columns]) {
+            $className = (string) $className;
+            // Memoize the per-class column discovery: a batch (e.g. normalize) scans many assets
+            // against the same classes, and introspecting the class definition each time is wasteful.
+            $this->columnsByClass[$className] ??= $this->textColumnsFor($className);
+            foreach ($this->columnsByClass[$className] as [$table, $columns]) {
                 if ($columns !== [] && $this->matchesAny($table, $columns, $needle)) {
                     return true;
                 }

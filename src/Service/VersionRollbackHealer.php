@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Event\AssetHealEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Model\HealResult;
+use Oronts\AssetPilotBundle\Notification\NotificationDispatcher;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Version;
 use Psr\Log\LoggerInterface;
@@ -32,6 +33,7 @@ class VersionRollbackHealer
         protected readonly LoggerInterface $logger,
         protected readonly ?QuarantineService $quarantine = null,
         protected readonly string $onUnrecoverable = 'report',
+        protected readonly ?NotificationDispatcher $notifier = null,
     ) {}
 
     public function healById(int $assetId, bool $dryRun = false): HealResult
@@ -92,8 +94,9 @@ class VersionRollbackHealer
         }
 
         if (!$dryRun) {
+            $firstUnrecoverable = $this->healLog->latestStatus((int) $asset->getId()) !== IntegrityHealLog::STATUS_UNRECOVERABLE;
             $this->healLog->record((int) $asset->getId(), null, null, $live->checker, IntegrityHealLog::STATUS_UNRECOVERABLE);
-            $this->routeUnrecoverable($asset);
+            $this->routeUnrecoverable($asset, $firstUnrecoverable);
         }
 
         return new HealResult(HealOutcome::Unrecoverable, $live->checker, null, 'No renderable version to roll back to.', $dryRun);
@@ -146,7 +149,7 @@ class VersionRollbackHealer
         }
     }
 
-    private function routeUnrecoverable(Asset $asset): void
+    private function routeUnrecoverable(Asset $asset, bool $notify): void
     {
         $this->logger->warning('Asset Pilot: asset {id} is broken and has no renderable version to roll back to.', [
             'id' => $asset->getId(),
@@ -154,9 +157,25 @@ class VersionRollbackHealer
 
         // Best-effort quarantine: QuarantineService re-verifies the asset is unused, so a still-referenced
         // broken asset stays put and is only reported (the report row is already written above).
+        $quarantined = false;
         if ($this->onUnrecoverable === 'quarantine' && $this->quarantine !== null) {
-            $this->quarantine->quarantine([(int) $asset->getId()]);
+            $result = $this->quarantine->quarantine([(int) $asset->getId()]);
+            $quarantined = ($result['quarantined'] ?? 0) > 0;
         }
+
+        if (!$notify) {
+            return;
+        }
+
+        $this->notifier?->dispatch(
+            'Asset Pilot: unrecoverable broken asset',
+            sprintf(
+                'Asset %d (%s) is broken and no stored version renders. %s',
+                $asset->getId(),
+                $asset->getRealFullPath(),
+                $quarantined ? 'It was moved to quarantine for review.' : 'It was left in place and reported for review.',
+            ),
+        );
     }
 
     /**

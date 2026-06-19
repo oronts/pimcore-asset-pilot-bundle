@@ -156,4 +156,32 @@ class ContentUsageScannerTest extends TestCase
 
         self::assertTrue($scanner->isReferencedInContent($this->asset()));
     }
+
+    #[Test]
+    public function memoizesColumnDiscoveryUntilResetClearsIt(): void
+    {
+        $calls = new \ArrayObject();
+        $scanner = new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), new NullLogger(), $calls) extends ContentUsageScanner {
+            /** @param \ArrayObject<int, string> $calls */
+            public function __construct(Connection $c, NullLogger $l, private readonly \ArrayObject $calls)
+            {
+                parent::__construct($c, $l, ['Product'], true);
+            }
+
+            protected function textColumnsFor(string $className): array
+            {
+                $this->calls->append($className);
+
+                return [];
+            }
+        };
+
+        $scanner->isReferencedInContent($this->asset());
+        $scanner->isReferencedInContent($this->asset());
+        self::assertCount(1, $calls, 'column discovery is memoized across scans within a batch');
+
+        $scanner->reset();
+        $scanner->isReferencedInContent($this->asset());
+        self::assertCount(2, $calls, 'reset() forces re-discovery on the next scan');
+    }
 }
