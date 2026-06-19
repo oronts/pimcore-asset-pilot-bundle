@@ -30,6 +30,7 @@ export const de: Record<string, string> = {
   'asset-pilot.common.showing': '{{count}} von {{total}} angezeigt',
   'asset-pilot.common.page-info': 'Seite {{page}}/{{pages}}',
   'asset-pilot.common.no-data': 'Keine Daten verfügbar',
+  'asset-pilot.common.none-on-page': 'Auf dieser Seite gab es keine Treffer; auf der nächsten Seite könnten weitere sein.',
 
   // Health (F7)
   'asset-pilot.health.title': 'Zustand',

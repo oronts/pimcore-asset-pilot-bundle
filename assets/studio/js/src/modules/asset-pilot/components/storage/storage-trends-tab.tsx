@@ -29,9 +29,10 @@ export const StorageTrendsTab: React.FC = () => {
     )
   }
 
-  const latest = data.items[data.items.length - 1]
-  const first = data.items[0]
-  const delta = latest.size - first.size
+  // trend() returns newest-first, so items[0] is the latest snapshot and the last item is the oldest.
+  const latest = data.items[0]
+  const oldest = data.items[data.items.length - 1]
+  const delta = latest.size - oldest.size
 
   return (
     <div>
@@ -43,7 +44,7 @@ export const StorageTrendsTab: React.FC = () => {
         <SummaryCard
           label={t('asset-pilot.storage.change')}
           value={`${delta >= 0 ? '+' : ''}${formatBytes(Math.abs(delta))}`}
-          sub={t('asset-pilot.storage.since', { date: formatDate(first.capturedAt) })}
+          sub={t('asset-pilot.storage.since', { date: formatDate(oldest.capturedAt) })}
           color={delta > 0 ? '#ff4d4f' : '#52c41a'}
         />
       </div>

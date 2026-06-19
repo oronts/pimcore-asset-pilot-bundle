@@ -319,7 +319,7 @@ export interface BrokenAssetItem {
   id: number
   path: string
   checker: string
-  reason: string
+  reason: string | null
 }
 
 export interface BrokenAssetsResponse {

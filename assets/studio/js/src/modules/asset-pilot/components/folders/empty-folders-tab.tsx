@@ -31,7 +31,8 @@ export const EmptyFoldersTab: React.FC = () => {
     </div>
   )
 
-  if (data == null || data.items.length === 0) {
+  if (data == null) return null
+  if (data.items.length === 0 && page === 1) {
     return <EmptyState variant="no-data" title={t('asset-pilot.folders.empty')} description={t('asset-pilot.folders.empty-desc')} />
   }
 
@@ -71,28 +72,32 @@ export const EmptyFoldersTab: React.FC = () => {
         )}
       </div>
 
-      <ResponsiveTableWrapper>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 480 }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
-              {perms.operate && <th style={thStyle}></th>}
-              <th style={thStyle}>{t('asset-pilot.columns.id')}</th>
-              <th style={thStyle}>{t('asset-pilot.columns.path')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map(folder => (
-              <tr key={folder.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(folder.id) ? '#e6f4ff' : 'transparent' }}>
-                {perms.operate && (
-                  <td style={tdStyle}><input type="checkbox" checked={selected.has(folder.id)} onChange={() => toggle(folder.id)} /></td>
-                )}
-                <td style={tdStyle}>#{folder.id}</td>
-                <td style={tdStyle}><ExpandablePath path={folder.path} maxLength={64} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </ResponsiveTableWrapper>
+      {data.items.length === 0
+        ? <p style={{ fontSize: 13, color: '#8c8c8c', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+        : (
+          <ResponsiveTableWrapper>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 480 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+                  {perms.operate && <th style={thStyle}></th>}
+                  <th style={thStyle}>{t('asset-pilot.columns.id')}</th>
+                  <th style={thStyle}>{t('asset-pilot.columns.path')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map(folder => (
+                  <tr key={folder.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(folder.id) ? '#e6f4ff' : 'transparent' }}>
+                    {perms.operate && (
+                      <td style={tdStyle}><input type="checkbox" checked={selected.has(folder.id)} onChange={() => toggle(folder.id)} /></td>
+                    )}
+                    <td style={tdStyle}>#{folder.id}</td>
+                    <td style={tdStyle}><ExpandablePath path={folder.path} maxLength={64} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
+        )}
 
       <Pagination page={data.page} pages={Math.max(1, data.items.length < LIMIT ? page : page + 1)} onPage={setPage} />
 

@@ -66,9 +66,9 @@ export const DuplicatesTab: React.FC = () => {
                 <td style={{ ...tdStyle, textAlign: 'center' }}>{group.count}</td>
                 <td style={tdStyle}><ExpandablePath path={group.assetIds.map(id => `#${id}`).join(', ')} maxLength={40} /></td>
                 <td style={tdStyle}>
-                  <button onClick={() => setSelected(group)} style={actionBtnStyle}>
-                    {t('asset-pilot.duplicates.merge')}
-                  </button>
+                  {perms.admin
+                    ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button>
+                    : <span style={{ color: '#bfbfbf', fontSize: 12 }}>-</span>}
                 </td>
               </tr>
             ))}

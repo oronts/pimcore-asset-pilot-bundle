@@ -33,7 +33,13 @@ export const IntegrityTab: React.FC = () => {
     </div>
   )
 
-  if (data == null || data.items.length === 0) {
+  if (data == null) return null
+
+  // findBroken pages the SOURCE asset ids and filters to broken ones, so an empty page does not mean
+  // "done": there may be more broken assets further on. Drive paging off the scanned count, not the
+  // number of broken rows, and only show the global empty state when nothing was even scanned.
+  const hasNext = data.scanned >= LIMIT
+  if (data.items.length === 0 && page === 1 && !hasNext) {
     return <EmptyState variant="no-data" title={t('asset-pilot.integrity.empty')} description={t('asset-pilot.integrity.empty-desc')} />
   }
 
@@ -65,41 +71,47 @@ export const IntegrityTab: React.FC = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.integrity.title', { count: data.broken })}</h4>
-        <button onClick={() => setHealing(true)} disabled={selected.size === 0} style={healBtnStyle}>
-          {t('asset-pilot.integrity.heal-selected', { count: selected.size })}
-        </button>
+        {perms.operate && (
+          <button onClick={() => setHealing(true)} disabled={selected.size === 0} style={healBtnStyle}>
+            {t('asset-pilot.integrity.heal-selected', { count: selected.size })}
+          </button>
+        )}
       </div>
 
-      <ResponsiveTableWrapper>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
-              <th style={thStyle}></th>
-              <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
-              <th style={thStyle}>{t('asset-pilot.columns.path')}</th>
-              <th style={thStyle}>{t('asset-pilot.columns.reason')}</th>
-              {perms.admin && <th style={thStyle}>{t('asset-pilot.common.actions')}</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map(item => (
-              <tr key={item.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(item.id) ? '#e6f4ff' : 'transparent' }}>
-                <td style={tdStyle}><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggle(item.id)} /></td>
-                <td style={tdStyle}>#{item.id}</td>
-                <td style={tdStyle}><ExpandablePath path={item.path} maxLength={48} /></td>
-                <td style={{ ...tdStyle, color: '#fa541c' }}>{item.reason}</td>
-                {perms.admin && (
-                  <td style={tdStyle}>
-                    <button onClick={() => setUndoing(item.id)} style={actionBtnStyle}>{t('asset-pilot.integrity.undo')}</button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </ResponsiveTableWrapper>
+      {data.items.length === 0
+        ? <p style={{ fontSize: 13, color: '#8c8c8c', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+        : (
+          <ResponsiveTableWrapper>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+                  <th style={thStyle}></th>
+                  <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
+                  <th style={thStyle}>{t('asset-pilot.columns.path')}</th>
+                  <th style={thStyle}>{t('asset-pilot.columns.reason')}</th>
+                  {perms.admin && <th style={thStyle}>{t('asset-pilot.common.actions')}</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map(item => (
+                  <tr key={item.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(item.id) ? '#e6f4ff' : 'transparent' }}>
+                    <td style={tdStyle}><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggle(item.id)} /></td>
+                    <td style={tdStyle}>#{item.id}</td>
+                    <td style={tdStyle}><ExpandablePath path={item.path} maxLength={48} /></td>
+                    <td style={{ ...tdStyle, color: '#fa541c' }}>{item.reason}</td>
+                    {perms.admin && (
+                      <td style={tdStyle}>
+                        <button onClick={() => setUndoing(item.id)} style={actionBtnStyle}>{t('asset-pilot.integrity.undo')}</button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
+        )}
 
-      <Pagination page={data.page} pages={Math.max(1, data.items.length < LIMIT ? page : page + 1)} onPage={setPage} />
+      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} />
 
       {healing && (
         <HealModal
