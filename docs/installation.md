@@ -26,8 +26,17 @@ bin/console pimcore:bundle:install OrontsAssetPilotBundle
 ```
 
 This creates:
-- The `asset_pilot_audit_log` table with indexes on `asset_id`, `object_id`, `rule_name`, `status`, and `created_at`
+- The owned tables: `asset_pilot_audit_log`, `asset_pilot_quarantine`, `asset_pilot_integrity_log`,
+  `asset_pilot_checksum`, and `asset_pilot_storage_snapshot` (with their indexes)
 - Three Pimcore permissions: `asset_pilot_view`, `asset_pilot_operate`, `asset_pilot_admin`
+
+The bundle has no Doctrine migrations; the installer owns its schema and is **idempotent** (it creates
+a table when absent and otherwise adds only missing columns/indexes, never dropping data). When you
+upgrade to a bundle version that adds a table or column, re-run the same command to pick it up:
+
+```bash
+bin/console pimcore:bundle:install OrontsAssetPilotBundle
+```
 
 ### 4. Configure Messenger transport
 
