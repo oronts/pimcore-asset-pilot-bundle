@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
@@ -30,6 +33,7 @@ class DuplicateReferenceRepointer
     public function __construct(
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
+        protected readonly Connection $connection,
     ) {}
 
     public function repoint(int $fromAssetId, int $toAssetId, bool $dryRun = false): RepointReport
@@ -324,22 +328,29 @@ class DuplicateReferenceRepointer
     }
 
     /**
-     * Reloads the object and asks Pimcore (which tracks nested references too) whether it still
-     * requires the copy after the rewrite.
+     * Whether the object still requires the copy after the rewrite. Pimcore rewrites the dependencies
+     * table synchronously on save (including nested brick/block/fieldcollection refs), so a targeted
+     * LIMIT-1 lookup is equivalent to scanning getRequires() but short-circuits instead of materialising
+     * the object's whole outgoing dependency list.
      */
     protected function objectStillReferences(int $objectId, int $fromAssetId): bool
     {
-        $object = Concrete::getById($objectId, ['force' => true]);
-        if ($object === null) {
-            return false;
-        }
+        return (bool) $this->stillReferencesQuery($objectId, $fromAssetId)->executeQuery()->fetchOne();
+    }
 
-        foreach ($object->getDependencies()->getRequires() as $row) {
-            if (($row['type'] ?? null) === 'asset' && (int) ($row['id'] ?? 0) === $fromAssetId) {
-                return true;
-            }
-        }
-
-        return false;
+    protected function stillReferencesQuery(int $objectId, int $fromAssetId): QueryBuilder
+    {
+        return $this->connection->createQueryBuilder()
+            ->select('1')
+            ->from(PimcoreSchema::TABLE_DEPENDENCIES)
+            ->where('sourcetype = :sourceType')
+            ->andWhere('sourceid = :objectId')
+            ->andWhere('targettype = :targetType')
+            ->andWhere('targetid = :assetId')
+            ->setParameter('sourceType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
+            ->setParameter('objectId', $objectId)
+            ->setParameter('targetType', PimcoreSchema::ELEMENT_TYPE_ASSET)
+            ->setParameter('assetId', $fromAssetId)
+            ->setMaxResults(1);
     }
 }

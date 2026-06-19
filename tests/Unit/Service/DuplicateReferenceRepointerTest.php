@@ -80,7 +80,7 @@ class DuplicateReferenceRepointerTest extends TestCase
                 private readonly \ArrayObject $writes,
                 private readonly \ArrayObject $saved,
             ) {
-                parent::__construct(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), new NullLogger());
+                parent::__construct(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor());
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -272,5 +272,30 @@ class DuplicateReferenceRepointerTest extends TestCase
 
         self::assertFalse($report->fullyRepointed);
         self::assertStringContainsString('42', $report->blocked[0]);
+    }
+
+    #[Test]
+    public function stillReferencesQueryIsTargetedAndBounded(): void
+    {
+        $connection = \Doctrine\DBAL\DriverManager::getConnection([
+            'driver' => 'pdo_mysql', 'host' => '127.0.0.1', 'dbname' => 'x', 'user' => 'x', 'password' => 'x', 'serverVersion' => '8.0.0',
+        ]);
+        $repointer = new DuplicateReferenceRepointer(
+            new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+            new NullLogger(),
+            $connection,
+        );
+
+        $method = new \ReflectionMethod(DuplicateReferenceRepointer::class, 'stillReferencesQuery');
+        /** @var \Doctrine\DBAL\Query\QueryBuilder $qb */
+        $qb = $method->invoke($repointer, 42, 9);
+        $sql = $qb->getSQL();
+
+        self::assertStringContainsString('dependencies', $sql);
+        self::assertStringContainsString('sourcetype = :sourceType', $sql);
+        self::assertStringContainsString('sourceid = :objectId', $sql);
+        self::assertStringContainsString('targettype = :targetType', $sql);
+        self::assertStringContainsString('targetid = :assetId', $sql);
+        self::assertSame(1, $qb->getMaxResults(), 'must early-exit with LIMIT 1 instead of scanning all dependencies');
     }
 }

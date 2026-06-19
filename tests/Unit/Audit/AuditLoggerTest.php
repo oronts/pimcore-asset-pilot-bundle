@@ -90,6 +90,50 @@ class AuditLoggerTest extends TestCase
         self::assertSame(2, $logger->computeCalls, 'ttl 0 disables the cache');
     }
 
+    #[Test]
+    public function iterateForExportYieldsAllRowsAcrossPagesThenStops(): void
+    {
+        $logger = new class ($this->createMock(Connection::class), new NullLogger()) extends AuditLogger {
+            public int $pageCalls = 0;
+
+            protected function fetchExportPage(array $filters, int $chunkSize, ?array $cursor): array
+            {
+                ++$this->pageCalls;
+
+                return match ($this->pageCalls) {
+                    1 => [['id' => 3, 'created_at' => '2026-06-19 03:00:00'], ['id' => 2, 'created_at' => '2026-06-19 02:00:00']],
+                    2 => [['id' => 1, 'created_at' => '2026-06-19 01:00:00']],
+                    default => [],
+                };
+            }
+        };
+
+        $rows = iterator_to_array($logger->iterateForExport([], 2), false);
+
+        self::assertSame([3, 2, 1], array_column($rows, 'id'));
+        self::assertSame(2, $logger->pageCalls, 'a short final page stops the cursor without an extra query');
+    }
+
+    #[Test]
+    public function exportPageQueryUsesAKeysetCursorNotAnOffset(): void
+    {
+        $connection = \Doctrine\DBAL\DriverManager::getConnection([
+            'driver' => 'pdo_mysql', 'host' => '127.0.0.1', 'dbname' => 'x', 'user' => 'x', 'password' => 'x', 'serverVersion' => '8.0.0',
+        ]);
+        $logger = new AuditLogger($connection, new NullLogger());
+
+        $method = new \ReflectionMethod(AuditLogger::class, 'exportPageQuery');
+        /** @var \Doctrine\DBAL\Query\QueryBuilder $qb */
+        $qb = $method->invoke($logger, ['status' => 'failed'], 1000, ['created_at' => '2026-06-19 00:00:00', 'id' => 5]);
+        $sql = $qb->getSQL();
+
+        self::assertStringContainsString('created_at < :cursorAt', $sql);
+        self::assertStringContainsString('id < :cursorId', $sql);
+        self::assertStringContainsString('status = :status', $sql);
+        self::assertStringContainsStringIgnoringCase('ORDER BY created_at DESC', $sql);
+        self::assertSame(1000, $qb->getMaxResults());
+    }
+
     private function operation(?int $userId): MoveOperation
     {
         return new MoveOperation(

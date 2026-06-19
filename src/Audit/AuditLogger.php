@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Audit;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
@@ -475,6 +476,78 @@ class AuditLogger implements AuditLoggerInterface
 
             return [];
         }
+    }
+
+    /**
+     * Keyset-paginated export cursor: yields rows newest-first in bounded pages so a full audit export
+     * streams without ever loading the whole table into memory. The (status|object_class, created_at)
+     * composite indexes back the filtered cursor.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function iterateForExport(array $filters = [], int $chunkSize = 1000): \Generator
+    {
+        $chunkSize = max(1, $chunkSize);
+        $cursor = null;
+
+        while (true) {
+            $rows = $this->fetchExportPage($filters, $chunkSize, $cursor);
+            if ($rows === []) {
+                return;
+            }
+
+            foreach ($rows as $row) {
+                yield $row;
+            }
+
+            if (count($rows) < $chunkSize) {
+                return;
+            }
+
+            $last = $rows[array_key_last($rows)];
+            $cursor = ['created_at' => (string) $last['created_at'], 'id' => (int) $last['id']];
+        }
+    }
+
+    /**
+     * @param array<string, mixed>                  $filters
+     * @param array{created_at: string, id: int}|null $cursor
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function fetchExportPage(array $filters, int $chunkSize, ?array $cursor): array
+    {
+        return $this->exportPageQuery($filters, $chunkSize, $cursor)->executeQuery()->fetchAllAssociative();
+    }
+
+    /**
+     * @param array<string, mixed>                  $filters
+     * @param array{created_at: string, id: int}|null $cursor
+     */
+    protected function exportPageQuery(array $filters, int $chunkSize, ?array $cursor): QueryBuilder
+    {
+        $qb = $this->connection->createQueryBuilder()
+            ->select('*')
+            ->from(self::TABLE_NAME)
+            ->orderBy('created_at', 'DESC')
+            ->addOrderBy('id', 'DESC')
+            ->setMaxResults($chunkSize);
+
+        foreach (self::FILTERABLE as $key) {
+            if (!empty($filters[$key])) {
+                $qb->andWhere("$key = :$key")->setParameter($key, $filters[$key]);
+            }
+        }
+
+        if ($cursor !== null) {
+            $qb->andWhere('(created_at < :cursorAt OR (created_at = :cursorAt AND id < :cursorId))')
+                ->setParameter('cursorAt', $cursor['created_at'])
+                ->setParameter('cursorId', $cursor['id']);
+        }
+
+        return $qb;
     }
 
     public function cleanup(int $retentionDays): int

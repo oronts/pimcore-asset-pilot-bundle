@@ -59,5 +59,14 @@ interface AuditLoggerInterface
      */
     public function getDistinctAssetsByRule(string $ruleName, int $page = 1, int $limit = 50, array $filters = []): array;
 
+    /**
+     * Keyset-paginated export cursor: yields rows newest-first in bounded pages (memory stays flat).
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function iterateForExport(array $filters = [], int $chunkSize = 1000): \Generator;
+
     public function cleanup(int $retentionDays): int;
 }

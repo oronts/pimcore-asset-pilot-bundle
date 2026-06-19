@@ -80,13 +80,12 @@ class AuditController
             'rule_name' => $request->query->get('ruleName'),
         ]);
 
-        $items = $this->auditLogger->getRecent(10000, $filters);
-
-        return new StreamedResponse(function () use ($items) {
+        return new StreamedResponse(function () use ($filters) {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, ['ID', 'Asset ID', 'From', 'To', 'Object ID', 'Class', 'Rule', 'Trigger', 'Status', 'Duration (ms)', 'Error', 'Date']);
 
-            foreach ($items as $item) {
+            $written = 0;
+            foreach ($this->auditLogger->iterateForExport($filters) as $item) {
                 fputcsv($handle, array_map($this->sanitizeCsvCell(...), [
                     $item['id'] ?? '',
                     $item['asset_id'] ?? '',
@@ -101,6 +100,10 @@ class AuditController
                     $item['error_message'] ?? '',
                     $item['created_at'] ?? '',
                 ]));
+
+                if ((++$written % 1000) === 0) {
+                    flush();
+                }
             }
 
             fclose($handle);
