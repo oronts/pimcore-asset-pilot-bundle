@@ -7,10 +7,10 @@ namespace Oronts\AssetPilotBundle\Command;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
@@ -20,9 +20,6 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 #[AsCommand(
     name: 'asset-pilot:organize',
@@ -32,7 +29,7 @@ class OrganizeCommand extends Command
 {
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
+        protected readonly OrganizeDispatcher $dispatcher,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly NamingStrategyInterface $namingStrategy,
@@ -200,14 +197,7 @@ class OrganizeCommand extends Command
             // Dispatch in batches
             $batches = array_chunk($objectIds, max(1, $batchSize));
             foreach ($batches as $batch) {
-                $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));
-                $this->messageBus->dispatch(Envelope::wrap(
-                    new BulkOrganizeMessage(
-                        objectIds: $batch,
-                        triggerType: TriggerType::BulkOperation,
-                    ),
-                    [new DeduplicateStamp($key, 60.0)],
-                ));
+                $this->dispatcher->dispatchBulk($batch, TriggerType::BulkOperation);
             }
             $io->success(sprintf('Dispatched %d batch(es) to messenger queue.', count($batches)));
             return Command::SUCCESS;

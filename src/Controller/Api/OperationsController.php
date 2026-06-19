@@ -9,12 +9,11 @@ use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
-use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
@@ -22,9 +21,6 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -34,7 +30,7 @@ class OperationsController
 
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
+        protected readonly OrganizeDispatcher $organizeDispatcher,
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
@@ -192,14 +188,7 @@ class OperationsController
         }
 
         if ($async) {
-            $this->messageBus->dispatch(Envelope::wrap(
-                new OrganizeAssetsMessage(
-                    objectId: (int) $objectId,
-                    triggerType: TriggerType::Api,
-                    dispatchedAt: time(),
-                ),
-                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)],
-            ));
+            $this->organizeDispatcher->dispatchObject((int) $objectId, TriggerType::Api);
             return new JsonResponse(['message' => 'Organization queued'], Response::HTTP_ACCEPTED);
         }
 
@@ -317,15 +306,7 @@ class OperationsController
             $batchSize = max(1, (int) ($data['batchSize'] ?? $this->defaultBatchSize));
             $batches = array_chunk($objectIds, $batchSize);
             foreach ($batches as $batch) {
-                $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));
-                $this->messageBus->dispatch(Envelope::wrap(
-                    new BulkOrganizeMessage(
-                        objectIds: $batch,
-                        triggerType: TriggerType::Api,
-                        dispatchedAt: time(),
-                    ),
-                    [new DeduplicateStamp($key, 60.0)],
-                ));
+                $this->organizeDispatcher->dispatchBulk($batch, TriggerType::Api);
             }
             return new JsonResponse([
                 'message' => 'Bulk organization queued',

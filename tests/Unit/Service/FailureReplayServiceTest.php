@@ -11,12 +11,12 @@ use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\NullLogger;
-use Symfony\Component\Messenger\MessageBusInterface;
 
 #[CoversClass(FailureReplayService::class)]
 class FailureReplayServiceTest extends TestCase
@@ -28,7 +28,7 @@ class FailureReplayServiceTest extends TestCase
     private function service(
         array $failed,
         AssetOrganizer $organizer,
-        MessageBusInterface $bus,
+        OrganizeDispatcher $bus,
         array $objectsById = [],
     ): FailureReplayService {
         $audit = $this->createMock(AuditLoggerInterface::class);
@@ -36,7 +36,7 @@ class FailureReplayServiceTest extends TestCase
 
         return new class ($audit, $organizer, $bus, $objectsById) extends FailureReplayService {
             /** @param array<int, ?AbstractObject> $objectsById */
-            public function __construct(AuditLoggerInterface $a, AssetOrganizer $o, MessageBusInterface $b, private array $objectsById)
+            public function __construct(AuditLoggerInterface $a, AssetOrganizer $o, OrganizeDispatcher $b, private array $objectsById)
             {
                 parent::__construct($a, $o, $b, new NullLogger());
             }
@@ -54,8 +54,8 @@ class FailureReplayServiceTest extends TestCase
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::once())->method('organize')->willReturn([]);
 
-        $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects(self::never())->method('dispatch');
+        $bus = $this->createMock(OrganizeDispatcher::class);
+        $bus->expects(self::never())->method('dispatchObject');
 
         $object = $this->createMock(AbstractObject::class);
         $service = $this->service(
@@ -80,8 +80,8 @@ class FailureReplayServiceTest extends TestCase
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::never())->method('organize');
 
-        $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects(self::exactly(2))->method('dispatch')->willReturnArgument(0);
+        $bus = $this->createMock(OrganizeDispatcher::class);
+        $bus->expects(self::exactly(2))->method('dispatchObject');
 
         $service = $this->service(
             [['object_id' => 1], ['object_id' => 2]],
@@ -96,6 +96,18 @@ class FailureReplayServiceTest extends TestCase
     }
 
     #[Test]
+    public function anAsyncDispatchFailureIsCountedNotFatal(): void
+    {
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->method('dispatchObject')->willThrowException(new \RuntimeException('bus down'));
+
+        $result = $this->service([['object_id' => 1]], $this->createMock(AssetOrganizer::class), $dispatcher)->replay(async: true);
+
+        self::assertSame(1, $result->failed);
+        self::assertSame(0, $result->dispatched);
+    }
+
+    #[Test]
     public function aFailedReorganizeIsCountedNotFatal(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);
@@ -105,7 +117,7 @@ class FailureReplayServiceTest extends TestCase
         $service = $this->service(
             [['object_id' => 1]],
             $organizer,
-            $this->createMock(MessageBusInterface::class),
+            $this->createMock(OrganizeDispatcher::class),
             [1 => $object],
         );
 
@@ -123,7 +135,7 @@ class FailureReplayServiceTest extends TestCase
         $organizer->method('organize')->willReturn([OperationResult::failed('still broken', $moveOp)]);
 
         $object = $this->createMock(AbstractObject::class);
-        $result = $this->service([['object_id' => 1]], $organizer, $this->createMock(MessageBusInterface::class), [1 => $object])->replay();
+        $result = $this->service([['object_id' => 1]], $organizer, $this->createMock(OrganizeDispatcher::class), [1 => $object])->replay();
 
         self::assertSame(1, $result->failed);
         self::assertSame(0, $result->organized);
@@ -132,7 +144,7 @@ class FailureReplayServiceTest extends TestCase
     #[Test]
     public function noCandidatesYieldsAllZeroes(): void
     {
-        $result = $this->service([], $this->createMock(AssetOrganizer::class), $this->createMock(MessageBusInterface::class))->replay();
+        $result = $this->service([], $this->createMock(AssetOrganizer::class), $this->createMock(OrganizeDispatcher::class))->replay();
 
         self::assertSame(0, $result->candidates);
         self::assertSame(0, $result->organized);
@@ -149,9 +161,9 @@ class FailureReplayServiceTest extends TestCase
         $audit->expects(self::never())->method('getDistinctFailedObjects');
 
         $object = $this->createMock(AbstractObject::class);
-        $service = new class ($audit, $organizer, $this->createMock(MessageBusInterface::class), [1 => $object]) extends FailureReplayService {
+        $service = new class ($audit, $organizer, $this->createMock(OrganizeDispatcher::class), [1 => $object]) extends FailureReplayService {
             /** @param array<int, ?AbstractObject> $objectsById */
-            public function __construct(AuditLoggerInterface $a, AssetOrganizer $o, MessageBusInterface $b, private array $objectsById)
+            public function __construct(AuditLoggerInterface $a, AssetOrganizer $o, OrganizeDispatcher $b, private array $objectsById)
             {
                 parent::__construct($a, $o, $b, new NullLogger());
             }

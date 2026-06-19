@@ -7,12 +7,12 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 use Oronts\AssetPilotBundle\EventListener\AssetUploadListener;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Dependency;
 use Psr\Log\NullLogger;
-use Symfony\Component\Messenger\MessageBusInterface;
 
 #[CoversClass(AssetUploadListener::class)]
 class AssetUploadListenerPagingTest extends TestCase
@@ -22,7 +22,7 @@ class AssetUploadListenerPagingTest extends TestCase
     {
         return new class (
             $this->createMock(AssetOrganizer::class),
-            $this->createMock(MessageBusInterface::class),
+            $this->createMock(OrganizeDispatcher::class),
             $this->createMock(LoopGuard::class),
             new NullLogger(),
             true,

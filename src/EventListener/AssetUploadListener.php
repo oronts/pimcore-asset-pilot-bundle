@@ -5,17 +5,14 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\EventListener;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Pimcore\Event\Model\AssetEvent;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
 use Pimcore\Model\Dependency;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 class AssetUploadListener
 {
@@ -23,7 +20,7 @@ class AssetUploadListener
 
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
+        protected readonly OrganizeDispatcher $dispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly bool $enabled = true,
@@ -147,14 +144,7 @@ class AssetUploadListener
                 return;
             }
 
-            $this->messageBus->dispatch(Envelope::wrap(
-                new OrganizeAssetsMessage(
-                    objectId: $objectId,
-                    triggerType: TriggerType::AssetUpload,
-                    dispatchedAt: time(),
-                ),
-                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)],
-            ));
+            $this->dispatcher->dispatchObject($objectId, TriggerType::AssetUpload);
             $this->loopGuard->markObjectDispatched($objectId);
 
             $this->logger->debug('AssetUploadListener: dispatched async organize for object {id}', [

@@ -11,6 +11,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -19,7 +20,6 @@ use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Messenger\MessageBusInterface;
 
 #[CoversClass(OperationsController::class)]
 class OperationsControllerResolveTest extends TestCase
@@ -28,7 +28,7 @@ class OperationsControllerResolveTest extends TestCase
     {
         $c = new class (
             $this->createMock(AssetOrganizer::class),
-            $this->createMock(MessageBusInterface::class),
+            $this->createMock(OrganizeDispatcher::class),
             $this->createMock(AuditLogger::class),
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),

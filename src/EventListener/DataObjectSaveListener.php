@@ -5,21 +5,18 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\EventListener;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Pimcore\Event\Model\DataObjectEvent;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 class DataObjectSaveListener
 {
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
+        protected readonly OrganizeDispatcher $dispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly bool $enabled = true,
@@ -86,14 +83,7 @@ class DataObjectSaveListener
                 return;
             }
 
-            $this->messageBus->dispatch(Envelope::wrap(
-                new OrganizeAssetsMessage(
-                    objectId: $objectId,
-                    triggerType: $triggerType,
-                    dispatchedAt: time(),
-                ),
-                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)],
-            ));
+            $this->dispatcher->dispatchObject($objectId, $triggerType);
             $this->loopGuard->markObjectDispatched($objectId);
 
             $this->logger->debug('DataObjectSaveListener: dispatched async message for {class}:{id}', [

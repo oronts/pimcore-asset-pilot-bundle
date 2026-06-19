@@ -7,13 +7,9 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Model\ReplayResult;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 /**
  * Re-runs the objects whose organization failed, read from the audit log. Re-organizing the object
@@ -26,7 +22,7 @@ class FailureReplayService
     public function __construct(
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
+        protected readonly OrganizeDispatcher $dispatcher,
         protected readonly LoggerInterface $logger,
         protected readonly int $defaultLimit = 100,
     ) {}
@@ -67,8 +63,16 @@ class FailureReplayService
             }
 
             if ($async) {
-                $this->dispatch($objectId);
-                ++$dispatched;
+                try {
+                    $this->dispatch($objectId);
+                    ++$dispatched;
+                } catch (\Throwable $e) {
+                    $this->logger->error('Asset Pilot: replay dispatch failed for object {id}: {error}', [
+                        'id' => $objectId,
+                        'error' => $e->getMessage(),
+                    ]);
+                    ++$failed;
+                }
                 continue;
             }
 
@@ -107,10 +111,7 @@ class FailureReplayService
 
     protected function dispatch(int $objectId): void
     {
-        $this->messageBus->dispatch(Envelope::wrap(
-            new OrganizeAssetsMessage($objectId, TriggerType::Manual, time()),
-            [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)],
-        ));
+        $this->dispatcher->dispatchObject($objectId, TriggerType::Manual);
     }
 
     protected function loadObject(int $objectId): ?AbstractObject
