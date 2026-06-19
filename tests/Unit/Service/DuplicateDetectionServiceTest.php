@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Oronts\AssetPilotBundle\Model\DuplicateGroup;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -218,5 +219,31 @@ class DuplicateDetectionServiceTest extends TestCase
 
         self::assertNull($service->groupForChecksum('ghost'), 'a single live member is not a duplicate group');
         self::assertNull($service->groupForChecksum(''), 'an empty checksum yields no group');
+    }
+
+    #[Test]
+    public function groupForAssetResolvesViaTheIndexedChecksum(): void
+    {
+        $sentinel = new DuplicateGroup('aaa', 100, 2, [5, 6]);
+
+        $service = new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), new NullLogger(), $sentinel) extends DuplicateDetectionService {
+            public function __construct(Connection $c, NullLogger $l, private readonly DuplicateGroup $sentinel)
+            {
+                parent::__construct($c, $l);
+            }
+
+            protected function indexedChecksumFor(int $assetId): ?string
+            {
+                return $assetId === 5 ? 'aaa' : null;
+            }
+
+            public function groupForChecksum(string $checksum): ?DuplicateGroup
+            {
+                return $checksum === 'aaa' ? $this->sentinel : null;
+            }
+        };
+
+        self::assertSame($sentinel, $service->groupForAsset(5));
+        self::assertNull($service->groupForAsset(9), 'an unindexed asset has no duplicate group');
     }
 }

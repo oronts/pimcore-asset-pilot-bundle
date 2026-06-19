@@ -33,7 +33,8 @@ class FindDuplicatesCommand extends Command
             ->addOption('type', null, InputOption::VALUE_REQUIRED, 'Restrict the scan to an asset type')
             ->addOption('extension', null, InputOption::VALUE_REQUIRED, 'Restrict the scan to a file extension')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max assets to index per scan run', '1000')
-            ->addOption('report-limit', null, InputOption::VALUE_REQUIRED, 'Max duplicate groups to report', '50');
+            ->addOption('report-limit', null, InputOption::VALUE_REQUIRED, 'Max duplicate groups to report', '50')
+            ->addOption('asset-id', null, InputOption::VALUE_REQUIRED, 'Report only the duplicate group containing this asset id (instead of all groups)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -50,6 +51,11 @@ class FindDuplicatesCommand extends Command
 
             $stats = $this->duplicates->index($filters, max(1, (int) $input->getOption('limit')));
             $io->text(sprintf('Indexed %d asset(s) (%d scanned, %d skipped).', $stats['indexed'], $stats['scanned'], $stats['skipped']));
+        }
+
+        $assetId = $input->getOption('asset-id');
+        if ($assetId !== null) {
+            return $this->reportSingleAsset($io, (int) $assetId);
         }
 
         $groups = $this->duplicates->findDuplicates(1, max(1, (int) $input->getOption('report-limit')));
@@ -70,6 +76,25 @@ class FindDuplicatesCommand extends Command
         );
         $io->table(['Hash', 'Copies', 'Size', 'Asset ids'], $rows);
         $io->warning(sprintf('%d duplicate group(s) of %d total in the index.', count($groups), $this->duplicates->countDuplicateGroups()));
+
+        return Command::SUCCESS;
+    }
+
+    private function reportSingleAsset(SymfonyStyle $io, int $assetId): int
+    {
+        $group = $this->duplicates->groupForAsset($assetId);
+        if ($group === null) {
+            $io->success(sprintf('Asset %d has no byte-identical duplicates in the index (run --scan if it is not indexed yet).', $assetId));
+
+            return Command::SUCCESS;
+        }
+
+        $io->table(['Hash', 'Copies', 'Size', 'Asset ids'], [[
+            substr($group->checksum, 0, 12) . '…',
+            (string) $group->count,
+            ByteFormat::human($group->fileSize),
+            implode(', ', $group->assetIds),
+        ]]);
 
         return Command::SUCCESS;
     }

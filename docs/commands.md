@@ -147,6 +147,9 @@ bin/console asset-pilot:find-duplicates --scan --folder=/Products --limit=5000
 
 # Report duplicates from the existing index (no scan)
 bin/console asset-pilot:find-duplicates
+
+# Check one specific asset: is it duplicated, and which group is it in?
+bin/console asset-pilot:find-duplicates --asset-id=123
 ```
 
 Pimcore stores no checksum or filesize column on the `assets` table, so there is no SQL `GROUP BY

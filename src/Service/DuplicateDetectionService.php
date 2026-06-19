@@ -161,6 +161,36 @@ class DuplicateDetectionService
     }
 
     /**
+     * The duplicate group one asset belongs to, via its indexed content hash, or null when it is not
+     * indexed yet or has no byte-identical siblings. The targeted "does THIS asset have copies?" check.
+     */
+    public function groupForAsset(int $assetId): ?DuplicateGroup
+    {
+        $checksum = $this->indexedChecksumFor($assetId);
+
+        return $checksum === null ? null : $this->groupForChecksum($checksum);
+    }
+
+    protected function indexedChecksumFor(int $assetId): ?string
+    {
+        try {
+            $checksum = $this->connection->createQueryBuilder()
+                ->select('checksum')
+                ->from(self::TABLE)
+                ->where('asset_id = :id')
+                ->setParameter('id', $assetId)
+                ->executeQuery()
+                ->fetchOne();
+
+            return $checksum === false ? null : (string) $checksum;
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to read the indexed checksum for asset {id}: {error}', ['id' => $assetId, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
      * @param array{type?: string, folder?: string, extension?: string} $filters
      * @return list<int>
      */
