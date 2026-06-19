@@ -115,6 +115,17 @@ class DuplicateMergeServiceTest extends TestCase
     }
 
     #[Test]
+    public function rejectsACanonicalThatIsNotAMemberOfTheGroup(): void
+    {
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $repointer->expects(self::never())->method('repoint');
+        $service = $this->service($repointer, [$this->strategy('quarantine')]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->merge(new DuplicateGroup('abc', 100, 2, [3, 9]), canonicalId: 999);
+    }
+
+    #[Test]
     public function advertisesEveryRegisteredStrategyName(): void
     {
         $service = $this->service(

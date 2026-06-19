@@ -40,54 +40,79 @@ class DuplicateReferenceRepointer
             return new RepointReport($fromAssetId, $toAssetId, 0, ['the source or canonical asset no longer exists']);
         }
 
+        // Snapshot every referrer BEFORE mutating anything: saving a repointed object removes it from
+        // the copy's reverse-dependency list, so paging with a moving offset against a shrinking list
+        // would skip referrers and could wrongly report the copy as fully repointed.
+        $referrers = $this->collectReferrers($fromAssetId);
+
         $blocked = [];
         $repointed = 0;
+
+        foreach ($referrers as $row) {
+            $type = (string) ($row['type'] ?? '');
+            $id = (int) ($row['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            if ($type !== 'object') {
+                $blocked[] = sprintf('%s %d references the copy and is not rewritten in this version', $type !== '' ? $type : 'element', $id);
+                continue;
+            }
+
+            try {
+                [$changed, $objectBlocked] = $this->repointObject($id, $from, $to, $dryRun);
+            } catch (\Throwable $e) {
+                $this->logger->error('Asset Pilot: failed to repoint references on object {id}: {error}', [
+                    'id' => $id,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+                $blocked[] = sprintf('object %d could not be repointed: %s', $id, $e->getMessage());
+                continue;
+            }
+
+            if ($changed) {
+                ++$repointed;
+            }
+            if ($objectBlocked !== null) {
+                $blocked[] = $objectBlocked;
+            }
+        }
+
+        return new RepointReport($fromAssetId, $toAssetId, $repointed, $blocked);
+    }
+
+    /**
+     * Page through the copy's reverse dependencies read-only and return the de-duplicated set, so the
+     * subsequent (mutating) repoint pass works from a stable snapshot.
+     *
+     * @return list<array{id: int|string, type: string}>
+     */
+    private function collectReferrers(int $fromAssetId): array
+    {
+        $rows = [];
+        $seen = [];
         $offset = 0;
 
         while (true) {
-            $rows = $this->requiredBy($fromAssetId, $offset, self::PAGE_SIZE);
-            if ($rows === []) {
+            $page = $this->requiredBy($fromAssetId, $offset, self::PAGE_SIZE);
+            if ($page === []) {
                 break;
             }
-
-            foreach ($rows as $row) {
-                $type = (string) ($row['type'] ?? '');
-                $id = (int) ($row['id'] ?? 0);
-                if ($id <= 0) {
-                    continue;
-                }
-                if ($type !== 'object') {
-                    $blocked[] = sprintf('%s %d references the copy and is not rewritten in this version', $type !== '' ? $type : 'element', $id);
-                    continue;
-                }
-
-                try {
-                    [$changed, $objectBlocked] = $this->repointObject($id, $from, $to, $dryRun);
-                } catch (\Throwable $e) {
-                    $this->logger->error('Asset Pilot: failed to repoint references on object {id}: {error}', [
-                        'id' => $id,
-                        'error' => $e->getMessage(),
-                        'exception' => $e,
-                    ]);
-                    $blocked[] = sprintf('object %d could not be repointed: %s', $id, $e->getMessage());
-                    continue;
-                }
-
-                if ($changed) {
-                    ++$repointed;
-                }
-                if ($objectBlocked !== null) {
-                    $blocked[] = $objectBlocked;
+            foreach ($page as $row) {
+                $key = ($row['type'] ?? '') . ':' . ($row['id'] ?? 0);
+                if (!isset($seen[$key])) {
+                    $seen[$key] = true;
+                    $rows[] = $row;
                 }
             }
-
-            if (count($rows) < self::PAGE_SIZE) {
+            if (count($page) < self::PAGE_SIZE) {
                 break;
             }
             $offset += self::PAGE_SIZE;
         }
 
-        return new RepointReport($fromAssetId, $toAssetId, $repointed, $blocked);
+        return $rows;
     }
 
     /**
@@ -124,9 +149,10 @@ class DuplicateReferenceRepointer
         }
 
         if ($dryRun) {
-            // Preview: nothing is saved, so Pimcore cannot recompute dependencies. When our handled
-            // fields did not account for the reference it is in a surface we do not rewrite — flag it.
-            return [$changed, $changed ? null : sprintf('object %d references the copy in a field this version does not rewrite (nested/advanced relation)', $objectId)];
+            // Preview: nothing is saved, so Pimcore cannot recompute dependencies and we cannot confirm
+            // a brick/block/fieldcollection or advanced relation does not also reference the copy.
+            // Report only what would change; whether the copy is disposable is decided on --apply.
+            return [$changed, null];
         }
 
         if ($changed) {
@@ -191,15 +217,17 @@ class DuplicateReferenceRepointer
     }
 
     /**
-     * Pure: rewrite a copy's full path and embedded element id to the canonical asset's inside markup.
+     * Pure: rewrite a copy's reference to the canonical asset's inside markup. The path is only
+     * replaced where it appears as a quoted attribute value (src="…"/href="…"), so a path that
+     * happens to occur as plain text or inside an unrelated attribute is left alone.
      *
      * @return array{0: bool, 1: string}
      */
     protected function replacePathInHtml(string $html, string $fromPath, string $toPath, int $fromId, int $toId): array
     {
         $new = str_replace(
-            [$fromPath, 'pimcore_id="' . $fromId . '"'],
-            [$toPath, 'pimcore_id="' . $toId . '"'],
+            ['"' . $fromPath . '"', "'" . $fromPath . "'", 'pimcore_id="' . $fromId . '"'],
+            ['"' . $toPath . '"', "'" . $toPath . "'", 'pimcore_id="' . $toId . '"'],
             $html,
         );
 

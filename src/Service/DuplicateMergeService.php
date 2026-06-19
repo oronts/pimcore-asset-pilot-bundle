@@ -85,10 +85,14 @@ class DuplicateMergeService
 
     private function pickCanonical(DuplicateGroup $group, ?int $canonicalId): int
     {
-        if ($canonicalId !== null && in_array($canonicalId, $group->assetIds, true)) {
-            return $canonicalId;
+        if ($canonicalId === null) {
+            return min($group->assetIds);
         }
 
-        return min($group->assetIds);
+        if (!in_array($canonicalId, $group->assetIds, true)) {
+            throw new \InvalidArgumentException(sprintf('Canonical asset %d is not a member of this duplicate group.', $canonicalId));
+        }
+
+        return $canonicalId;
     }
 }

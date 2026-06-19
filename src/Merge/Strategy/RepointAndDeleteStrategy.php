@@ -8,20 +8,18 @@ use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
-use Oronts\AssetPilotBundle\Service\AssetDependencyResolver;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
 /**
  * Frees storage immediately: once a copy's references are fully repointed, delete the copy (recoverable
  * only via Pimcore's version history, not the quarantine restore). Before the destructive delete it
- * RE-VERIFIES the copy is unreferenced, so a reference that reappeared after the repoint leaves the
- * copy in place rather than orphaning it.
+ * RE-VERIFIES the copy has NO remaining reverse dependency of any type (object, document or asset), so
+ * a reference that reappeared after the repoint leaves the copy in place rather than orphaning it.
  */
 class RepointAndDeleteStrategy implements DuplicateMergeStrategyInterface
 {
     public function __construct(
-        protected readonly AssetDependencyResolver $dependencies,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -40,7 +38,7 @@ class RepointAndDeleteStrategy implements DuplicateMergeStrategyInterface
             ));
         }
 
-        if ($this->dependencies->dependentObjectIds($copyId, 1) !== []) {
+        if ($this->hasReferences($copyId)) {
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, 'a reference reappeared after the repoint; not deleting');
         }
 
@@ -49,6 +47,14 @@ class RepointAndDeleteStrategy implements DuplicateMergeStrategyInterface
         }
 
         return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'the copy could not be deleted');
+    }
+
+    /** Whether the copy still has any reverse dependency (of any element type) right now. */
+    protected function hasReferences(int $assetId): bool
+    {
+        $asset = Asset::getById($assetId);
+
+        return $asset !== null && $asset->getDependencies()->getRequiredBy(0, 1) !== [];
     }
 
     protected function deleteAsset(int $assetId): bool
