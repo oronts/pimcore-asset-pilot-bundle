@@ -106,6 +106,9 @@ oronts_asset_pilot:
 | `notifications.recipient_user_ids` | `int[]` | `[]` | Pimcore backend users notified in-app by the built-in notifier (all are notified; unknown ids are skipped) |
 | `notifications.recipient_group_ids` | `int[]` | `[]` | Pimcore user groups (roles) whose members are notified in-app |
 | `notifications.sender_user_id` | `int` | `0` | Pimcore user the in-app notification is sent from (`0` = system) |
+| `duplicates.merge_strategy` | `string` | `quarantine` | Default disposition for a duplicate merge: a registered strategy name (`quarantine`, `delete`, `isolate`, or a custom tagged one). See [Extending](extending.md#duplicate-merge-strategies) |
+| `cache.stats_ttl` | `int` | `60` | TTL (seconds) for the audit-stats cache (dashboard/metrics). `0` disables (always live) |
+| `cache.unused_stats_ttl` | `int` | `300` | TTL (seconds) for the unused-asset storage-stats cache on the web endpoint. `0` disables |
 
 ## Rule Options
 

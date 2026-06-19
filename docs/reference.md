@@ -85,6 +85,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:sweep-empty-folders` | Find / `--delete` empty asset folders (`--folder`, `--limit`) |
 | `asset-pilot:normalize-filenames` | Preview / `--apply` filename sanitization (`--by-ids`, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:find-duplicates` | Report byte-identical assets (`--scan` to build the hash index, `--folder`, `--type`, `--limit`) |
+| `asset-pilot:merge-duplicates` | Merge a byte-identical group onto a canonical asset (`--checksum`, `--canonical`, `--strategy`, `--apply`; preview by default) |
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:heal-assets` | Roll broken assets back to the last renderable version (`--by-ids`, `--dry-run`, `--undo`, scan filters) |
 
@@ -95,12 +96,13 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity`, `/duplicates` | View |
+| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity`, `/duplicates`, `/duplicates/strategies` | View |
 | GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
 | POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |
 | POST | `/integrity/heal` | Operate |
 | POST | `/integrity/undo` | Admin |
+| POST | `/duplicates/merge` | Admin |
 | GET | `/folders/empty`, `/storage/trends` | View |
 | POST | `/folders/empty/delete` | Operate |
 | POST | `/organize`, `/organize/bulk` | Operate |

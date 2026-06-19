@@ -405,8 +405,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         return $count > 0;
     }
 
-    // The assets table has no size column; post-filtering would corrupt the count on a delete path,
-    // so reject size filters loudly rather than silently ignore them (data-loss risk).
+    // Reject loudly: with no size column, post-filtering would under-count the delete path (data loss).
     private function rejectUnsupportedSizeFilters(array $filters): void
     {
         if (isset($filters['minSize']) || isset($filters['maxSize'])) {

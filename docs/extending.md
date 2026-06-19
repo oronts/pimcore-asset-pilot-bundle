@@ -486,6 +486,58 @@ Then reference it: `actions: [{ type: assign_review_tag }]`. An action that save
 so loop-safely (see [Architecture](architecture.md)); the built-in `set_property` writes the
 property directly, so it never re-enters the pipeline.
 
+### Duplicate Merge Strategies
+
+A duplicate merge picks a canonical asset, repoints every copy's references onto it, then hands each
+copy to a *merge strategy* that decides its fate. Three are built in, selected by name via the
+`duplicates.merge_strategy` config key (default `quarantine`) or the `strategy` body field on
+`POST /duplicates/merge`:
+
+| Name | Disposition |
+|------|-------------|
+| `quarantine` | Repoint, then soft-delete a fully-repointed copy to the quarantine folder (reversible via restore). Default. |
+| `delete` | Repoint, then hard-delete a fully-repointed copy (re-verifies no reverse dependency + the workspace `delete` ACL first). |
+| `isolate` | Never repoints; only quarantines copies that are already unreferenced (lowest risk). |
+
+Add your own disposition by implementing `DuplicateMergeStrategyInterface`; it is auto-tagged
+`oronts_asset_pilot.duplicate_merge_strategy` and selected by its `name()`:
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
+use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
+use Oronts\AssetPilotBundle\Merge\RepointReport;
+
+class TagForReviewStrategy implements DuplicateMergeStrategyInterface
+{
+    public function name(): string
+    {
+        return 'tag_for_review';
+    }
+
+    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+    {
+        // A strategy MUST NOT destroy a copy whose references were not fully repointed.
+        if (!$report->fullyRepointed) {
+            return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, 'references remain');
+        }
+
+        // ... flag the copy for a human instead of deleting it ...
+        return new CopyDisposition($copyId, DispositionOutcome::Skipped, 'tagged for review, left in place');
+    }
+}
+```
+
+No service config is needed beyond autowiring. Then select it: `duplicates: { merge_strategy: tag_for_review }`.
+
+> Strategies are selected by **name**, not by asset type (there is no `supports()` filter): a strategy
+> that should only handle certain types must check inside `disposeCopy()`. The v1 repointer rewrites
+> top-level asset relations (image / many-to-one / many-to-many) and hard-coded asset paths/ids in
+> WYSIWYG fields; references inside documents, nested bricks/blocks/fieldcollections or advanced/metadata
+> relations are reported as blocked and that copy is left untouched (never silently merged).
+
 ### Events
 
 Subscribe to asset move events for custom logic:
@@ -544,3 +596,20 @@ asset change outside the move pipeline (CDN purge, search reindex, DAM sync):
 | `oronts_asset_pilot.reverted` | `AssetPilotEvents::REVERTED` | A move was reverted |
 | `oronts_asset_pilot.quarantined` | `AssetPilotEvents::QUARANTINED` | Unused assets were quarantined (soft-deleted) |
 | `oronts_asset_pilot.restored` | `AssetPilotEvents::RESTORED` | An asset was restored from quarantine |
+
+Integrity heal events (`AssetHealEvent`, carrying `asset`/`targetVersion`/`outcome`) — for vetoing or
+observing a version-rollback self-heal:
+
+| Event | Constant | Description |
+|-------|----------|-------------|
+| `oronts_asset_pilot.integrity_pre_heal` | `AssetPilotEvents::INTEGRITY_PRE_HEAL` | Before a heal; cancellable via `cancel()` (veto restoring a broken asset to an older version) |
+| `oronts_asset_pilot.integrity_post_heal` | `AssetPilotEvents::INTEGRITY_POST_HEAL` | After a heal attempt; `outcome` holds the `HealOutcome` |
+
+## Known Limitations
+
+- **Content-reference scan field types.** The opt-in delete/move guard (`content_scan`) scans only the
+  top-level `wysiwyg`, `textarea` and `input` fields of the configured classes for a hard-coded asset
+  path. References inside nested bricks/blocks/fieldcollections, or in a custom field type that stores a
+  path, are not scanned — treat it as a heuristic safety net, not a guarantee.
+- **Merge strategy selection.** Merge strategies are chosen by `name()`, not by asset type (there is no
+  `supports()` filter); type-specific behaviour must live inside `disposeCopy()`.

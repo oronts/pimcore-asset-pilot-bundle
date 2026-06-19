@@ -177,6 +177,9 @@ class AuditController
         }
 
         try {
+            // createFolderByPath runs before the LoopGuard window, which is safe: it creates Asset\Folder
+            // elements, not DataObjects, so it cannot re-enter the organize pipeline (the save listener
+            // is on DataObjects). Only the asset move below needs the guard, via saveReverted().
             $folder = Asset\Service::createFolderByPath($sourceDir);
             $asset->setParent($folder);
             $asset->setFilename($sourceFilename);

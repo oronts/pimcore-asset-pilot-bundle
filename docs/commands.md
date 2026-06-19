@@ -160,6 +160,23 @@ deleting the copy) is a separate, guarded step.
 The index is a snapshot from the last `--scan`: an asset deleted or re-uploaded afterwards stays
 listed (or stale) until the next scan, so re-scan or verify an id before acting on it.
 
+### Merge Duplicates
+
+```bash
+# Preview a merge of one byte-identical group onto its canonical asset (no writes)
+bin/console asset-pilot:merge-duplicates --checksum=<hash>
+
+# Apply it, choosing the canonical and the disposition strategy
+bin/console asset-pilot:merge-duplicates --checksum=<hash> --canonical=123 --strategy=delete --apply
+```
+
+Consolidates a group: picks the canonical (lowest id, or `--canonical`), repoints each copy's
+references onto it, then disposes the copy per `--strategy` (default from `duplicates.merge_strategy`:
+`quarantine` / `delete` / `isolate`, or a custom one). Preview by default; `--apply` writes. A copy
+whose references are not fully repointed (documents, nested bricks/blocks/fieldcollections, advanced
+relations) is reported blocked and left untouched, never deleted. The disposition seam is documented in
+[Extending](extending.md#duplicate-merge-strategies).
+
 ### Heal Assets (version rollback)
 
 ```bash
