@@ -83,6 +83,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:sweep-empty-folders` | Find / `--delete` empty asset folders (`--folder`, `--limit`) |
+| `asset-pilot:normalize-filenames` | Preview / `--apply` filename sanitization (`--by-ids`, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:find-duplicates` | Report byte-identical assets (`--scan` to build the hash index, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:heal-assets` | Roll broken assets back to the last renderable version (`--by-ids`, `--dry-run`, `--undo`, scan filters) |

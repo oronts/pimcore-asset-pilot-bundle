@@ -182,6 +182,23 @@ the wrong content). An asset that is broken with no renderable version is report
 left. A missing/unsupported render tool yields `unverifiable` and the asset is never healed. Bound
 the run with `--by-ids` or the scan filters plus `--limit`; for a large catalog run it in batches.
 
+### Normalize Filenames
+
+```bash
+# Preview which assets have a non-normalized filename and what they would become
+bin/console asset-pilot:normalize-filenames --folder=/uploads
+
+# Rename specific assets to the sanitized form
+bin/console asset-pilot:normalize-filenames --by-ids=1024,1025 --apply
+```
+
+Renames assets whose filename is not a valid Pimcore key to the sanitized form (via the native
+`Element\Service::getValidKey`). Destructive (a rename changes the path), so it previews by default
+and only renames with `--apply`; each rename is per-asset permission-checked, skipped when the asset
+is referenced in object content (a hard-coded path would break, the same guard as move/delete when
+`content_scan` is enabled), and LoopGuard-wrapped so it does not re-enter the organize pipeline.
+Already-valid filenames are left untouched.
+
 ### Sweep Empty Folders
 
 ```bash
