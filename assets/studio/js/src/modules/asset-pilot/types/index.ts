@@ -313,3 +313,81 @@ export interface MergeResult {
   dryRun: boolean
   dispositions: MergeDisposition[]
 }
+
+// Integrity
+export interface BrokenAssetItem {
+  id: number
+  path: string
+  checker: string
+  reason: string
+}
+
+export interface BrokenAssetsResponse {
+  items: BrokenAssetItem[]
+  scanned: number
+  broken: number
+  page: number
+  limit: number
+}
+
+export interface HealResultItem {
+  assetId: number
+  outcome: string
+  toVersion: number | null
+  checker: string
+  reason: string | null
+}
+
+export interface HealResponse {
+  dryRun: boolean
+  results: HealResultItem[]
+}
+
+// Quarantine
+export interface QuarantineItem {
+  asset_id: number
+  original_path: string
+  quarantined_at: string
+  path: string
+  filename: string
+  type: string
+  mimetype: string | null
+}
+
+export interface QuarantineResponse {
+  items: QuarantineItem[]
+  total: number
+  page: number
+  pages: number
+}
+
+// Storage trends
+export interface StorageTrendPoint {
+  capturedAt: string
+  count: number
+  size: number
+}
+
+export interface StorageTrendResponse {
+  type: string | null
+  items: StorageTrendPoint[]
+}
+
+// Empty folders
+export interface EmptyFolderItem {
+  id: number
+  path: string
+}
+
+export interface EmptyFoldersResponse {
+  items: EmptyFolderItem[]
+  page: number
+  limit: number
+}
+
+export interface EmptyFolderDeleteResult {
+  deleted: number
+  skipped: number
+  failed: number
+  errors: Record<number | string, string>
+}

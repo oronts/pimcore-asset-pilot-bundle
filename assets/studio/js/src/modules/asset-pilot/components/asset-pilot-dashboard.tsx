@@ -7,10 +7,14 @@ import { OperationsTab } from './operations/operations-tab'
 import { AuditTab } from './audit/audit-tab'
 import { UnusedAssetsTab } from './unused-assets/unused-assets-tab'
 import { DuplicatesTab } from './duplicates/duplicates-tab'
+import { IntegrityTab } from './integrity/integrity-tab'
+import { QuarantineTab } from './quarantine/quarantine-tab'
+import { StorageTrendsTab } from './storage/storage-trends-tab'
+import { EmptyFoldersTab } from './folders/empty-folders-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
 import { PermissionContext, usePermissionsFetch } from '../hooks/use-permissions'
 
-const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'management'] as const
+const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'integrity', 'quarantine', 'storage', 'folders', 'management'] as const
 type TabKey = typeof tabKeys[number]
 
 const tabLabelKeys: Record<TabKey, string> = {
@@ -20,6 +24,10 @@ const tabLabelKeys: Record<TabKey, string> = {
   audit: 'asset-pilot.tabs.audit',
   unused: 'asset-pilot.tabs.unused',
   duplicates: 'asset-pilot.tabs.duplicates',
+  integrity: 'asset-pilot.tabs.integrity',
+  quarantine: 'asset-pilot.tabs.quarantine',
+  storage: 'asset-pilot.tabs.storage',
+  folders: 'asset-pilot.tabs.folders',
   management: 'asset-pilot.tabs.management',
 }
 
@@ -91,6 +99,10 @@ export const AssetPilotDashboard: React.FC = () => {
         {activeTab === 'audit' && <AuditTab />}
         {activeTab === 'unused' && <UnusedAssetsTab />}
         {activeTab === 'duplicates' && <DuplicatesTab />}
+        {activeTab === 'integrity' && <IntegrityTab />}
+        {activeTab === 'quarantine' && <QuarantineTab />}
+        {activeTab === 'storage' && <StorageTrendsTab />}
+        {activeTab === 'folders' && <EmptyFoldersTab />}
         {activeTab === 'management' && <AssetManagementTab />}
       </div>
     </div>

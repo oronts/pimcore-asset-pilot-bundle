@@ -27,6 +27,12 @@ import type {
   DuplicatesResponse,
   MergeStrategies,
   MergeResult,
+  BrokenAssetsResponse,
+  HealResponse,
+  QuarantineResponse,
+  StorageTrendResponse,
+  EmptyFoldersResponse,
+  EmptyFolderDeleteResult,
 } from '../types'
 
 const BASE_URL = '/pimcore-studio/api/asset-pilot'
@@ -222,6 +228,30 @@ export const assetPilotApi = {
       method: 'POST',
       body: JSON.stringify({ checksum, canonicalId, strategy, dryRun }),
     }),
+
+  // Integrity
+  getBrokenAssets: (page = 1, limit = 25, filters: { folder?: string; type?: string; extension?: string } = {}) =>
+    request<BrokenAssetsResponse>(`/integrity${buildQuery({ page, limit, folder: filters.folder, type: filters.type, extension: filters.extension })}`),
+  healAssets: (ids: number[], dryRun = false) =>
+    request<HealResponse>('/integrity/heal', { method: 'POST', body: JSON.stringify({ ids, dryRun }) }),
+  undoHeal: (assetId: number) =>
+    request<{ assetId: number; undone: boolean }>('/integrity/undo', { method: 'POST', body: JSON.stringify({ assetId }) }),
+
+  // Quarantine
+  getQuarantine: (page = 1, limit = 50) =>
+    request<QuarantineResponse>(`/quarantine${buildQuery({ page, limit })}`),
+  restoreQuarantine: (assetId: number) =>
+    request<{ message: string; assetId: number }>(`/quarantine/${assetId}/restore`, { method: 'POST' }),
+
+  // Storage trends
+  getStorageTrends: (type?: string, limit = 90) =>
+    request<StorageTrendResponse>(`/storage/trends${buildQuery({ type, limit })}`),
+
+  // Empty folders
+  getEmptyFolders: (page = 1, limit = 50) =>
+    request<EmptyFoldersResponse>(`/folders/empty${buildQuery({ page, limit })}`),
+  deleteEmptyFolders: (ids: number[]) =>
+    request<EmptyFolderDeleteResult>('/folders/empty/delete', { method: 'POST', body: JSON.stringify({ ids }) }),
 
   // Permissions
   getPermissions: () =>

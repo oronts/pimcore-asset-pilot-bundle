@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
-import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, MergeStrategies } from '../types'
+import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, MergeStrategies, BrokenAssetsResponse, QuarantineResponse, StorageTrendResponse, EmptyFoldersResponse } from '../types'
 
 interface AsyncState<T> {
   data: T | null
@@ -95,4 +95,20 @@ export function useDuplicates(page: number, limit: number): AsyncState<Duplicate
 
 export function useMergeStrategies(): AsyncState<MergeStrategies> {
   return useAsyncData(() => assetPilotApi.getMergeStrategies())
+}
+
+export function useBrokenAssets(page: number, limit: number): AsyncState<BrokenAssetsResponse> {
+  return useAsyncData(() => assetPilotApi.getBrokenAssets(page, limit), [page, limit])
+}
+
+export function useQuarantine(page: number, limit: number): AsyncState<QuarantineResponse> {
+  return useAsyncData(() => assetPilotApi.getQuarantine(page, limit), [page, limit])
+}
+
+export function useStorageTrends(type: string | undefined, limit: number): AsyncState<StorageTrendResponse> {
+  return useAsyncData(() => assetPilotApi.getStorageTrends(type, limit), [type, limit])
+}
+
+export function useEmptyFolders(page: number, limit: number): AsyncState<EmptyFoldersResponse> {
+  return useAsyncData(() => assetPilotApi.getEmptyFolders(page, limit), [page, limit])
 }
