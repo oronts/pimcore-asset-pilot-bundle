@@ -32,6 +32,7 @@ no config edits.
 | `oronts_asset_pilot.health_check` | `HealthCheckInterface` | run by `asset-pilot:health` and `GET /health` | [link](extending.md#add-a-health-check) |
 | `oronts_asset_pilot.rule_action` | `RuleActionInterface` | post-move actions selected by a rule's `actions` | [link](extending.md#rule-actions-do-more-than-move) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` | highest-priority `supports()` match render-tests the asset | [link](extending.md#add-an-integrity-checker) |
+| `oronts_asset_pilot.notifier` | `NotifierInterface` | every tagged notifier receives each dispatched alert (built-in: Pimcore in-app) | [link](extending.md#add-a-notifier) |
 
 The default path resolver is a single service, not a tagged chain; to change it, replace the
 `PathResolverInterface` alias (see below and [Overriding](overriding.md)).

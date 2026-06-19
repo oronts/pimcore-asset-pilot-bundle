@@ -412,6 +412,30 @@ class SvgIntegrityChecker extends AbstractBinaryIntegrityChecker
 
 No service config is needed beyond autowiring; the interface tag is applied automatically.
 
+### Add a Notifier
+
+When a bulk run's failure rate crosses `notifications.failure_rate_threshold`, the bundle dispatches
+an alert to every tagged notifier. The built-in `PimcoreNotificationNotifier` sends a Pimcore in-app
+("bell") notification to the configured user/group. Add email, Slack, or a webhook by implementing
+`NotifierInterface`; it is auto-tagged `oronts_asset_pilot.notifier` and receives every alert.
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Notification\NotifierInterface;
+
+class SlackNotifier implements NotifierInterface
+{
+    public function notify(string $title, string $message): void
+    {
+        // POST to your Slack webhook, send mail, etc.
+    }
+}
+```
+
+A notifier that throws is isolated and logged by the dispatcher, so a failing transport never blocks
+the others or the operation that triggered the alert.
+
 ### Rule Actions (do more than move)
 
 A rule can run post-move actions on the organized asset via its `actions` config. Each entry has a

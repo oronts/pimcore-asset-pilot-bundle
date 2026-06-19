@@ -155,6 +155,7 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.health_check` | `HealthCheckInterface` |
 | `oronts_asset_pilot.rule_action` | `RuleActionInterface` (post-move actions, built-in `set_property`) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` (broken-asset detection; built-ins stream/image/document) |
+| `oronts_asset_pilot.notifier` | `NotifierInterface` (alert transport; built-in Pimcore in-app notifier) |
 
 The default path resolver is a single replaceable service (`PathResolverInterface`, below), not a
 tagged chain.

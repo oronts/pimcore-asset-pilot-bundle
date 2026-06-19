@@ -45,6 +45,7 @@ class Configuration implements ConfigurationInterface
         $this->addQuarantineSection($rootNode);
         $this->addIntegritySection($rootNode);
         $this->addContentScanSection($rootNode);
+        $this->addNotificationsSection($rootNode);
 
         return $treeBuilder;
     }
@@ -254,6 +255,43 @@ class Configuration implements ConfigurationInterface
                             ->values(['report', 'quarantine'])
                             ->defaultValue('report')
                             ->info('What to do with a broken asset that has no renderable version: report only (log + heal-log row), or also best-effort quarantine it (only if still unused).')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addNotificationsSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('notifications')
+                    ->addDefaultsIfNotSet()
+                    ->info('Opt-in alerts (default off). The built-in notifier sends a Pimcore in-app notification; tag oronts_asset_pilot.notifier to add email/Slack/webhook.')
+                    ->children()
+                        ->booleanNode('enabled')
+                            ->defaultFalse()
+                            ->info('Enable the failure-rate notification on bulk completion.')
+                        ->end()
+                        ->floatNode('failure_rate_threshold')
+                            ->defaultValue(0.5)
+                            ->min(0.0)
+                            ->max(1.0)
+                            ->info('Notify when a completed bulk run\'s failed/total ratio is at or above this (0..1).')
+                        ->end()
+                        ->arrayNode('recipient_user_ids')
+                            ->integerPrototype()->end()
+                            ->defaultValue([])
+                            ->info('Pimcore backend user ids to notify in-app (an allow list; all are notified).')
+                        ->end()
+                        ->arrayNode('recipient_group_ids')
+                            ->integerPrototype()->end()
+                            ->defaultValue([])
+                            ->info('Pimcore user-group (role) ids to notify in-app; all members of each are notified.')
+                        ->end()
+                        ->integerNode('sender_user_id')
+                            ->defaultValue(0)
+                            ->info('Pimcore user id the notification is sent from (0 = system).')
                         ->end()
                     ->end()
                 ->end()

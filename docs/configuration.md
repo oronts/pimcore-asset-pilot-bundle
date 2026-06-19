@@ -67,6 +67,13 @@ oronts_asset_pilot:
     content_scan:
         enabled: false
         classes: []   # e.g. [Article, Page] — scan these classes' text fields before delete/move
+
+    notifications:
+        enabled: false
+        failure_rate_threshold: 0.5   # 0..1
+        recipient_user_ids: []        # Pimcore backend users to notify in-app (all are notified)
+        recipient_group_ids: []       # and/or user groups (roles)
+        sender_user_id: 0
 ```
 
 ## Configuration Reference
@@ -94,6 +101,11 @@ oronts_asset_pilot:
 | `integrity.on_unrecoverable` | `enum` | `report` | A broken asset with no renderable version: `report` (log + heal-log row) or `quarantine` (also best-effort quarantine, only if still unused) |
 | `content_scan.enabled` | `bool` | `false` | Before deleting/moving an unused asset, also scan rich-text/text fields for a hard-coded reference to its path (which the dependency table misses). Opt-in delete/move guard |
 | `content_scan.classes` | `string[]` | `[]` | DataObject classes whose `wysiwyg`/`textarea`/`input` fields are scanned. Empty = the guard is inert |
+| `notifications.enabled` | `bool` | `false` | Notify when a completed bulk run's failure rate crosses the threshold |
+| `notifications.failure_rate_threshold` | `float` | `0.5` | Failed/total ratio (0..1) at or above which a notification is sent |
+| `notifications.recipient_user_ids` | `int[]` | `[]` | Pimcore backend users notified in-app by the built-in notifier (all are notified; unknown ids are skipped) |
+| `notifications.recipient_group_ids` | `int[]` | `[]` | Pimcore user groups (roles) whose members are notified in-app |
+| `notifications.sender_user_id` | `int` | `0` | Pimcore user the in-app notification is sent from (`0` = system) |
 
 ## Rule Options
 

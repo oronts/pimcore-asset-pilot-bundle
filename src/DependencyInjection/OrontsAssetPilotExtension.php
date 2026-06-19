@@ -66,6 +66,13 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.content_scan.enabled', $config['content_scan']['enabled']);
         $container->setParameter('oronts_asset_pilot.content_scan.classes', $config['content_scan']['classes']);
 
+        // Notifications
+        $container->setParameter('oronts_asset_pilot.notifications.enabled', $config['notifications']['enabled']);
+        $container->setParameter('oronts_asset_pilot.notifications.failure_rate_threshold', $config['notifications']['failure_rate_threshold']);
+        $container->setParameter('oronts_asset_pilot.notifications.recipient_user_ids', $config['notifications']['recipient_user_ids']);
+        $container->setParameter('oronts_asset_pilot.notifications.recipient_group_ids', $config['notifications']['recipient_group_ids']);
+        $container->setParameter('oronts_asset_pilot.notifications.sender_user_id', $config['notifications']['sender_user_id']);
+
         // Process rules into Rule objects
         $rules = [];
         foreach ($config['rules'] as $name => $ruleConfig) {

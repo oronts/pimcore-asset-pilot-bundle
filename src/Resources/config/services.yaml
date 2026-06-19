@@ -25,6 +25,9 @@ services:
         Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface:
             tags: ['oronts_asset_pilot.integrity_checker']
 
+        Oronts\AssetPilotBundle\Notification\NotifierInterface:
+            tags: ['oronts_asset_pilot.notifier']
+
     # -- Core services ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\:
@@ -173,6 +176,25 @@ services:
     Oronts\AssetPilotBundle\Service\VersionRollbackHealer:
         arguments:
             $onUnrecoverable: '%oronts_asset_pilot.integrity.on_unrecoverable%'
+
+    # -- Notifications ----------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Notification\NotificationDispatcher:
+        arguments:
+            $notifiers: !tagged_iterator oronts_asset_pilot.notifier
+
+    Oronts\AssetPilotBundle\Notification\PimcoreNotificationNotifier:
+        arguments:
+            $recipientUserIds: '%oronts_asset_pilot.notifications.recipient_user_ids%'
+            $recipientGroupIds: '%oronts_asset_pilot.notifications.recipient_group_ids%'
+            $senderUserId: '%oronts_asset_pilot.notifications.sender_user_id%'
+
+    Oronts\AssetPilotBundle\EventListener\BulkFailureNotificationListener:
+        arguments:
+            $enabled: '%oronts_asset_pilot.notifications.enabled%'
+            $failureRateThreshold: '%oronts_asset_pilot.notifications.failure_rate_threshold%'
+        tags:
+            - { name: 'kernel.event_listener', event: !php/const Oronts\AssetPilotBundle\Event\AssetPilotEvents::BULK_COMPLETED, method: 'onBulkCompleted' }
 
     # -- Quarantine -------------------------------------------------------------
 
