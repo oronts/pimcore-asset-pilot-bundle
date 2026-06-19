@@ -192,4 +192,31 @@ class DuplicateDetectionServiceTest extends TestCase
         self::assertSame([1, 2], $groups[0]->assetIds);
         self::assertSame(1, $service->countDuplicateGroups());
     }
+
+    #[Test]
+    public function groupForChecksumReturnsLiveMembersOrNullWhenTooFewRemain(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_checksum (asset_id INTEGER, checksum TEXT, file_size INTEGER, indexed_at TEXT)');
+        // assets 1,2 live and share "dup"; "ghost" has only one live member (4 was deleted).
+        foreach ([1, 2, 3] as $id) {
+            $connection->insert('assets', ['id' => $id]);
+        }
+        foreach ([[1, 'dup', 90], [2, 'dup', 100], [3, 'ghost', 50], [4, 'ghost', 50]] as [$assetId, $checksum, $size]) {
+            $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => $checksum, 'file_size' => $size, 'indexed_at' => '2026-06-19 00:00:00']);
+        }
+
+        $service = new DuplicateDetectionService($connection, new NullLogger());
+
+        $group = $service->groupForChecksum('dup');
+        self::assertNotNull($group);
+        self::assertSame('dup', $group->checksum);
+        self::assertSame([1, 2], $group->assetIds);
+        self::assertSame(2, $group->count);
+        self::assertSame(90, $group->fileSize, 'reports the smallest indexed size in the group');
+
+        self::assertNull($service->groupForChecksum('ghost'), 'a single live member is not a duplicate group');
+        self::assertNull($service->groupForChecksum(''), 'an empty checksum yields no group');
+    }
 }

@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
+use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,6 +19,7 @@ class DuplicatesController
 
     public function __construct(
         protected readonly DuplicateDetectionService $duplicates,
+        protected readonly DuplicateMergeService $merge,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -50,6 +52,55 @@ class DuplicatesController
             $this->logger->error('Failed to list duplicate assets.', ['exception' => $e]);
 
             return new JsonResponse(['error' => 'Failed to list duplicate assets.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Consolidate one duplicate group (by content hash) onto a canonical asset and dispose of the
+     * copies via the configured (or requested) strategy. Destructive, so Admin-only; pass
+     * "dryRun": true to preview the plan without repointing or disposing anything.
+     */
+    #[Route('/duplicates/merge', name: 'oronts_asset_pilot_duplicates_merge', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Admin->value)]
+    public function merge(Request $request): JsonResponse
+    {
+        $data = json_decode((string) ($request->getContent() ?: '{}'), true);
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'A JSON body is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        $checksum = is_string($data['checksum'] ?? null) ? $data['checksum'] : '';
+        if ($checksum === '') {
+            return new JsonResponse(['error' => 'A checksum is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+        $canonicalId = isset($data['canonicalId']) ? (int) $data['canonicalId'] : null;
+        $strategy = is_string($data['strategy'] ?? null) ? $data['strategy'] : null;
+        $dryRun = ($data['dryRun'] ?? false) === true;
+
+        $group = $this->duplicates->groupForChecksum($checksum);
+        if ($group === null) {
+            return new JsonResponse(['error' => 'No duplicate group with at least two live assets for that checksum.'], JsonResponse::HTTP_NOT_FOUND);
+        }
+
+        try {
+            $outcome = $this->merge->merge($group, $canonicalId, $strategy, $dryRun);
+
+            return new JsonResponse([
+                'checksum' => $outcome->checksum,
+                'canonicalId' => $outcome->canonicalId,
+                'dryRun' => $dryRun,
+                'dispositions' => array_map(static fn ($disposition): array => [
+                    'copyId' => $disposition->copyId,
+                    'outcome' => $disposition->outcome->value,
+                    'reason' => $disposition->reason,
+                ], $outcome->dispositions),
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to merge duplicates.', ['exception' => $e]);
+
+            return new JsonResponse(['error' => 'Failed to merge duplicates.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 }

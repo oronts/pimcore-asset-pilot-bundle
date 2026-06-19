@@ -28,6 +28,9 @@ services:
         Oronts\AssetPilotBundle\Notification\NotifierInterface:
             tags: ['oronts_asset_pilot.notifier']
 
+        Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface:
+            tags: ['oronts_asset_pilot.duplicate_merge_strategy']
+
     # -- Core services ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\:
@@ -41,6 +44,9 @@ services:
             - '../../Dto/'
             - '../../Message/'
             - '../../Event/'
+            - '../../Merge/RepointReport.php'
+            - '../../Merge/CopyDisposition.php'
+            - '../../Merge/MergeOutcome.php'
             - '../../OrontsAssetPilotBundle.php'
             - '../../Installer.php'
             - '../../Webpack/'
@@ -197,6 +203,13 @@ services:
             $failureRateThreshold: '%oronts_asset_pilot.notifications.failure_rate_threshold%'
         tags:
             - { name: 'kernel.event_listener', event: !php/const Oronts\AssetPilotBundle\Event\AssetPilotEvents::BULK_COMPLETED, method: 'onBulkCompleted' }
+
+    # -- Duplicate merge --------------------------------------------------------
+
+    Oronts\AssetPilotBundle\Service\DuplicateMergeService:
+        arguments:
+            $strategies: !tagged_iterator oronts_asset_pilot.duplicate_merge_strategy
+            $defaultStrategy: '%oronts_asset_pilot.duplicates.merge_strategy%'
 
     # -- Quarantine -------------------------------------------------------------
 

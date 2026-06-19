@@ -127,6 +127,40 @@ class DuplicateDetectionService
     }
 
     /**
+     * The duplicate group for one content hash (live assets only), or null when fewer than two live
+     * assets share it. The id list is capped at {@see self::IDS_PER_GROUP}, so a merge of a very large
+     * group is bounded and simply re-run.
+     */
+    public function groupForChecksum(string $checksum): ?DuplicateGroup
+    {
+        if ($checksum === '') {
+            return null;
+        }
+
+        try {
+            $ids = $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP);
+            if (count($ids) < 2) {
+                return null;
+            }
+
+            $fileSize = (int) $this->connection->createQueryBuilder()
+                ->select('MIN(c.file_size)')
+                ->from(self::TABLE, 'c')
+                ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
+                ->where('c.checksum = :checksum')
+                ->setParameter('checksum', $checksum)
+                ->executeQuery()
+                ->fetchOne();
+
+            return new DuplicateGroup($checksum, $fileSize, count($ids), $ids);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to load duplicate group for a checksum: {error}', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
      * @param array{type?: string, folder?: string, extension?: string} $filters
      * @return list<int>
      */

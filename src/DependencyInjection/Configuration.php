@@ -46,8 +46,26 @@ class Configuration implements ConfigurationInterface
         $this->addIntegritySection($rootNode);
         $this->addContentScanSection($rootNode);
         $this->addNotificationsSection($rootNode);
+        $this->addDuplicatesSection($rootNode);
 
         return $treeBuilder;
+    }
+
+    protected function addDuplicatesSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('duplicates')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('merge_strategy')
+                            ->defaultValue('quarantine')
+                            ->cannotBeEmpty()
+                            ->info('Default disposition for a duplicate merge: a registered strategy name (built-in: quarantine, delete, isolate). Custom strategies tagged oronts_asset_pilot.duplicate_merge_strategy are selectable too.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
     }
 
     protected function addRulesSection(ArrayNodeDefinition $rootNode): void

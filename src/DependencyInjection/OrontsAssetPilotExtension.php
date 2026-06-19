@@ -73,6 +73,9 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.notifications.recipient_group_ids', $config['notifications']['recipient_group_ids']);
         $container->setParameter('oronts_asset_pilot.notifications.sender_user_id', $config['notifications']['sender_user_id']);
 
+        // Duplicate merge
+        $container->setParameter('oronts_asset_pilot.duplicates.merge_strategy', $config['duplicates']['merge_strategy']);
+
         // Process rules into Rule objects
         $rules = [];
         foreach ($config['rules'] as $name => $ruleConfig) {
