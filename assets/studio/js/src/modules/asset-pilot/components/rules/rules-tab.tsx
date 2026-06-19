@@ -8,6 +8,7 @@ import { StrategyTag } from '../shared/status-tag'
 import { RuleDetailModal } from './rule-detail-modal'
 import { RulePreviewModal } from './rule-preview-modal'
 import { RuleOverlapPanel } from './rule-overlap-panel'
+import { RuleDiffModal } from './rule-diff-modal'
 import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
@@ -34,6 +35,7 @@ export const RulesTab: React.FC = () => {
   const [exporting, setExporting] = useState(false)
   const [detailRule, setDetailRule] = useState<string | null>(null)
   const [previewRule, setPreviewRule] = useState<string | null>(null)
+  const [comparing, setComparing] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const { sortField, sortDirection, toggleSort, sortedData } = useSort<RuleData>()
   const [containerRef, containerWidth] = useContainerWidth()
@@ -77,9 +79,12 @@ export const RulesTab: React.FC = () => {
     <div ref={containerRef}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.rules.configured', { count: rules.length })}</h4>
-        <button onClick={handleExport} disabled={exporting} style={btnStyle}>
-          {exporting ? t('asset-pilot.common.loading') : t('asset-pilot.rules.export.button')}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setComparing(true)} style={btnStyle}>{t('asset-pilot.rules.diff.button')}</button>
+          <button onClick={handleExport} disabled={exporting} style={btnStyle}>
+            {exporting ? t('asset-pilot.common.loading') : t('asset-pilot.rules.export.button')}
+          </button>
+        </div>
       </div>
 
       <RuleOverlapPanel />
@@ -149,6 +154,7 @@ export const RulesTab: React.FC = () => {
 
       {detailRule != null && <RuleDetailModal ruleName={detailRule} onClose={() => setDetailRule(null)} />}
       {previewRule != null && <RulePreviewModal ruleName={previewRule} onClose={() => setPreviewRule(null)} />}
+      {comparing && <RuleDiffModal onClose={() => setComparing(false)} />}
     </div>
   )
 }

@@ -22,6 +22,7 @@ import type {
   HealthReport,
   RuleOverlapResponse,
   RulesExportArtifact,
+  RuleSetDiff,
   ReplayParams,
   ReplaySummary,
   DuplicatesResponse,
@@ -80,6 +81,8 @@ export const assetPilotApi = {
   getRules: () => request<RuleData[]>('/rules'),
   getRuleDetail: (name: string) => request<RuleDetail>(`/rules/${encodeURIComponent(name)}`),
   getRuleOverlap: () => request<RuleOverlapResponse>('/rules/overlap'),
+  diffRules: (artifact: unknown) =>
+    request<RuleSetDiff>('/rules/diff', { method: 'POST', body: JSON.stringify(artifact) }),
   exportRules: async (): Promise<void> => {
     const artifact = await request<RulesExportArtifact>('/rules/export')
     const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' })

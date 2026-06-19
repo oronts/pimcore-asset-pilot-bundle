@@ -265,6 +265,14 @@ export interface RulesExportArtifact {
   rules: Record<string, Record<string, unknown>>
 }
 
+export interface RuleSetDiff {
+  added: Record<string, Record<string, unknown>>
+  removed: Record<string, Record<string, unknown>>
+  changed: Record<string, { current: Record<string, unknown>; imported: Record<string, unknown> }>
+  unchanged: string[]
+  hasChanges: boolean
+}
+
 export interface ReplayParams {
   since?: string
   rule?: string
