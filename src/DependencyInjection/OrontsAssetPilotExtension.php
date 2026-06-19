@@ -21,6 +21,14 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
             );
             $loader->load('studio_ui.yaml');
         }
+
+        if ($container->hasExtension('doctrine_migrations')) {
+            $loader = new YamlFileLoader(
+                $container,
+                new FileLocator(__DIR__ . '/../Resources/config'),
+            );
+            $loader->load('doctrine_migrations.yml');
+        }
     }
 
     public function load(array $configs, ContainerBuilder $container): void

@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Migrations\Version20260619120000;
 use Pimcore\Extension\Bundle\Installer\SettingsStoreAwareInstaller;
 use Pimcore\Model\User\Permission\Definition;
 use Symfony\Component\HttpKernel\Bundle\BundleInterface;
@@ -161,7 +162,6 @@ class Installer extends SettingsStoreAwareInstaller
             'idx_audit_asset_id' => ['asset_id'],
             'idx_audit_object_id' => ['object_id'],
             'idx_audit_rule_name' => ['rule_name'],
-            'idx_audit_status' => ['status'],
             'idx_audit_created_at' => ['created_at'],
             'idx_audit_asset_status' => ['asset_id', 'status'],
             'idx_audit_rule_status_created' => ['rule_name', 'status', 'created_at'],
@@ -295,5 +295,14 @@ class Installer extends SettingsStoreAwareInstaller
     public function needsReloadAfterInstall(): bool
     {
         return true;
+    }
+
+    /**
+     * A fresh install creates the current schema in full, so Pimcore marks every migration up to this
+     * version as already applied; existing installs pick up later schema deltas via the migrations.
+     */
+    public function getLastMigrationVersionClassName(): ?string
+    {
+        return Version20260619120000::class;
     }
 }

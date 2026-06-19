@@ -53,5 +53,7 @@ class InstallerTest extends TestCase
         // Back the filtered-and-ordered dashboard / recent / failed-object queries.
         self::assertSame(['status', 'created_at'], $indexes['idx_audit_status_created']);
         self::assertSame(['object_class', 'created_at'], $indexes['idx_audit_class_created']);
+        // Superseded by the (status, created_at) left prefix; must not be re-declared.
+        self::assertArrayNotHasKey('idx_audit_status', $indexes);
     }
 }
