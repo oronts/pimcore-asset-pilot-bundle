@@ -8,6 +8,7 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
@@ -25,6 +26,8 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class UnusedAssetFinder implements UnusedAssetFinderInterface
 {
+    private const string UNUSED_STATS_CACHE_KEY = 'asset_pilot.unused_stats';
+
     public function __construct(
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
@@ -32,6 +35,8 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
         private readonly ?ContentUsageScanner $contentScanner = null,
+        private readonly ?StatsCache $statsCache = null,
+        private readonly int $statsTtl = 0,
     ) {}
 
     /**
@@ -124,6 +129,17 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
             return 0;
         }
+    }
+
+    /**
+     * Web-path stats: served from the short-TTL cache (the unbounded scan + per-asset storage stat is
+     * too costly to run on every request). getUnusedStats() stays uncached for the schedule capture,
+     * which needs live numbers. The cache is busted on the bundle's own delete/move.
+     */
+    public function getUnusedStatsCached(): array
+    {
+        return $this->statsCache?->remember(self::UNUSED_STATS_CACHE_KEY, $this->statsTtl, fn (): array => $this->getUnusedStats())
+            ?? $this->getUnusedStats();
     }
 
     public function getUnusedStats(): array
@@ -258,6 +274,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         }
 
         if ($deletedIds !== []) {
+            $this->statsCache?->delete(self::UNUSED_STATS_CACHE_KEY);
             $this->eventDispatcher->dispatch(new AssetMutationEvent($deletedIds, 'unused_delete'), AssetPilotEvents::UNUSED_DELETED);
         }
 
@@ -339,6 +356,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         }
 
         if ($movedIds !== []) {
+            $this->statsCache?->delete(self::UNUSED_STATS_CACHE_KEY);
             $this->eventDispatcher->dispatch(new AssetMutationEvent($movedIds, 'unused_move', ['targetFolder' => $targetFolder]), AssetPilotEvents::UNUSED_MOVED);
         }
 

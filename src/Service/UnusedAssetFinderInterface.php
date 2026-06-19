@@ -22,6 +22,13 @@ interface UnusedAssetFinderInterface
     public function getUnusedStats(): array;
 
     /**
+     * Cached variant of getUnusedStats() for the web endpoint (the raw scan is too costly per request).
+     *
+     * @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: array<int, array{type: string, count: int, total_size: int}>}
+     */
+    public function getUnusedStatsCached(): array;
+
+    /**
      * @param int[] $assetIds
      * @return array{deleted: int, failed: int, errors: array<int, string>}
      */

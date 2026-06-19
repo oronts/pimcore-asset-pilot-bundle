@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Audit;
 
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
@@ -13,6 +14,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
+use Symfony\Component\Cache\Adapter\ArrayAdapter;
 
 #[CoversClass(AuditLogger::class)]
 class AuditLoggerTest extends TestCase
@@ -46,6 +48,46 @@ class AuditLoggerTest extends TestCase
         $connection->expects(self::never())->method('insert');
 
         (new AuditLogger($connection, new NullLogger(), enabled: false))->log($this->operation(42));
+    }
+
+    #[Test]
+    public function getStatsIsServedFromCacheWithinTtl(): void
+    {
+        $logger = new class ($this->createMock(Connection::class), new NullLogger(), true, 90, new StatsCache(new ArrayAdapter()), 60) extends AuditLogger {
+            public int $computeCalls = 0;
+
+            protected function computeStats(): array
+            {
+                ++$this->computeCalls;
+
+                return ['completed' => 1, 'by_class' => []];
+            }
+        };
+
+        $logger->getStats();
+        $logger->getStats();
+
+        self::assertSame(1, $logger->computeCalls, 'the second getStats() is served from cache');
+    }
+
+    #[Test]
+    public function getStatsAlwaysComputesWhenTtlIsZero(): void
+    {
+        $logger = new class ($this->createMock(Connection::class), new NullLogger(), true, 90, new StatsCache(new ArrayAdapter()), 0) extends AuditLogger {
+            public int $computeCalls = 0;
+
+            protected function computeStats(): array
+            {
+                ++$this->computeCalls;
+
+                return ['by_class' => []];
+            }
+        };
+
+        $logger->getStats();
+        $logger->getStats();
+
+        self::assertSame(2, $logger->computeCalls, 'ttl 0 disables the cache');
     }
 
     private function operation(?int $userId): MoveOperation

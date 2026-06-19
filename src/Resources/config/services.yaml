@@ -140,10 +140,16 @@ services:
 
     # -- Audit ------------------------------------------------------------------
 
+    Oronts\AssetPilotBundle\Cache\StatsCache:
+        arguments:
+            $pool: '@cache.app'
+
     Oronts\AssetPilotBundle\Audit\AuditLogger:
         arguments:
             $enabled: '%oronts_asset_pilot.audit.enabled%'
             $retentionDays: '%oronts_asset_pilot.audit.retention_days%'
+            $statsCache: '@Oronts\AssetPilotBundle\Cache\StatsCache'
+            $statsTtl: '%oronts_asset_pilot.cache.stats_ttl%'
 
     Oronts\AssetPilotBundle\Service\ConfidenceScorer:
         arguments:
@@ -162,6 +168,8 @@ services:
     Oronts\AssetPilotBundle\Service\UnusedAssetFinder:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+            $statsCache: '@Oronts\AssetPilotBundle\Cache\StatsCache'
+            $statsTtl: '%oronts_asset_pilot.cache.unused_stats_ttl%'
 
     Oronts\AssetPilotBundle\Service\ContentUsageScanner:
         arguments:

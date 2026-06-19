@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Audit;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -14,6 +15,9 @@ use Psr\Log\LoggerInterface;
 class AuditLogger implements AuditLoggerInterface
 {
     public const string TABLE_NAME = 'asset_pilot_audit_log';
+
+    private const string CACHE_KEY_STATS = 'asset_pilot.audit.stats';
+    private const string CACHE_KEY_CLASS_BREAKDOWN = 'asset_pilot.audit.class_breakdown';
 
     private const array FILTERABLE = ['object_class', 'status', 'rule_name'];
 
@@ -33,7 +37,22 @@ class AuditLogger implements AuditLoggerInterface
         protected readonly LoggerInterface $logger,
         protected readonly bool $enabled = true,
         protected readonly int $retentionDays = 90,
+        protected readonly ?StatsCache $statsCache = null,
+        protected readonly int $statsTtl = 0,
     ) {}
+
+    /**
+     * Serve a stats aggregate from the short-TTL cache, or compute it. The hot log() write path is left
+     * untouched (no invalidation): the dashboard tolerates up to statsTtl seconds of staleness.
+     *
+     * @param callable():array<mixed> $compute
+     *
+     * @return array<mixed>
+     */
+    protected function cached(string $key, callable $compute): array
+    {
+        return $this->statsCache?->remember($key, $this->statsTtl, $compute) ?? $compute();
+    }
 
     public function isEnabled(): bool
     {
@@ -124,30 +143,7 @@ class AuditLogger implements AuditLoggerInterface
         $this->logger->debug('Asset Pilot: fetching audit stats');
 
         try {
-            $statusCounts = $this->connection->createQueryBuilder()
-                ->select('status, COUNT(*) as count')
-                ->from(self::TABLE_NAME)
-                ->groupBy('status')
-                ->executeQuery()
-                ->fetchAllAssociative();
-
-            $byClass = $this->connection->createQueryBuilder()
-                ->select('object_class, COUNT(*) as count')
-                ->from(self::TABLE_NAME)
-                ->groupBy('object_class')
-                ->orderBy('count', 'DESC')
-                ->executeQuery()
-                ->fetchAllAssociative();
-
-            $stats = ['by_class' => []];
-            foreach ($statusCounts as $row) {
-                $stats[$row['status']] = (int) $row['count'];
-            }
-            foreach ($byClass as $row) {
-                $stats['by_class'][$row['object_class']] = (int) $row['count'];
-            }
-
-            return $stats;
+            return $this->cached(self::CACHE_KEY_STATS, fn (): array => $this->computeStats());
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to fetch audit stats: {error}', [
                 'error' => $e->getMessage(),
@@ -156,6 +152,37 @@ class AuditLogger implements AuditLoggerInterface
 
             return ['by_class' => []];
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function computeStats(): array
+    {
+        $statusCounts = $this->connection->createQueryBuilder()
+            ->select('status, COUNT(*) as count')
+            ->from(self::TABLE_NAME)
+            ->groupBy('status')
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        $byClass = $this->connection->createQueryBuilder()
+            ->select('object_class, COUNT(*) as count')
+            ->from(self::TABLE_NAME)
+            ->groupBy('object_class')
+            ->orderBy('count', 'DESC')
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        $stats = ['by_class' => []];
+        foreach ($statusCounts as $row) {
+            $stats[$row['status']] = (int) $row['count'];
+        }
+        foreach ($byClass as $row) {
+            $stats['by_class'][$row['object_class']] = (int) $row['count'];
+        }
+
+        return $stats;
     }
 
     public function getDurationStats(): array
@@ -293,45 +320,7 @@ class AuditLogger implements AuditLoggerInterface
     public function getClassBreakdown(): array
     {
         try {
-            $rows = $this->connection->createQueryBuilder()
-                ->select('object_class, status, COUNT(*) as count')
-                ->from(self::TABLE_NAME)
-                ->groupBy('object_class, status')
-                ->orderBy('object_class')
-                ->executeQuery()
-                ->fetchAllAssociative();
-
-            $ruleRows = $this->connection->createQueryBuilder()
-                ->select('object_class, COUNT(DISTINCT rule_name) as rule_count')
-                ->from(self::TABLE_NAME)
-                ->groupBy('object_class')
-                ->executeQuery()
-                ->fetchAllAssociative();
-
-            $ruleCounts = [];
-            foreach ($ruleRows as $row) {
-                $ruleCounts[$row['object_class']] = (int) $row['rule_count'];
-            }
-
-            $breakdown = [];
-            foreach ($rows as $row) {
-                $class = $row['object_class'];
-                if (!isset($breakdown[$class])) {
-                    $breakdown[$class] = [
-                        'className' => $class,
-                        'total' => 0,
-                        OperationStatus::Completed->value => 0,
-                        OperationStatus::Failed->value => 0,
-                        OperationStatus::Skipped->value => 0,
-                        'ruleCount' => $ruleCounts[$class] ?? 0,
-                    ];
-                }
-                $count = (int) $row['count'];
-                $breakdown[$class]['total'] += $count;
-                $breakdown[$class][$row['status']] = $count;
-            }
-
-            return array_values($breakdown);
+            return $this->cached(self::CACHE_KEY_CLASS_BREAKDOWN, fn (): array => $this->computeClassBreakdown());
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to get class breakdown: {error}', [
                 'error' => $e->getMessage(),
@@ -339,6 +328,52 @@ class AuditLogger implements AuditLoggerInterface
 
             return [];
         }
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    protected function computeClassBreakdown(): array
+    {
+        $rows = $this->connection->createQueryBuilder()
+            ->select('object_class, status, COUNT(*) as count')
+            ->from(self::TABLE_NAME)
+            ->groupBy('object_class, status')
+            ->orderBy('object_class')
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        $ruleRows = $this->connection->createQueryBuilder()
+            ->select('object_class, COUNT(DISTINCT rule_name) as rule_count')
+            ->from(self::TABLE_NAME)
+            ->groupBy('object_class')
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        $ruleCounts = [];
+        foreach ($ruleRows as $row) {
+            $ruleCounts[$row['object_class']] = (int) $row['rule_count'];
+        }
+
+        $breakdown = [];
+        foreach ($rows as $row) {
+            $class = $row['object_class'];
+            if (!isset($breakdown[$class])) {
+                $breakdown[$class] = [
+                    'className' => $class,
+                    'total' => 0,
+                    OperationStatus::Completed->value => 0,
+                    OperationStatus::Failed->value => 0,
+                    OperationStatus::Skipped->value => 0,
+                    'ruleCount' => $ruleCounts[$class] ?? 0,
+                ];
+            }
+            $count = (int) $row['count'];
+            $breakdown[$class]['total'] += $count;
+            $breakdown[$class][$row['status']] = $count;
+        }
+
+        return array_values($breakdown);
     }
 
     /**

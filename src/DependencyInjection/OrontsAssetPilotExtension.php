@@ -84,6 +84,10 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         // Duplicate merge
         $container->setParameter('oronts_asset_pilot.duplicates.merge_strategy', $config['duplicates']['merge_strategy']);
 
+        // Stats caching (read-only dashboard/metrics/unused-storage panels)
+        $container->setParameter('oronts_asset_pilot.cache.stats_ttl', $config['cache']['stats_ttl']);
+        $container->setParameter('oronts_asset_pilot.cache.unused_stats_ttl', $config['cache']['unused_stats_ttl']);
+
         // Process rules into Rule objects
         $rules = [];
         foreach ($config['rules'] as $name => $ruleConfig) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Service\ConfidenceScorer;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
@@ -13,6 +14,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Psr\Log\NullLogger;
+use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 
 #[CoversClass(UnusedAssetFinder::class)]
@@ -242,5 +244,86 @@ class UnusedAssetFinderTest extends TestCase
         $asset->method('getRealFullPath')->willReturn('/p/x.jpg');
 
         return $asset;
+    }
+
+    #[Test]
+    public function getUnusedStatsCachedComputesOnceWithinTtl(): void
+    {
+        $finder = $this->cachingFinder(60);
+
+        $finder->getUnusedStatsCached();
+        $finder->getUnusedStatsCached();
+
+        self::assertSame(1, $finder->computeCalls, 'the second call is served from the cache');
+    }
+
+    #[Test]
+    public function getUnusedStatsCachedAlwaysComputesWhenTtlIsZero(): void
+    {
+        $finder = $this->cachingFinder(0);
+
+        $finder->getUnusedStatsCached();
+        $finder->getUnusedStatsCached();
+
+        self::assertSame(2, $finder->computeCalls, 'ttl 0 keeps the schedule/maintenance callers on live data');
+    }
+
+    #[Test]
+    public function deleteAssetsBustsTheUnusedStatsCache(): void
+    {
+        $asset = $this->createMock(Asset::class);
+        $asset->method('isAllowed')->willReturn(true);
+        $asset->method('getRealFullPath')->willReturn('/p/x.jpg');
+
+        $finder = new class ($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), new StatsCache(new ArrayAdapter()), $asset) extends UnusedAssetFinder {
+            public int $computeCalls = 0;
+
+            public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, StatsCache $cache, private readonly Asset $asset)
+            {
+                parent::__construct($c, $l, $s, $d, statsCache: $cache, statsTtl: 60);
+            }
+
+            public function getUnusedStats(): array
+            {
+                ++$this->computeCalls;
+
+                return ['totalCount' => $this->computeCalls, 'totalSize' => 0, 'totalSizeFormatted' => '0 B', 'byType' => []];
+            }
+
+            protected function loadAsset(int $id): ?Asset
+            {
+                return $this->asset;
+            }
+
+            public function isReferenced(int $assetId): bool
+            {
+                return false;
+            }
+        };
+
+        $finder->getUnusedStatsCached();
+        $finder->deleteAssets([1]);
+        $finder->getUnusedStatsCached();
+
+        self::assertSame(2, $finder->computeCalls, 'a delete evicts the stale stats so the next read recomputes');
+    }
+
+    private function cachingFinder(int $ttl): UnusedAssetFinder
+    {
+        return new class ($this->createMock(Connection::class), new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), new StatsCache(new ArrayAdapter()), $ttl) extends UnusedAssetFinder {
+            public int $computeCalls = 0;
+
+            public function __construct(Connection $c, NullLogger $l, ConfidenceScorer $s, EventDispatcher $d, StatsCache $cache, int $ttl)
+            {
+                parent::__construct($c, $l, $s, $d, statsCache: $cache, statsTtl: $ttl);
+            }
+
+            public function getUnusedStats(): array
+            {
+                ++$this->computeCalls;
+
+                return ['totalCount' => $this->computeCalls, 'totalSize' => 0, 'totalSizeFormatted' => '0 B', 'byType' => []];
+            }
+        };
     }
 }

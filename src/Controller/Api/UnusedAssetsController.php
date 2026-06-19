@@ -63,7 +63,7 @@ class UnusedAssetsController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function stats(): JsonResponse
     {
-        return new JsonResponse($this->unusedAssetFinder->getUnusedStats());
+        return new JsonResponse($this->unusedAssetFinder->getUnusedStatsCached());
     }
 
     #[Route('/unused-assets/bulk-delete', name: 'oronts_asset_pilot_unused_assets_bulk_delete', methods: ['POST'])]

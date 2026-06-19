@@ -47,8 +47,31 @@ class Configuration implements ConfigurationInterface
         $this->addContentScanSection($rootNode);
         $this->addNotificationsSection($rootNode);
         $this->addDuplicatesSection($rootNode);
+        $this->addCacheSection($rootNode);
 
         return $treeBuilder;
+    }
+
+    protected function addCacheSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('cache')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('stats_ttl')
+                            ->defaultValue(60)
+                            ->min(0)
+                            ->info('TTL (seconds) for the audit-log stats cache (dashboard/metrics). 0 disables caching (always live).')
+                        ->end()
+                        ->integerNode('unused_stats_ttl')
+                            ->defaultValue(300)
+                            ->min(0)
+                            ->info('TTL (seconds) for the unused-asset storage-stats cache on the web endpoint. 0 disables (always live).')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
     }
 
     protected function addDuplicatesSection(ArrayNodeDefinition $rootNode): void
