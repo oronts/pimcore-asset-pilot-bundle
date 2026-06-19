@@ -414,4 +414,17 @@ export const de: Record<string, string> = {
   'asset-pilot.folders.deleted': '{{count}} Ordner gelöscht.',
   'asset-pilot.folders.delete-partial': '{{count}} Ordner konnten nicht gelöscht werden.',
   'asset-pilot.folders.delete-failed': 'Ordner konnten nicht gelöscht werden.',
+
+  // Positionsabweichung
+  'asset-pilot.tabs.drift': 'Abweichung',
+  'asset-pilot.drift.title': 'Positionsabweichung',
+  'asset-pilot.drift.pick-class': 'Klasse auswählen...',
+  'asset-pilot.drift.hint': 'Assets, deren aktueller Ordner nicht mehr dem von ihrer Regel erzeugten Pfad entspricht.',
+  'asset-pilot.drift.choose': 'Klasse wählen',
+  'asset-pilot.drift.choose-desc': 'Wählen Sie eine DataObject-Klasse, um ihre Assets auf Positionsabweichung zu prüfen.',
+  'asset-pilot.drift.none': 'Keine Abweichung',
+  'asset-pilot.drift.none-desc': 'Alle {{count}} geprüften Objekte haben ihre Assets am erwarteten Ort.',
+  'asset-pilot.drift.scanned': '{{count}} Objekt(e) geprüft',
+  'asset-pilot.drift.current': 'Aktueller Ort',
+  'asset-pilot.drift.expected': 'Erwarteter Ort',
 }

@@ -33,6 +33,7 @@ import type {
   StorageTrendResponse,
   EmptyFoldersResponse,
   EmptyFolderDeleteResult,
+  DriftResponse,
 } from '../types'
 
 const BASE_URL = '/pimcore-studio/api/asset-pilot'
@@ -252,6 +253,10 @@ export const assetPilotApi = {
     request<EmptyFoldersResponse>(`/folders/empty${buildQuery({ page, limit })}`),
   deleteEmptyFolders: (ids: number[]) =>
     request<EmptyFolderDeleteResult>('/folders/empty/delete', { method: 'POST', body: JSON.stringify({ ids }) }),
+
+  // Location drift
+  getDrift: (className: string, page = 1, limit = 50) =>
+    request<DriftResponse>(`/rules/drift${buildQuery({ class: className, page, limit })}`),
 
   // Permissions
   getPermissions: () =>

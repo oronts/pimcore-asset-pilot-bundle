@@ -391,3 +391,18 @@ export interface EmptyFolderDeleteResult {
   failed: number
   errors: Record<number | string, string>
 }
+
+// Location drift
+export interface DriftItem {
+  assetId: number
+  currentPath: string
+  expectedPath: string
+  ruleName: string
+}
+
+export interface DriftResponse {
+  items: DriftItem[]
+  objectsScanned: number
+  page: number
+  limit: number
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
-import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, MergeStrategies, BrokenAssetsResponse, QuarantineResponse, StorageTrendResponse, EmptyFoldersResponse } from '../types'
+import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, MergeStrategies, BrokenAssetsResponse, QuarantineResponse, StorageTrendResponse, EmptyFoldersResponse, DriftResponse } from '../types'
 
 interface AsyncState<T> {
   data: T | null
@@ -111,4 +111,11 @@ export function useStorageTrends(type: string | undefined, limit: number): Async
 
 export function useEmptyFolders(page: number, limit: number): AsyncState<EmptyFoldersResponse> {
   return useAsyncData(() => assetPilotApi.getEmptyFolders(page, limit), [page, limit])
+}
+
+export function useDrift(className: string | null, page: number): AsyncState<DriftResponse> {
+  return useAsyncData(
+    () => className != null && className !== '' ? assetPilotApi.getDrift(className, page) : Promise.reject(new Error('No class selected')),
+    [className, page],
+  )
 }

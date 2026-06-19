@@ -414,4 +414,17 @@ export const en: Record<string, string> = {
   'asset-pilot.folders.deleted': '{{count}} folder(s) deleted.',
   'asset-pilot.folders.delete-partial': '{{count}} folder(s) could not be deleted.',
   'asset-pilot.folders.delete-failed': 'Failed to delete the folders.',
+
+  // Location drift
+  'asset-pilot.tabs.drift': 'Drift',
+  'asset-pilot.drift.title': 'Location drift',
+  'asset-pilot.drift.pick-class': 'Select a class...',
+  'asset-pilot.drift.hint': 'Assets whose current folder no longer matches the path their rule would produce.',
+  'asset-pilot.drift.choose': 'Choose a class',
+  'asset-pilot.drift.choose-desc': 'Pick a DataObject class to check its assets for location drift.',
+  'asset-pilot.drift.none': 'No drift',
+  'asset-pilot.drift.none-desc': 'All {{count}} scanned object(s) have their assets in the expected location.',
+  'asset-pilot.drift.scanned': '{{count}} object(s) scanned',
+  'asset-pilot.drift.current': 'Current location',
+  'asset-pilot.drift.expected': 'Expected location',
 }
