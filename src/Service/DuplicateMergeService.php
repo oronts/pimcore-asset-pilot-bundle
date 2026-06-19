@@ -60,9 +60,13 @@ class DuplicateMergeService
             $report = $this->repointer->repoint($copyId, $canonical, $dryRun);
 
             if ($dryRun) {
-                $reason = $report->fullyRepointed
-                    ? 'dry run: references would be repointed and the copy disposed'
-                    : 'dry run: blocked: ' . implode('; ', $report->blocked);
+                // A dry run cannot recompute dependencies (nothing is saved), so it never claims the
+                // copy is disposable: it only reports what would be rewritten and what plainly cannot.
+                $reason = sprintf(
+                    'dry run: %d object reference(s) would be repointed%s; nested/advanced references are verified only on --apply',
+                    $report->repointedObjects,
+                    $report->blocked === [] ? '' : sprintf('; %d reference(s) cannot be rewritten (%s)', count($report->blocked), implode('; ', $report->blocked)),
+                );
                 $dispositions[] = new CopyDisposition($copyId, DispositionOutcome::Skipped, $reason);
                 continue;
             }

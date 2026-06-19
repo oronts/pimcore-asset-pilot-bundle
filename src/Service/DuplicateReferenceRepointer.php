@@ -217,17 +217,17 @@ class DuplicateReferenceRepointer
     }
 
     /**
-     * Pure: rewrite a copy's reference to the canonical asset's inside markup. The path is only
-     * replaced where it appears as a quoted attribute value (src="…"/href="…"), so a path that
-     * happens to occur as plain text or inside an unrelated attribute is left alone.
+     * Pure: rewrite a copy's reference to the canonical asset inside markup. The path is replaced only
+     * where it is an attribute value (=" … " or =' … ', e.g. src/href), so a path that happens to
+     * occur as plain text is left alone; the Pimcore-managed pimcore_id reference is rewritten too.
      *
      * @return array{0: bool, 1: string}
      */
     protected function replacePathInHtml(string $html, string $fromPath, string $toPath, int $fromId, int $toId): array
     {
         $new = str_replace(
-            ['"' . $fromPath . '"', "'" . $fromPath . "'", 'pimcore_id="' . $fromId . '"'],
-            ['"' . $toPath . '"', "'" . $toPath . "'", 'pimcore_id="' . $toId . '"'],
+            ['="' . $fromPath . '"', "='" . $fromPath . "'", 'pimcore_id="' . $fromId . '"'],
+            ['="' . $toPath . '"', "='" . $toPath . "'", 'pimcore_id="' . $toId . '"'],
             $html,
         );
 
