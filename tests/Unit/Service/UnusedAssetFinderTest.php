@@ -29,6 +29,25 @@ class UnusedAssetFinderTest extends TestCase
     }
 
     #[Test]
+    public function unusedPredicateUsesCorrelatedNotExistsNotNotIn(): void
+    {
+        // A lazy real-platform connection (never opened) so getSQL() renders the predicate; no live DB.
+        $connection = \Doctrine\DBAL\DriverManager::getConnection([
+            'driver' => 'pdo_mysql', 'host' => '127.0.0.1', 'dbname' => 'x', 'user' => 'x', 'password' => 'x', 'serverVersion' => '8.0.0',
+        ]);
+        $qb = $connection->createQueryBuilder()->select('a.id')->from('assets', 'a');
+
+        $method = new \ReflectionMethod(UnusedAssetFinder::class, 'applyUnusedPredicate');
+        $method->invoke($this->finder(), $qb);
+
+        $sql = $qb->getSQL();
+        self::assertStringContainsStringIgnoringCase('NOT EXISTS', $sql, 'the unused predicate must use a correlated NOT EXISTS');
+        self::assertStringNotContainsStringIgnoringCase('NOT IN', $sql, 'NOT IN degrades to a full dependencies scan and mishandles NULL targetid');
+        self::assertStringContainsString('d.targetid = a.id', $sql, 'the subquery must be correlated to the outer asset row');
+        self::assertStringContainsString('d.targettype = :assetType', $sql);
+    }
+
+    #[Test]
     public function findUnusedRejectsMinSizeFilterInsteadOfSilentlyIgnoringIt(): void
     {
         $this->expectException(\InvalidArgumentException::class);

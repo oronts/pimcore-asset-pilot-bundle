@@ -349,14 +349,14 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
      * Restrict a query on the `assets` table (alias `a`) to non-folder assets that no element
      * references. The shared predicate behind findUnused/countUnused/getUnusedStats.
      */
-    private function applyUnusedPredicate(QueryBuilder $qb): void
+    protected function applyUnusedPredicate(QueryBuilder $qb): void
     {
-        // Distinct param name: the user-supplied `filters['folder']` path filter also binds :folder,
-        // which previously clobbered this type exclusion when both were present.
+        // NOT EXISTS (not NOT IN): null-safe and short-circuits. Distinct param name — filters['folder']
+        // also binds :folder and would otherwise clobber this exclusion.
         $qb
             ->andWhere('a.type != :notFolderType')
             ->andWhere(sprintf(
-                'a.id NOT IN (SELECT d.targetid FROM %s d WHERE d.targettype = :assetType)',
+                'NOT EXISTS (SELECT 1 FROM %s d WHERE d.targetid = a.id AND d.targettype = :assetType)',
                 PimcoreSchema::TABLE_DEPENDENCIES,
             ))
             ->setParameter('notFolderType', PimcoreSchema::ASSET_TYPE_FOLDER)
@@ -399,7 +399,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         }
     }
 
-    private function applyFilters($qb, array $filters): void
+    protected function applyFilters($qb, array $filters): void
     {
         if (!empty($filters['type'])) {
             $types = is_array($filters['type']) ? $filters['type'] : explode(',', $filters['type']);

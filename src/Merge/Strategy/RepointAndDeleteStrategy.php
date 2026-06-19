@@ -42,6 +42,13 @@ class RepointAndDeleteStrategy implements DuplicateMergeStrategyInterface
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, 'a reference reappeared after the repoint; not deleting');
         }
 
+        // Workspace ACL: a flat operate/admin permission is not enough to hard-delete an element the
+        // acting user has no delete right on (the quarantine strategy applies the same gate). isAllowed()
+        // resolves the current user and returns true on CLI.
+        if (!$this->isDeletionAllowed($copyId)) {
+            return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'not permitted to delete this asset');
+        }
+
         if ($this->deleteAsset($copyId)) {
             return new CopyDisposition($copyId, DispositionOutcome::Deleted);
         }
@@ -55,6 +62,14 @@ class RepointAndDeleteStrategy implements DuplicateMergeStrategyInterface
         $asset = Asset::getById($assetId);
 
         return $asset !== null && $asset->getDependencies()->getRequiredBy(0, 1) !== [];
+    }
+
+    /** Whether the acting user holds the Pimcore workspace delete right on the copy. */
+    protected function isDeletionAllowed(int $assetId): bool
+    {
+        $asset = Asset::getById($assetId);
+
+        return $asset !== null && $asset->isAllowed('delete');
     }
 
     protected function deleteAsset(int $assetId): bool

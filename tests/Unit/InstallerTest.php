@@ -50,5 +50,8 @@ class InstallerTest extends TestCase
 
         self::assertSame(['asset_id', 'status'], $indexes['idx_audit_asset_status']);
         self::assertSame(['rule_name', 'status', 'created_at'], $indexes['idx_audit_rule_status_created']);
+        // Back the filtered-and-ordered dashboard / recent / failed-object queries.
+        self::assertSame(['status', 'created_at'], $indexes['idx_audit_status_created']);
+        self::assertSame(['object_class', 'created_at'], $indexes['idx_audit_class_created']);
     }
 }

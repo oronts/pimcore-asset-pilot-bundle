@@ -165,6 +165,8 @@ class Installer extends SettingsStoreAwareInstaller
             'idx_audit_created_at' => ['created_at'],
             'idx_audit_asset_status' => ['asset_id', 'status'],
             'idx_audit_rule_status_created' => ['rule_name', 'status', 'created_at'],
+            'idx_audit_status_created' => ['status', 'created_at'],
+            'idx_audit_class_created' => ['object_class', 'created_at'],
         ];
     }
 

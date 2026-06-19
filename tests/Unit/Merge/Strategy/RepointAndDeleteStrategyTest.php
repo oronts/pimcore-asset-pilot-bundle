@@ -16,11 +16,11 @@ use Psr\Log\NullLogger;
 class RepointAndDeleteStrategyTest extends TestCase
 {
     /** @param \ArrayObject<int, int> $deleted */
-    private function strategy(bool $hasReferences, \ArrayObject $deleted, bool $deleteResult = true): RepointAndDeleteStrategy
+    private function strategy(bool $hasReferences, \ArrayObject $deleted, bool $deleteResult = true, bool $deletionAllowed = true): RepointAndDeleteStrategy
     {
-        return new class ($hasReferences, $deleted, $deleteResult) extends RepointAndDeleteStrategy {
+        return new class ($hasReferences, $deleted, $deleteResult, $deletionAllowed) extends RepointAndDeleteStrategy {
             /** @param \ArrayObject<int, int> $deleted */
-            public function __construct(private readonly bool $hasReferences, private readonly \ArrayObject $deleted, private readonly bool $deleteResult)
+            public function __construct(private readonly bool $hasReferences, private readonly \ArrayObject $deleted, private readonly bool $deleteResult, private readonly bool $deletionAllowed)
             {
                 parent::__construct(new NullLogger());
             }
@@ -28,6 +28,11 @@ class RepointAndDeleteStrategyTest extends TestCase
             protected function hasReferences(int $assetId): bool
             {
                 return $this->hasReferences;
+            }
+
+            protected function isDeletionAllowed(int $assetId): bool
+            {
+                return $this->deletionAllowed;
             }
 
             protected function deleteAsset(int $assetId): bool
@@ -86,5 +91,17 @@ class RepointAndDeleteStrategyTest extends TestCase
         $disposition = $this->strategy(false, $deleted, deleteResult: false)->disposeCopy(9, new RepointReport(9, 5, 2, []));
 
         self::assertSame(DispositionOutcome::LeftError, $disposition->outcome);
+    }
+
+    #[Test]
+    public function leavesACopyTheCurrentUserMayNotDelete(): void
+    {
+        $deleted = new \ArrayObject();
+
+        $disposition = $this->strategy(false, $deleted, deletionAllowed: false)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+
+        self::assertSame(DispositionOutcome::LeftError, $disposition->outcome);
+        self::assertSame([], $deleted->getArrayCopy(), 'a copy the user cannot delete is never deleted');
+        self::assertStringContainsString('permitted', (string) $disposition->reason);
     }
 }

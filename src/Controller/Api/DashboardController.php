@@ -70,6 +70,7 @@ class DashboardController
     }
 
     #[Route('/permissions', name: 'oronts_asset_pilot_permissions', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
     public function permissions(): JsonResponse
     {
         $user = $this->securityService->getCurrentUser();
