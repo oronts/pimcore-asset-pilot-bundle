@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\ReorganizeResult;
+use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
@@ -149,8 +150,12 @@ class AssetReorganizer
      */
     protected function listAssetIdsInFolder(string $folderPath, int $limit): array
     {
+        // Shared filter helper: LIKE-escapes the folder path (so a name with `_`/`%` cannot
+        // over-match) and excludes folder rows, which carry no dependents to reorganize.
+        [$condition, $params] = AssetFilter::condition(['folder' => $folderPath], excludeFolders: true);
+
         $listing = new Asset\Listing();
-        $listing->setCondition('path LIKE ?', [rtrim($folderPath, '/') . '/%']);
+        $listing->setCondition($condition, $params);
         $listing->setLimit($limit);
 
         return array_map('intval', $listing->loadIdList());
