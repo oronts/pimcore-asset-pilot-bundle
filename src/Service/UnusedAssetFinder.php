@@ -14,6 +14,7 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetStorageSize;
+use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -141,7 +142,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 'error' => $e->getMessage(),
             ]);
 
-            return ['totalCount' => 0, 'totalSize' => 0, 'totalSizeFormatted' => $this->formatBytes(0), 'byType' => []];
+            return ['totalCount' => 0, 'totalSize' => 0, 'totalSizeFormatted' => ByteFormat::human(0), 'byType' => []];
         }
     }
 
@@ -172,7 +173,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         return [
             'totalCount' => count($rows),
             'totalSize' => $totalSize,
-            'totalSizeFormatted' => $this->formatBytes($totalSize),
+            'totalSizeFormatted' => ByteFormat::human($totalSize),
             'byType' => $byTypeList,
         ];
     }
@@ -463,13 +464,4 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         }
     }
 
-    private function formatBytes(int $bytes): string
-    {
-        if ($bytes === 0) {
-            return '0 B';
-        }
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $i = (int) floor(log($bytes, 1024));
-        return round($bytes / (1024 ** $i), 2) . ' ' . $units[$i];
-    }
 }

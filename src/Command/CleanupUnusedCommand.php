@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -135,7 +136,7 @@ HELP
                 $item['id'],
                 $item['full_path'],
                 $item['type'],
-                $this->formatBytes((int) $item['file_size']),
+                ByteFormat::human((int) $item['file_size']),
                 $item['modified_at'] ?? '-',
             ]);
         }
@@ -305,15 +306,5 @@ HELP
         }
 
         return $filters;
-    }
-
-    private function formatBytes(int $bytes): string
-    {
-        if ($bytes === 0) {
-            return '0 B';
-        }
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $i = (int) floor(log($bytes, 1024));
-        return round($bytes / (1024 ** $i), 2) . ' ' . $units[$i];
     }
 }

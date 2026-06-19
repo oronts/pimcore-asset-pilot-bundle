@@ -201,6 +201,10 @@ services:
         tags:
             - { name: 'pimcore.maintenance.task', type: 'assetPilotQuarantinePurge' }
 
+    Oronts\AssetPilotBundle\Maintenance\StorageSnapshotTask:
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotStorageSnapshot' }
+
     # -- Health checks ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\Health\HealthChecker:
@@ -317,6 +321,10 @@ services:
             - { name: 'console.command' }
 
     Oronts\AssetPilotBundle\Command\MetricsCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Oronts\AssetPilotBundle\Command\CaptureStorageSnapshotCommand:
         tags:
             - { name: 'console.command' }
 

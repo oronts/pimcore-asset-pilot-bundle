@@ -215,6 +215,20 @@ re-verifies each is still unused before deleting (an asset referenced again whil
 skipped). It also runs automatically as a Pimcore maintenance task (`QuarantinePurgeTask`), so the
 hard-delete is scheduled without a dedicated cron.
 
+### Capture Storage Snapshot (trends)
+
+```bash
+# Record the current unused-asset count and byte size per type, for trend reporting
+bin/console asset-pilot:capture-storage-snapshot
+```
+
+Snapshots the current unused storage per type into an owned table so `GET /storage/trends` can show
+how it moves over time. Because the assets table has no size column, the capture reads each unused
+asset's size from storage (a scan), so it runs on the Pimcore maintenance schedule
+(`StorageSnapshotTask`) or via this command, never on a request; the trend report only reads the
+snapshots. A run with nothing unused records no rows for that timestamp (the absence reads as zero in
+the series).
+
 ### Metrics (Prometheus / JSON)
 
 ```bash

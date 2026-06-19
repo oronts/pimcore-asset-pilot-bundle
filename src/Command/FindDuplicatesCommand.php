@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
+use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -62,7 +63,7 @@ class FindDuplicatesCommand extends Command
             static fn ($group): array => [
                 substr($group->checksum, 0, 12) . '…',
                 (string) $group->count,
-                self::formatBytes($group->fileSize),
+                ByteFormat::human($group->fileSize),
                 implode(', ', $group->assetIds),
             ],
             $groups,
@@ -71,16 +72,5 @@ class FindDuplicatesCommand extends Command
         $io->warning(sprintf('%d duplicate group(s) of %d total in the index.', count($groups), $this->duplicates->countDuplicateGroups()));
 
         return Command::SUCCESS;
-    }
-
-    private static function formatBytes(int $bytes): string
-    {
-        if ($bytes <= 0) {
-            return '0 B';
-        }
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $i = (int) floor(log($bytes, 1024));
-
-        return round($bytes / (1024 ** $i), 2) . ' ' . $units[$i];
     }
 }

@@ -79,6 +79,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:replay-failures` | Re-run failed objects (`--object-id`, `--since`, `--rule`, `--class`, `--async`) |
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
 | `asset-pilot:metrics` | Output metrics as Prometheus text exposition or JSON (`--format`) |
+| `asset-pilot:capture-storage-snapshot` | Record an unused-storage snapshot for trend reporting |
 | `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:sweep-empty-folders` | Find / `--delete` empty asset folders (`--folder`, `--limit`) |
@@ -99,7 +100,7 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 | POST | `/rules/{name}/apply` | Operate |
 | POST | `/integrity/heal` | Operate |
 | POST | `/integrity/undo` | Admin |
-| GET | `/folders/empty` | View |
+| GET | `/folders/empty`, `/storage/trends` | View |
 | POST | `/folders/empty/delete` | Operate |
 | POST | `/organize`, `/organize/bulk` | Operate |
 | POST | `/organize/preview`, `/organize/explain`, `/operations/bulk-preview` | View |

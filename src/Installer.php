@@ -18,6 +18,7 @@ class Installer extends SettingsStoreAwareInstaller
     public const string TABLE_QUARANTINE = 'asset_pilot_quarantine';
     public const string TABLE_INTEGRITY_LOG = 'asset_pilot_integrity_log';
     public const string TABLE_CHECKSUM = 'asset_pilot_checksum';
+    public const string TABLE_STORAGE_SNAPSHOT = 'asset_pilot_storage_snapshot';
 
     public function __construct(
         BundleInterface $bundle,
@@ -38,6 +39,7 @@ class Installer extends SettingsStoreAwareInstaller
         $this->ensureTable($schema, self::TABLE_QUARANTINE, self::quarantineColumns(), self::quarantineIndexes(), self::quarantineUniqueIndexes());
         $this->ensureTable($schema, self::TABLE_INTEGRITY_LOG, self::integrityLogColumns(), self::integrityLogIndexes());
         $this->ensureTable($schema, self::TABLE_CHECKSUM, self::checksumColumns(), self::checksumIndexes(), self::checksumUniqueIndexes());
+        $this->ensureTable($schema, self::TABLE_STORAGE_SNAPSHOT, self::storageSnapshotColumns(), self::storageSnapshotIndexes());
 
         $this->applySchemaDiff($schemaManager, $currentSchema, $schema);
 
@@ -58,7 +60,7 @@ class Installer extends SettingsStoreAwareInstaller
         $currentSchema = $schemaManager->introspectSchema();
         $schema = clone $currentSchema;
 
-        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG, self::TABLE_CHECKSUM] as $tableName) {
+        foreach ([self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG, self::TABLE_CHECKSUM, self::TABLE_STORAGE_SNAPSHOT] as $tableName) {
             if ($schema->hasTable($tableName)) {
                 $schema->dropTable($tableName);
             }
@@ -260,6 +262,31 @@ class Installer extends SettingsStoreAwareInstaller
     {
         return [
             'uniq_checksum_asset' => ['asset_id'],
+        ];
+    }
+
+    /**
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    protected static function storageSnapshotColumns(): array
+    {
+        return [
+            ['id', 'integer', ['autoincrement' => true, 'notnull' => true]],
+            ['captured_at', 'datetime', ['notnull' => true]],
+            ['type', 'string', ['length' => 50, 'notnull' => true]],
+            ['unused_count', 'integer', ['notnull' => true]],
+            ['unused_size', 'bigint', ['notnull' => true]],
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    protected static function storageSnapshotIndexes(): array
+    {
+        return [
+            'idx_snapshot_captured' => ['captured_at'],
+            'idx_snapshot_type_captured' => ['type', 'captured_at'],
         ];
     }
 
