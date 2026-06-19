@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
-use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
@@ -129,24 +129,10 @@ class DuplicateDetectionService
      */
     protected function listAssetIds(array $filters, int $offset, int $limit): array
     {
+        [$condition, $params] = AssetFilter::condition($filters, excludeFolders: true);
+
         $listing = new Asset\Listing();
-
-        $conditions = ["type != 'folder'"];
-        $params = [];
-        if (!empty($filters['folder'])) {
-            $conditions[] = 'path LIKE ?';
-            $params[] = Like::escape(rtrim((string) $filters['folder'], '/') . '/') . '%';
-        }
-        if (!empty($filters['type'])) {
-            $conditions[] = 'type = ?';
-            $params[] = (string) $filters['type'];
-        }
-        if (!empty($filters['extension'])) {
-            $conditions[] = 'filename LIKE ?';
-            $params[] = '%.' . Like::escape(ltrim((string) $filters['extension'], '.'));
-        }
-
-        $listing->setCondition(implode(' AND ', $conditions), $params);
+        $listing->setCondition($condition, $params);
         $listing->setOffset(max(0, $offset));
         $listing->setLimit($limit);
 

@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\IntegrityStatus;
 use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
-use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
@@ -112,24 +112,11 @@ class AssetIntegrityService
      */
     protected function listAssetIds(array $filters, int $offset, int $limit): array
     {
-        $listing = new Asset\Listing();
+        [$condition, $params] = AssetFilter::condition($filters);
 
-        $conditions = [];
-        $params = [];
-        if (!empty($filters['folder'])) {
-            $conditions[] = 'path LIKE ?';
-            $params[] = Like::escape(rtrim((string) $filters['folder'], '/') . '/') . '%';
-        }
-        if (!empty($filters['type'])) {
-            $conditions[] = 'type = ?';
-            $params[] = (string) $filters['type'];
-        }
-        if (!empty($filters['extension'])) {
-            $conditions[] = 'filename LIKE ?';
-            $params[] = '%.' . Like::escape(ltrim((string) $filters['extension'], '.'));
-        }
-        if ($conditions !== []) {
-            $listing->setCondition(implode(' AND ', $conditions), $params);
+        $listing = new Asset\Listing();
+        if ($condition !== '') {
+            $listing->setCondition($condition, $params);
         }
         $listing->setOffset(max(0, $offset));
         $listing->setLimit($limit);
