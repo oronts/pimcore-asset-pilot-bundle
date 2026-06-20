@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Installer;
@@ -151,9 +152,11 @@ class QuarantineService
     }
 
     /**
+     * @param array{type?: string, before?: string, after?: string} $filters
+     *
      * @return array{items: array<int, array<string, mixed>>, total: int, page: int, pages: int}
      */
-    public function listQuarantined(int $page = 1, int $limit = 50): array
+    public function listQuarantined(int $page = 1, int $limit = 50, array $filters = []): array
     {
         $offset = (max(1, $page) - 1) * $limit;
 
@@ -165,12 +168,15 @@ class QuarantineService
                 ->orderBy('q.quarantined_at', 'DESC')
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
+            $this->applyQuarantineFilters($qb, $filters);
 
-            $total = (int) $this->connection->createQueryBuilder()
+            // Count joins assets too, so the total matches the list (and orphan rows are excluded).
+            $countQb = $this->connection->createQueryBuilder()
                 ->select('COUNT(*)')
-                ->from(Installer::TABLE_QUARANTINE)
-                ->executeQuery()
-                ->fetchOne();
+                ->from(Installer::TABLE_QUARANTINE, 'q')
+                ->innerJoin('q', PimcoreSchema::TABLE_ASSETS, 'a', 'q.asset_id = a.id');
+            $this->applyQuarantineFilters($countQb, $filters);
+            $total = (int) $countQb->executeQuery()->fetchOne();
 
             $items = $qb->executeQuery()->fetchAllAssociative();
             foreach ($items as &$item) {
@@ -185,6 +191,22 @@ class QuarantineService
             ]);
 
             return ['items' => [], 'total' => 0, 'page' => max(1, $page), 'pages' => 0];
+        }
+    }
+
+    /**
+     * @param array{type?: string, before?: string, after?: string} $filters
+     */
+    private function applyQuarantineFilters(QueryBuilder $qb, array $filters): void
+    {
+        if (!empty($filters['type'])) {
+            $qb->andWhere('a.type = :type')->setParameter('type', $filters['type']);
+        }
+        if (!empty($filters['after'])) {
+            $qb->andWhere('q.quarantined_at >= :after')->setParameter('after', $filters['after']);
+        }
+        if (!empty($filters['before'])) {
+            $qb->andWhere('q.quarantined_at <= :before')->setParameter('before', $filters['before']);
         }
     }
 

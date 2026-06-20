@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\ParameterType;
+use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -87,15 +89,18 @@ class DuplicateDetectionService
     }
 
     /**
-     * @return list<DuplicateGroup> content hashes shared by more than one indexed asset, paged
+     * @param int         $minCopies minimum copies a group must have (clamped to >= 2)
+     * @param string|null $type      restrict to groups whose assets are of this type
+     *
+     * @return list<DuplicateGroup> content hashes shared by at least $minCopies indexed assets, paged
      */
-    public function findDuplicates(int $page = 1, int $limit = 50): array
+    public function findDuplicates(int $page = 1, int $limit = 50, int $minCopies = 2, ?string $type = null): array
     {
         $page = max(1, $page);
         $limit = max(1, $limit);
 
         $groups = [];
-        foreach ($this->fetchDuplicateRows(($page - 1) * $limit, $limit) as $row) {
+        foreach ($this->fetchDuplicateRows(($page - 1) * $limit, $limit, $minCopies, $type) as $row) {
             $checksum = (string) $row['checksum'];
             $groups[] = new DuplicateGroup(
                 $checksum,
@@ -108,17 +113,18 @@ class DuplicateDetectionService
         return $groups;
     }
 
-    public function countDuplicateGroups(): int
+    public function countDuplicateGroups(int $minCopies = 2, ?string $type = null): int
     {
         try {
             // INNER JOIN assets so a deleted asset's stale index row is not counted (no ghost groups).
-            $sql = sprintf(
-                'SELECT COUNT(*) FROM (SELECT c.checksum FROM %s c INNER JOIN %s a ON a.id = c.asset_id GROUP BY c.checksum HAVING COUNT(*) > 1) AS grouped',
-                self::TABLE,
-                PimcoreSchema::TABLE_ASSETS,
-            );
+            // Same filters as fetchDuplicateRows, so the count matches the paged list.
+            $inner = $this->groupQuery($minCopies, $type)->select('c.checksum');
 
-            return (int) $this->connection->fetchOne($sql);
+            return (int) $this->connection->fetchOne(
+                sprintf('SELECT COUNT(*) FROM (%s) AS grouped', $inner->getSQL()),
+                $inner->getParameters(),
+                $inner->getParameterTypes(),
+            );
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to count duplicate groups: {error}', ['error' => $e->getMessage()]);
 
@@ -240,21 +246,37 @@ class DuplicateDetectionService
     /**
      * @return list<array{checksum: string, file_size: int|string, cnt: int|string}>
      */
-    protected function fetchDuplicateRows(int $offset, int $limit): array
+    protected function fetchDuplicateRows(int $offset, int $limit, int $minCopies = 2, ?string $type = null): array
     {
-        // INNER JOIN assets so a deleted asset's stale index row never forms a ghost duplicate group.
-        return $this->connection->createQueryBuilder()
+        return $this->groupQuery($minCopies, $type)
             ->select('c.checksum', 'MIN(c.file_size) AS file_size', 'COUNT(*) AS cnt')
-            ->from(self::TABLE, 'c')
-            ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
-            ->groupBy('c.checksum')
-            ->having('COUNT(*) > 1')
             ->orderBy('cnt', 'DESC')
             ->addOrderBy('c.checksum', 'ASC')
             ->setFirstResult($offset)
             ->setMaxResults($limit)
             ->executeQuery()
             ->fetchAllAssociative();
+    }
+
+    /**
+     * The base GROUP BY query over the checksum index joined to live assets (so a deleted asset's
+     * stale row never forms a ghost group), with the min-copies and optional type filters applied.
+     * Shared by the paged list and the count so the two always agree.
+     */
+    protected function groupQuery(int $minCopies, ?string $type): QueryBuilder
+    {
+        $qb = $this->connection->createQueryBuilder()
+            ->from(self::TABLE, 'c')
+            ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
+            ->groupBy('c.checksum')
+            ->having('COUNT(*) >= :minCopies')
+            ->setParameter('minCopies', max(2, $minCopies), ParameterType::INTEGER);
+
+        if ($type !== null && $type !== '') {
+            $qb->andWhere('a.type = :type')->setParameter('type', $type);
+        }
+
+        return $qb;
     }
 
     /**

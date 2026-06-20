@@ -41,9 +41,12 @@ class DuplicatesController
     {
         $page = max(1, $request->query->getInt('page', 1));
         $limit = min(self::MAX_LIMIT, max(1, $request->query->getInt('limit', 50)));
+        $minCopies = max(2, $request->query->getInt('minCopies', 2));
+        $typeParam = $request->query->get('type');
+        $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;
 
         try {
-            $groups = $this->duplicates->findDuplicates($page, $limit);
+            $groups = $this->duplicates->findDuplicates($page, $limit, $minCopies, $type);
             $reps = $this->assets->summarize(array_values(array_filter(
                 array_map(static fn ($group): ?int => $group->assetIds[0] ?? null, $groups),
             )));
@@ -67,7 +70,7 @@ class DuplicatesController
                         ],
                     ];
                 }, $groups),
-                'total' => $this->duplicates->countDuplicateGroups(),
+                'total' => $this->duplicates->countDuplicateGroups($minCopies, $type),
                 'page' => $page,
                 'limit' => $limit,
             ]);
@@ -84,12 +87,16 @@ class DuplicatesController
      */
     #[Route('/duplicates/export', name: 'oronts_asset_pilot_duplicates_export', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
-    public function export(): StreamedResponse
+    public function export(Request $request): StreamedResponse
     {
-        $rows = (function (): \Generator {
+        $minCopies = max(2, $request->query->getInt('minCopies', 2));
+        $typeParam = $request->query->get('type');
+        $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;
+
+        $rows = (function () use ($minCopies, $type): \Generator {
             $page = 1;
             do {
-                $groups = $this->duplicates->findDuplicates($page, self::EXPORT_PAGE);
+                $groups = $this->duplicates->findDuplicates($page, self::EXPORT_PAGE, $minCopies, $type);
                 foreach ($groups as $group) {
                     yield [
                         $group->checksum,

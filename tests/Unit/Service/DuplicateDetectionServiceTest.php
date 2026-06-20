@@ -95,7 +95,7 @@ class DuplicateDetectionServiceTest extends TestCase
                 $this->upserts->append([$assetId, $checksum, $fileSize]);
             }
 
-            protected function fetchDuplicateRows(int $offset, int $limit): array
+            protected function fetchDuplicateRows(int $offset, int $limit, int $minCopies = 2, ?string $type = null): array
             {
                 return array_slice($this->duplicateRows, $offset, $limit);
             }

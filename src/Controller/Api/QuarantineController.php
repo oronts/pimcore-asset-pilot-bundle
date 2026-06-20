@@ -33,7 +33,17 @@ class QuarantineController
         $page = max(1, $request->query->getInt('page', 1));
         $limit = min(200, max(1, $request->query->getInt('limit', 50)));
 
-        return new JsonResponse($this->quarantineService->listQuarantined($page, $limit));
+        return new JsonResponse($this->quarantineService->listQuarantined($page, $limit, $this->filters($request)));
+    }
+
+    /** @return array{type?: string, before?: string, after?: string} */
+    private function filters(Request $request): array
+    {
+        return array_filter([
+            'type' => $request->query->get('type'),
+            'before' => $request->query->get('before'),
+            'after' => $request->query->get('after'),
+        ], static fn ($v): bool => is_string($v) && $v !== '');
     }
 
     /**
@@ -41,12 +51,14 @@ class QuarantineController
      */
     #[Route('/quarantine/export', name: 'oronts_asset_pilot_quarantine_export', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
-    public function export(): StreamedResponse
+    public function export(Request $request): StreamedResponse
     {
-        $rows = (function (): \Generator {
+        $filters = $this->filters($request);
+
+        $rows = (function () use ($filters): \Generator {
             $page = 1;
             do {
-                $result = $this->quarantineService->listQuarantined($page, self::EXPORT_PAGE);
+                $result = $this->quarantineService->listQuarantined($page, self::EXPORT_PAGE, $filters);
                 foreach ($result['items'] as $item) {
                     yield [
                         $item['asset_id'] ?? '',
