@@ -182,6 +182,17 @@ export const assetPilotApi = {
       method: 'POST',
       body: JSON.stringify({ assetIds, targetFolder }),
     }),
+  exportUnused: (filters: UnusedAssetFilters = {}): void => {
+    const query = buildQuery({
+      type: filters.type,
+      extension: filters.extension,
+      before: filters.before,
+      after: filters.after,
+      folder: filters.folder,
+      confidence: filters.confidence,
+    })
+    window.open(`${BASE_URL}/unused-assets/export${query}`, '_blank')
+  },
 
   // Asset Management
   searchAssets: (filters: AssetSearchFilters = {}) =>
@@ -234,6 +245,7 @@ export const assetPilotApi = {
       method: 'POST',
       body: JSON.stringify({ checksum, canonicalId, strategy, dryRun }),
     }),
+  exportDuplicates: (): void => { window.open(`${BASE_URL}/duplicates/export`, '_blank') },
 
   // Integrity
   getBrokenAssets: (page = 1, limit = 25, filters: { folder?: string; type?: string; extension?: string } = {}) =>
@@ -248,6 +260,7 @@ export const assetPilotApi = {
     request<QuarantineResponse>(`/quarantine${buildQuery({ page, limit })}`),
   restoreQuarantine: (assetId: number) =>
     request<{ message: string; assetId: number }>(`/quarantine/${assetId}/restore`, { method: 'POST' }),
+  exportQuarantine: (): void => { window.open(`${BASE_URL}/quarantine/export`, '_blank') },
 
   // Storage trends
   getStorageTrends: (type?: string, limit = 90) =>

@@ -289,12 +289,22 @@ export interface ReplaySummary {
   failed: number
 }
 
+// Shared asset summary (filename/path/size) used to enrich id-only listings.
+export interface AssetSummary {
+  id: number
+  filename: string
+  fullPath: string
+  fileSize: number
+  type: string
+}
+
 // Duplicates
 export interface DuplicateGroup {
   checksum: string
   fileSize: number
   count: number
   assetIds: number[]
+  representative: AssetSummary | null
 }
 
 export interface DuplicatesResponse {

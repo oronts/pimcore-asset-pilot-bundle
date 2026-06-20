@@ -7,7 +7,8 @@ import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
-import { ExpandablePath } from '../shared/expandable-path'
+import { OpenButton } from '../shared/open-button'
+import { assetPilotApi } from '../../services/api'
 import { formatBytes, truncate } from '../../utils/format'
 import { MergeModal } from './merge-modal'
 
@@ -44,6 +45,7 @@ export const DuplicatesTab: React.FC = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.duplicates.title', { count: data.total })}</h4>
+        <button onClick={() => assetPilotApi.exportDuplicates()} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
       </div>
       <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 16 }}>{t('asset-pilot.duplicates.scan-hint')}</p>
 
@@ -54,7 +56,7 @@ export const DuplicatesTab: React.FC = () => {
               <th style={thStyle}>{t('asset-pilot.duplicates.checksum')}</th>
               <th style={thStyle}>{t('asset-pilot.columns.size')}</th>
               <th style={{ ...thStyle, textAlign: 'center' }}>{t('asset-pilot.columns.copies')}</th>
-              <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
+              <th style={thStyle}>{t('asset-pilot.duplicates.example')}</th>
               <th style={thStyle}>{t('asset-pilot.common.actions')}</th>
             </tr>
           </thead>
@@ -62,9 +64,13 @@ export const DuplicatesTab: React.FC = () => {
             {data.items.map(group => (
               <tr key={group.checksum} style={{ borderBottom: '1px solid #f5f5f5' }}>
                 <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{truncate(group.checksum, 16)}</td>
-                <td style={tdStyle}>{formatBytes(group.fileSize)}</td>
+                <td style={tdStyle}>{formatBytes(group.representative?.fileSize ?? group.fileSize)}</td>
                 <td style={{ ...tdStyle, textAlign: 'center' }}>{group.count}</td>
-                <td style={tdStyle}><ExpandablePath path={group.assetIds.map(id => `#${id}`).join(', ')} maxLength={40} /></td>
+                <td style={tdStyle}>
+                  {group.representative != null
+                    ? <OpenButton id={group.representative.id} type="asset" label={group.representative.filename} />
+                    : <span style={{ color: '#bfbfbf' }}>-</span>}
+                </td>
                 <td style={tdStyle}>
                   {perms.admin
                     ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button>
@@ -97,4 +103,8 @@ const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid 
 const actionBtnStyle: React.CSSProperties = {
   padding: '3px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
   cursor: 'pointer', fontSize: 12, color: '#1677ff',
+}
+const exportBtnStyle: React.CSSProperties = {
+  padding: '5px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff',
+  cursor: 'pointer', fontSize: 12, fontWeight: 500,
 }

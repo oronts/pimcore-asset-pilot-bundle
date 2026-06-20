@@ -10,6 +10,7 @@ import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { ConfirmDialog } from '../shared/confirm-dialog'
+import { OpenButton } from '../shared/open-button'
 
 const LIMIT = 50
 
@@ -90,7 +91,7 @@ export const EmptyFoldersTab: React.FC = () => {
                     {perms.operate && (
                       <td style={tdStyle}><input type="checkbox" checked={selected.has(folder.id)} onChange={() => toggle(folder.id)} /></td>
                     )}
-                    <td style={tdStyle}>#{folder.id}</td>
+                    <td style={tdStyle}><OpenButton id={folder.id} type="asset" /></td>
                     <td style={tdStyle}><ExpandablePath path={folder.path} maxLength={64} /></td>
                   </tr>
                 ))}

@@ -11,6 +11,7 @@ import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { ConfirmDialog } from '../shared/confirm-dialog'
+import { OpenButton } from '../shared/open-button'
 import { formatDate } from '../../utils/format'
 
 const LIMIT = 50
@@ -53,7 +54,10 @@ export const QuarantineTab: React.FC = () => {
 
   return (
     <div>
-      <h4 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.quarantine.title', { count: data.total })}</h4>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.quarantine.title', { count: data.total })}</h4>
+        <button onClick={() => assetPilotApi.exportQuarantine()} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
+      </div>
 
       <ResponsiveTableWrapper>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
@@ -68,7 +72,7 @@ export const QuarantineTab: React.FC = () => {
           <tbody>
             {data.items.map(item => (
               <tr key={item.asset_id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                <td style={tdStyle}>#{item.asset_id}</td>
+                <td style={tdStyle}><OpenButton id={item.asset_id} type="asset" label={item.filename} /></td>
                 <td style={tdStyle}><ExpandablePath path={item.original_path} maxLength={48} /></td>
                 <td style={tdStyle}>{formatDate(item.quarantined_at, true)}</td>
                 <td style={tdStyle}>
@@ -105,4 +109,8 @@ const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid 
 const actionBtnStyle: React.CSSProperties = {
   padding: '3px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
   cursor: 'pointer', fontSize: 12, color: '#1677ff',
+}
+const exportBtnStyle: React.CSSProperties = {
+  padding: '5px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff',
+  cursor: 'pointer', fontSize: 12, fontWeight: 500,
 }

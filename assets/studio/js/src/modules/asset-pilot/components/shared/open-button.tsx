@@ -14,9 +14,12 @@ interface PimcoreStudioApi {
 interface OpenButtonProps {
   id: number
   type: ElementType
+  // Optional label (e.g. a filename) rendered instead of the bare id, so a deep link can read as
+  // "photo.jpg" rather than "#1234". Falls back to the id.
+  label?: string
 }
 
-export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
+export const OpenButton: React.FC<OpenButtonProps> = ({ id, type, label }) => {
   const { t } = useTranslation()
   const toast = useToast()
   const [opening, setOpening] = useState(false)
@@ -51,7 +54,7 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
       style={{ ...linkStyle, opacity: opening ? 0.5 : 1 }}
       title={t('asset-pilot.open.title', { type, id })}
     >
-      {id}
+      {label ?? id}
     </button>
   )
 }
