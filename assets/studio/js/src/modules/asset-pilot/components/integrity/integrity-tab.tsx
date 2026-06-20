@@ -10,6 +10,7 @@ import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { ConfirmDialog } from '../shared/confirm-dialog'
+import { OpenButton } from '../shared/open-button'
 import { HealModal } from './heal-modal'
 
 const LIMIT = 25
@@ -94,7 +95,7 @@ export const IntegrityTab: React.FC = () => {
                 {data.items.map(item => (
                   <tr key={item.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(item.id) ? '#e6f4ff' : 'transparent' }}>
                     <td style={tdStyle}><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggle(item.id)} /></td>
-                    <td style={tdStyle}>#{item.id}</td>
+                    <td style={tdStyle}><OpenButton id={item.id} type="asset" /></td>
                     <td style={tdStyle}><ExpandablePath path={item.path} maxLength={48} /></td>
                     <td style={{ ...tdStyle, color: '#fa541c' }}>{item.reason}</td>
                     {perms.admin && (

@@ -32,6 +32,12 @@ if (nodeEnv !== env) {
 
 export default defineConfig({
   mode: env,
+  // Disable the persistent build cache: a warm cache can skip re-emitting the module-federation
+  // entrypoints (exposeRemote.js), which silently breaks module registration. Reliability over a
+  // few seconds of rebuild time for a deploy-time bundle build.
+  performance: {
+    buildCache: false,
+  },
   server: {
     port: 3040,
   },

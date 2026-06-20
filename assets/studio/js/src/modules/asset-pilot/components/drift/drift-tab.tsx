@@ -6,6 +6,7 @@ import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
+import { OpenButton } from '../shared/open-button'
 
 const LIMIT = 50
 
@@ -76,7 +77,7 @@ export const DriftTab: React.FC = () => {
                       <tbody>
                         {data.items.map(item => (
                           <tr key={item.assetId} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                            <td style={tdStyle}>#{item.assetId}</td>
+                            <td style={tdStyle}><OpenButton id={item.assetId} type="asset" /></td>
                             <td style={{ ...tdStyle, color: '#fa541c' }}><ExpandablePath path={item.currentPath} maxLength={36} /></td>
                             <td style={{ ...tdStyle, color: '#52c41a' }}><ExpandablePath path={item.expectedPath} maxLength={36} /></td>
                             <td style={tdStyle}>{item.ruleName}</td>
