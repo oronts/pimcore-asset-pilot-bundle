@@ -14,7 +14,6 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -24,6 +23,7 @@ class UnusedAssetsController
     use StreamsCsv;
 
     private const int EXPORT_PAGE = 200;
+    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
         private readonly UnusedAssetFinderInterface $unusedAssetFinder,
@@ -83,8 +83,15 @@ class UnusedAssetsController
      */
     #[Route('/unused-assets/export', name: 'oronts_asset_pilot_unused_assets_export', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
-    public function export(Request $request): StreamedResponse
+    public function export(Request $request): Response
     {
+        if ($request->query->has('minSize') || $request->query->has('maxSize')) {
+            return new JsonResponse([
+                'error' => 'Size filtering (minSize/maxSize) is not supported: the Pimcore assets '
+                    . 'table has no size column. Filter by type, extension, folder, or date instead.',
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
         $filters = array_filter([
             'type' => $request->query->get('type'),
             'extension' => $request->query->get('extension'),
@@ -107,8 +114,7 @@ class UnusedAssetsController
                         $item['modified_at'] ?? '',
                     ];
                 }
-                ++$page;
-            } while (count($result['items']) === self::EXPORT_PAGE);
+            } while (count($result['items']) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
         })();
 
         return $this->streamCsv(

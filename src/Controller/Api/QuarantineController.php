@@ -19,6 +19,7 @@ class QuarantineController
     use StreamsCsv;
 
     private const int EXPORT_PAGE = 200;
+    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
         protected readonly QuarantineService $quarantineService,
@@ -55,8 +56,7 @@ class QuarantineController
                         $item['quarantined_at'] ?? '',
                     ];
                 }
-                ++$page;
-            } while (count($result['items']) === self::EXPORT_PAGE);
+            } while (count($result['items']) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
         })();
 
         return $this->streamCsv(

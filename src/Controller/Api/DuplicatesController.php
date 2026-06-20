@@ -22,6 +22,7 @@ class DuplicatesController
 
     private const int MAX_LIMIT = 100;
     private const int EXPORT_PAGE = 200;
+    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
         protected readonly DuplicateDetectionService $duplicates,
@@ -98,8 +99,7 @@ class DuplicatesController
                         implode(';', $group->assetIds),
                     ];
                 }
-                ++$page;
-            } while (count($groups) === self::EXPORT_PAGE);
+            } while (count($groups) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
         })();
 
         return $this->streamCsv(
