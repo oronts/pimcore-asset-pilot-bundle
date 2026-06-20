@@ -611,8 +611,20 @@ observing a version-rollback self-heal:
 | `oronts_asset_pilot.integrity_pre_heal` | `AssetPilotEvents::INTEGRITY_PRE_HEAL` | Before a heal; cancellable via `cancel()` (veto restoring a broken asset to an older version) |
 | `oronts_asset_pilot.integrity_post_heal` | `AssetPilotEvents::INTEGRITY_POST_HEAL` | After a heal attempt; `outcome` holds the `HealOutcome` |
 
+## Asset field-type coverage
+
+`AssetFieldExtractor` discovers the assets to organize across image, video, document, archive,
+hotspotimage and imageGallery fields; every relation type (manyToOne / manyToMany / object and the
+advanced relations, unwrapped from `ElementMetadata`); and assets nested in **object bricks**, **field
+collections**, **localized fields** and **block** fields (reported under a qualified field name such
+as `myBrick.image`). Unused-asset detection additionally relies on Pimcore's dependency table, which
+records relation references regardless of where they are nested.
+
 ## Known Limitations
 
+- **Classificationstore-held assets.** Assets referenced through a classification-store key are not
+  picked up by the organizer (they are uncommon; the dependency table still records them, so unused
+  detection stays correct). Add a `context_provider` or a custom extractor if you store assets there.
 - **Content-reference scan field types.** The opt-in delete/move guard (`content_scan`) scans only the
   top-level `wysiwyg`, `textarea` and `input` fields of the configured classes for a hard-coded asset
   path. References inside nested bricks/blocks/fieldcollections, or in a custom field type that stores a
