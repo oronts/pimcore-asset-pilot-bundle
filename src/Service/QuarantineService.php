@@ -206,7 +206,9 @@ class QuarantineService
             $qb->andWhere('q.quarantined_at >= :after')->setParameter('after', $filters['after']);
         }
         if (!empty($filters['before'])) {
-            $qb->andWhere('q.quarantined_at <= :before')->setParameter('before', $filters['before']);
+            // A date-only bound means the whole day: extend to end-of-day so same-day records are kept.
+            $before = preg_match('/^\d{4}-\d{2}-\d{2}$/', $filters['before']) ? $filters['before'] . ' 23:59:59' : $filters['before'];
+            $qb->andWhere('q.quarantined_at <= :before')->setParameter('before', $before);
         }
     }
 

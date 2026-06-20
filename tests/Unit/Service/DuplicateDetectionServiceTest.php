@@ -100,7 +100,7 @@ class DuplicateDetectionServiceTest extends TestCase
                 return array_slice($this->duplicateRows, $offset, $limit);
             }
 
-            protected function assetIdsForChecksum(string $checksum, int $cap): array
+            protected function assetIdsForChecksum(string $checksum, int $cap, ?string $type = null): array
             {
                 return array_slice($this->idsByChecksum[$checksum] ?? [], 0, $cap);
             }
@@ -192,6 +192,38 @@ class DuplicateDetectionServiceTest extends TestCase
         self::assertSame('dup', $groups[0]->checksum);
         self::assertSame([1, 2], $groups[0]->assetIds);
         self::assertSame(1, $service->countDuplicateGroups());
+    }
+
+    #[Test]
+    public function findDuplicatesWithTypeFilterReturnsOnlyThatTypesIdsAndCount(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, type TEXT)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_checksum (asset_id INTEGER, checksum TEXT, file_size INTEGER, indexed_at TEXT)');
+        // Three live assets share the "dup" hash: two images and one document.
+        foreach ([[1, 'image'], [2, 'image'], [3, 'document']] as [$id, $type]) {
+            $connection->insert('assets', ['id' => $id, 'type' => $type]);
+        }
+        foreach ([1, 2, 3] as $assetId) {
+            $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => 'dup', 'file_size' => 100, 'indexed_at' => '2026-06-20 00:00:00']);
+        }
+
+        $service = new DuplicateDetectionService($connection, new NullLogger());
+
+        $all = $service->findDuplicates();
+        self::assertCount(1, $all);
+        self::assertSame(3, $all[0]->count);
+        self::assertSame([1, 2, 3], $all[0]->assetIds);
+
+        $images = $service->findDuplicates(type: 'image');
+        self::assertCount(1, $images);
+        self::assertSame(2, $images[0]->count, 'count reflects only the image copies');
+        self::assertSame([1, 2], $images[0]->assetIds, 'ids must not include the document copy');
+        self::assertSame(1, $service->countDuplicateGroups(type: 'image'));
+
+        // The lone document copy is below minCopies once the group is type-filtered.
+        self::assertSame([], $service->findDuplicates(type: 'document'));
+        self::assertSame(0, $service->countDuplicateGroups(type: 'document'));
     }
 
     #[Test]

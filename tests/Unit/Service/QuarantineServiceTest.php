@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DriverManager;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
@@ -236,6 +237,40 @@ class QuarantineServiceTest extends TestCase
         self::assertSame(1, $result['purged']);
         self::assertSame([], $service->deleted);
         self::assertSame([], $service->removed);
+    }
+
+    #[Test]
+    public function listQuarantinedFiltersByTypeAndKeepsSameDayRecordsOnADateOnlyBefore(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, path TEXT, filename TEXT, type TEXT, mimetype TEXT)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_quarantine (asset_id INTEGER, original_path TEXT, quarantined_at TEXT)');
+        $connection->insert('assets', ['id' => 1, 'path' => '/Quarantine/', 'filename' => 'a.jpg', 'type' => 'image', 'mimetype' => 'image/jpeg']);
+        $connection->insert('assets', ['id' => 2, 'path' => '/Quarantine/', 'filename' => 'b.pdf', 'type' => 'document', 'mimetype' => 'application/pdf']);
+        $connection->insert('asset_pilot_quarantine', ['asset_id' => 1, 'original_path' => '/Products/a.jpg', 'quarantined_at' => '2024-01-01 14:30:00']);
+        $connection->insert('asset_pilot_quarantine', ['asset_id' => 2, 'original_path' => '/Docs/b.pdf', 'quarantined_at' => '2024-01-02 09:00:00']);
+
+        $service = new QuarantineService(
+            $connection,
+            $this->createMock(LoopGuard::class),
+            $this->createMock(UnusedAssetFinderInterface::class),
+            new EventDispatcher(),
+            new NullLogger(),
+        );
+
+        $allIds = array_column($service->listQuarantined()['items'], 'asset_id');
+        sort($allIds);
+        self::assertSame([1, 2], $allIds);
+
+        $images = $service->listQuarantined(filters: ['type' => 'image']);
+        self::assertSame([1], array_column($images['items'], 'asset_id'));
+        self::assertSame(1, $images['total']);
+
+        $before = $service->listQuarantined(filters: ['before' => '2024-01-01']);
+        self::assertSame([1], array_column($before['items'], 'asset_id'), 'a date-only before keeps the same-day 14:30 record');
+
+        $after = $service->listQuarantined(filters: ['after' => '2024-01-02']);
+        self::assertSame([2], array_column($after['items'], 'asset_id'));
     }
 
     #[Test]

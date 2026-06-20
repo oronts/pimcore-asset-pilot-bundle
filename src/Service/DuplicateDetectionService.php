@@ -106,7 +106,7 @@ class DuplicateDetectionService
                 $checksum,
                 (int) $row['file_size'],
                 (int) $row['cnt'],
-                $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP),
+                $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP, $type),
             );
         }
 
@@ -280,21 +280,26 @@ class DuplicateDetectionService
     }
 
     /**
+     * @param string|null $type when set, restrict to assets of this type so the id list (and the
+     *                          representative derived from it) stays consistent with a type-filtered group
+     *
      * @return list<int>
      */
-    protected function assetIdsForChecksum(string $checksum, int $cap): array
+    protected function assetIdsForChecksum(string $checksum, int $cap, ?string $type = null): array
     {
-        $ids = $this->connection->createQueryBuilder()
+        $qb = $this->connection->createQueryBuilder()
             ->select('c.asset_id')
             ->from(self::TABLE, 'c')
             ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
             ->where('c.checksum = :checksum')
             ->setParameter('checksum', $checksum)
             ->orderBy('c.asset_id', 'ASC')
-            ->setMaxResults($cap)
-            ->executeQuery()
-            ->fetchFirstColumn();
+            ->setMaxResults($cap);
 
-        return array_map('intval', $ids);
+        if ($type !== null && $type !== '') {
+            $qb->andWhere('a.type = :type')->setParameter('type', $type);
+        }
+
+        return array_map('intval', $qb->executeQuery()->fetchFirstColumn());
     }
 }
