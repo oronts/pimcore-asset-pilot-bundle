@@ -12,8 +12,10 @@ import { DataTable, type DataColumn } from '../shared/data-table'
 import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
 import { useRowSelection } from '../../hooks/use-row-selection'
+import { useCart } from '../../hooks/use-cart'
 import { formatBytes, formatDate } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
+import { AssetCartBar } from './asset-cart-bar'
 
 const typeOptions = ['', 'image', 'document', 'video', 'audio', 'text', 'archive']
 
@@ -27,6 +29,13 @@ export const AssetManagementTab: React.FC = () => {
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useAssetSearch(mergedFilters)
   const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
+  const cart = useCart()
+
+  const addSelectionToCart = (): void => {
+    cart.add([...selected])
+    toast.success(t('asset-pilot.cart.added', { count: selected.size }))
+    clear()
+  }
 
   const handleSearch = (): void => {
     const objId = objectIdInput ? parseInt(objectIdInput, 10) : undefined
@@ -103,8 +112,10 @@ export const AssetManagementTab: React.FC = () => {
         <button onClick={handleSearch} style={searchBtnStyle}>{t('asset-pilot.management.search-btn')}</button>
       </div>
 
+      {cart.count > 0 && <AssetCartBar cart={cart} />}
+
       {selected.size > 0 && (
-        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} />
+        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} onAddToCart={addSelectionToCart} />
       )}
 
       <DataTable

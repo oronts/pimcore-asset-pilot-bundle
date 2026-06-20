@@ -10,11 +10,12 @@ interface BulkAssetActionsProps {
   assetIds: number[]
   onResult: (message: string) => void
   onDeselect: () => void
+  onAddToCart?: () => void
 }
 
 type ActiveForm = 'none' | 'tags' | 'property'
 
-export const BulkAssetActions: React.FC<BulkAssetActionsProps> = ({ assetIds, onResult, onDeselect }) => {
+export const BulkAssetActions: React.FC<BulkAssetActionsProps> = ({ assetIds, onResult, onDeselect, onAddToCart }) => {
   const { t } = useTranslation()
   const toast = useToast()
   const { operate } = usePermissions()
@@ -127,6 +128,10 @@ export const BulkAssetActions: React.FC<BulkAssetActionsProps> = ({ assetIds, on
           </div>
         )}
 
+        {activeForm === 'none' && onAddToCart != null && (
+          <button onClick={onAddToCart} style={cartBtnStyle}>{t('asset-pilot.cart.add')}</button>
+        )}
+
         <button onClick={onDeselect} style={deselectBtnStyle}>
           {t('asset-pilot.bulk.deselect-all')}
         </button>
@@ -170,4 +175,8 @@ const selectStyle: React.CSSProperties = {
 const downloadBtnStyle: React.CSSProperties = {
   padding: '4px 12px', border: '1px solid #91caff', borderRadius: 4, background: '#e6f4ff',
   color: '#0958d9', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+}
+const cartBtnStyle: React.CSSProperties = {
+  padding: '4px 12px', border: '1px solid #ffd591', borderRadius: 4, background: '#fff7e6',
+  color: '#ad4e00', cursor: 'pointer', fontSize: 12, fontWeight: 500,
 }
