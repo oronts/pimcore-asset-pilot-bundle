@@ -114,6 +114,10 @@ export const de: Record<string, string> = {
 
   // Dashboard
   'asset-pilot.dashboard.organized': 'Organisiert',
+  'asset-pilot.dashboard.ops-by-status': 'Operationen nach Status',
+  'asset-pilot.dashboard.operations': 'Operationen',
+  'asset-pilot.dashboard.assets-by-class': 'Assets organisiert nach Klasse',
+  'asset-pilot.dashboard.no-class-data': 'Noch keine Klassenaktivität.',
   'asset-pilot.dashboard.pending': 'Ausstehend',
   'asset-pilot.dashboard.failed': 'Fehlgeschlagen',
   'asset-pilot.dashboard.skipped': 'Übersprungen',
@@ -420,6 +424,7 @@ export const de: Record<string, string> = {
   // Speichertrend
   'asset-pilot.tabs.storage': 'Speicher',
   'asset-pilot.storage.title': 'Trend ungenutzter Speicher',
+  'asset-pilot.storage.size-trend': 'Ungenutzte Größe im Zeitverlauf',
   'asset-pilot.storage.hint': 'Datenpunkte werden vom Befehl asset-pilot:capture-storage-snapshot (oder der Wartungsaufgabe) erfasst.',
   'asset-pilot.storage.empty': 'Noch keine Snapshots',
   'asset-pilot.storage.empty-desc': 'Erfassen Sie einen Speicher-Snapshot, um den Trend zu starten.',

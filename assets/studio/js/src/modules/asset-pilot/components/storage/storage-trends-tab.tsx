@@ -4,6 +4,7 @@ import { useStorageTrends } from '../../hooks/use-asset-pilot-api'
 import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
+import { TrendChart } from '../shared/charts/trend-chart'
 import { formatBytes, formatDate } from '../../utils/format'
 
 const POINTS = 90
@@ -47,6 +48,16 @@ export const StorageTrendsTab: React.FC = () => {
           color={delta > 0 ? '#ff4d4f' : '#52c41a'}
         />
       </div>
+
+      {data.items.length > 1 && (
+        <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, marginBottom: 20 }}>
+          <h5 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600 }}>{t('asset-pilot.storage.size-trend')}</h5>
+          <TrendChart
+            points={[...data.items].reverse().map(p => ({ label: formatDate(p.capturedAt), value: p.size }))}
+            formatValue={formatBytes}
+          />
+        </div>
+      )}
 
       <ResponsiveTableWrapper>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 420 }}>
