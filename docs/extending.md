@@ -245,17 +245,17 @@ use Pimcore\Model\DataObject\AbstractObject;
 
 class WorkflowConditionEvaluator implements ConditionEvaluatorInterface
 {
-    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
+    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool
     {
         // The live pipeline must never throw from a condition; swallow and treat errors as "no match".
         try {
-            return $this->evaluateStrict($object, $asset, $rule);
+            return $this->evaluateStrict($object, $asset, $rule, $locale);
         } catch (\Throwable) {
             return false;
         }
     }
 
-    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule): bool
+    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool
     {
         if ($rule->condition === null) {
             return true;

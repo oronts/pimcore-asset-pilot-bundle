@@ -119,7 +119,8 @@ oronts_asset_pilot:
 |-----|------|----------|---------|-------------|
 | `class` | `string` | yes | — | DataObject class name or `*` for wildcard |
 | `fields` | `string[]` | no | `[]` | Field names to match. Empty = all asset fields |
-| `condition` | `string` | no | `null` | ExpressionLanguage condition |
+| `locales` | `string[]` | no | `[]` | Locales to match for a localized asset field. Empty = any locale (and applies to non-localized fields too). A non-empty list never matches a non-localized field. Values are not validated against Pimcore's languages, so a typo silently matches nothing |
+| `condition` | `string` | no | `null` | ExpressionLanguage condition (`object`, `asset`, `rule`, `locale` available) |
 | `target_path` | `string` | yes | — | Twig path template |
 | `strategy` | `enum` | no | `always` | `always`, `first_assignment`, `callback` |
 | `callback` | `string` | no | `null` | Service ID (required when strategy is `callback`) |
