@@ -42,7 +42,7 @@ class OperationReverter
     {
         $entry = $this->auditLogger->findById($auditId);
         if ($entry === null) {
-            throw RevertException::of(RevertFailure::AuditEntryNotFound, 'Audit entry not found', ['id' => $auditId]);
+            throw RevertException::of(RevertFailure::AuditEntryNotFound, 'Audit entry not found');
         }
 
         if (($entry['status'] ?? '') !== OperationStatus::Completed->value) {
@@ -52,7 +52,7 @@ class OperationReverter
         $assetId = (int) ($entry['asset_id'] ?? 0);
         $asset = $this->loadAsset($assetId);
         if ($asset === null) {
-            throw RevertException::of(RevertFailure::AssetNotFound, 'Asset not found', ['assetId' => $assetId]);
+            throw RevertException::of(RevertFailure::AssetNotFound, 'Asset not found');
         }
 
         // Per-asset Pimcore workspace ACL on top of the admin-level operate permission.
@@ -88,6 +88,26 @@ class OperationReverter
             $asset->setParent($folder);
             $asset->setFilename($sourceFilename);
             $this->saveReverted($asset, $assetId);
+
+            // Record who performed the revert: a revert is a deliberate human action, unlike the
+            // rule-driven moves whose actor is the rule (so they stay null). The audit write and event
+            // stay inside the guard window so a failure here is reported like any other revert failure.
+            $this->auditLogger->log(new MoveOperation(
+                assetId: $assetId,
+                sourcePath: $targetPath,
+                targetPath: $sourcePath,
+                objectId: (int) ($entry['object_id'] ?? 0),
+                objectClass: (string) ($entry['object_class'] ?? ''),
+                ruleName: 'revert:' . ($entry['rule_name'] ?? ''),
+                status: OperationStatus::Completed,
+                triggerType: TriggerType::Manual,
+                userId: $this->currentUserId(),
+            ));
+
+            $this->eventDispatcher->dispatch(
+                new AssetMutationEvent([$assetId], 'revert', ['from' => $targetPath, 'to' => $sourcePath]),
+                AssetPilotEvents::REVERTED,
+            );
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to revert audit entry {id}: {error}', [
                 'id' => $auditId,
@@ -98,30 +118,11 @@ class OperationReverter
             throw RevertException::of(RevertFailure::ExecutionFailed, 'Failed to revert the operation.', [], $e);
         }
 
-        // Record who performed the revert: a revert is a deliberate human action, unlike the
-        // rule-driven moves whose actor is the rule (so they stay null).
-        $this->auditLogger->log(new MoveOperation(
-            assetId: $assetId,
-            sourcePath: $targetPath,
-            targetPath: $sourcePath,
-            objectId: (int) ($entry['object_id'] ?? 0),
-            objectClass: (string) ($entry['object_class'] ?? ''),
-            ruleName: 'revert:' . ($entry['rule_name'] ?? ''),
-            status: OperationStatus::Completed,
-            triggerType: TriggerType::Manual,
-            userId: $this->currentUserId(),
-        ));
-
         $this->logger->info('Asset Pilot: reverted audit entry {id}, asset {assetId} moved back to {path}', [
             'id' => $auditId,
             'assetId' => $assetId,
             'path' => $sourcePath,
         ]);
-
-        $this->eventDispatcher->dispatch(
-            new AssetMutationEvent([$assetId], 'revert', ['from' => $targetPath, 'to' => $sourcePath]),
-            AssetPilotEvents::REVERTED,
-        );
 
         return new RevertResult($assetId, $targetPath, $sourcePath);
     }
