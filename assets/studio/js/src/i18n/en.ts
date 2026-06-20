@@ -308,10 +308,6 @@ export const en: Record<string, string> = {
   'asset-pilot.explain.close': 'Close',
   'asset-pilot.explain.operations-preview': '{{count}} operation(s) would be performed',
 
-  // Permissions
-  'asset-pilot.permission.denied': 'You do not have permission to access Asset Pilot.',
-  'asset-pilot.permission.denied-desc': 'Contact your administrator to request access.',
-
   // Confidence Scoring
   'asset-pilot.confidence.label': 'Confidence',
   'asset-pilot.confidence.all': 'All Confidence Levels',
