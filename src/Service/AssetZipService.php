@@ -79,6 +79,9 @@ class AssetZipService
     {
         $assets = [];
         foreach ($objectIds as $objectId) {
+            if (count($assets) >= $this->maxAssets) {
+                break;
+            }
             $object = $this->loadObject((int) $objectId);
             if ($object === null) {
                 continue;
@@ -115,22 +118,35 @@ class AssetZipService
         $path = $this->createScratchPath();
         $zip = new \ZipArchive();
         if ($zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+            @unlink($path);
+
             throw new \RuntimeException('Could not create the zip archive.');
         }
 
         $added = 0;
         $used = [];
-        foreach ($capped as $asset) {
-            $file = $this->localFileFor($asset, $options->thumbnail, $entryExtension);
-            if ($file === null || !is_file($file)) {
-                $skipped++;
-                continue;
+        try {
+            foreach ($capped as $asset) {
+                $file = $this->localFileFor($asset, $options->thumbnail, $entryExtension);
+                // safeEntryName rejects zip-slip paths (absolute, .., backslash, control chars) that a
+                // custom strategy could emit; a rejected or unreadable asset is skipped, not packed.
+                $entry = $file !== null && is_file($file)
+                    ? $this->safeEntryName($this->retargetExtension($strategy->entryPath($asset), $entryExtension))
+                    : null;
+                if ($file === null || $entry === null) {
+                    $skipped++;
+                    continue;
+                }
+                $zip->addFile($file, $this->uniqueName($entry, $used));
+                $added++;
             }
-            $entry = $this->retargetExtension($strategy->entryPath($asset), $entryExtension);
-            $zip->addFile($file, $this->uniqueName($entry, $used));
-            $added++;
+            $zip->close();
+        } catch (\Throwable $e) {
+            @$zip->close();
+            @unlink($path);
+
+            throw $e;
         }
-        $zip->close();
 
         if ($added === 0) {
             @unlink($path);
@@ -156,6 +172,10 @@ class AssetZipService
     {
         $assets = [];
         foreach ($assetIds as $id) {
+            // Stop loading once the cap is reached so a huge id list cannot exhaust memory before build().
+            if (count($assets) >= $this->maxAssets) {
+                break;
+            }
             $asset = $this->loadAsset((int) $id);
             // Per-asset Pimcore workspace ACL on top of the View permission; isAllowed() returns true on CLI.
             if ($asset === null || $asset instanceof Asset\Folder || !$asset->isAllowed('view')) {
@@ -247,8 +267,29 @@ class AssetZipService
         return substr($entry, 0, -(strlen($current) + 1)) . '.' . $newExtension;
     }
 
+    /**
+     * Normalise a strategy-provided archive entry path and reject zip-slip: drop backslashes, leading
+     * slashes, `.`/`..` segments and control characters. Returns null when nothing valid remains.
+     */
+    protected function safeEntryName(string $entry): ?string
+    {
+        $segments = [];
+        foreach (explode('/', str_replace('\\', '/', $entry)) as $segment) {
+            $segment = trim($segment);
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                continue;
+            }
+            if (preg_match('/[\x00-\x1f]/', $segment) === 1) {
+                return null;
+            }
+            $segments[] = $segment;
+        }
+
+        return $segments === [] ? null : implode('/', $segments);
+    }
+
     /** @param array<string, int> $used */
-    private function uniqueName(string $entry, array &$used): string
+    protected function uniqueName(string $entry, array &$used): string
     {
         $entry = $entry !== '' ? $entry : 'asset';
         if (!isset($used[$entry])) {

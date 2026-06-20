@@ -37,6 +37,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         private readonly ?ContentUsageScanner $contentScanner = null,
         private readonly ?StatsCache $statsCache = null,
         private readonly int $statsTtl = 0,
+        private readonly ?LoopGuard $loopGuard = null,
     ) {}
 
     /**
@@ -287,8 +288,17 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                     continue;
                 }
 
+                // Loop-safe like every other bundle save: the listener that fires on asset.postUpdate
+                // stays guarded across the save window (an unused asset has no owners to re-organize,
+                // but the guard keeps the invariant uniform).
                 $asset->setParent($folder);
-                $asset->save(['versionNote' => 'Asset Pilot: moved unused asset to ' . $targetFolder]);
+                $this->loopGuard?->markAssetProcessing($id);
+                try {
+                    $asset->save(['versionNote' => 'Asset Pilot: moved unused asset to ' . $targetFolder]);
+                    $this->loopGuard?->markAssetRecentlyMoved($id);
+                } finally {
+                    $this->loopGuard?->unmarkAssetProcessing($id);
+                }
                 $movedIds[] = $id;
 
                 $this->logger->info('Asset Pilot: moved unused asset {id} to {path}', [
