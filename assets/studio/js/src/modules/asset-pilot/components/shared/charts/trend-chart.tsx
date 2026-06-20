@@ -37,7 +37,7 @@ export const TrendChart: React.FC<Props> = ({ points, formatValue, color = '#167
   const last = points[n - 1]
 
   return (
-    <div ref={ref} style={{ width: '100%' }}>
+    <div ref={ref} style={{ width: '100%', overflowX: 'hidden' }}>
       <svg width={w} height={height} role="img" aria-label={`trend, latest ${fmt(last.value)}`}>
         <path d={area} fill={color} fillOpacity={0.12} />
         <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
