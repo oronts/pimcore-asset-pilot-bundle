@@ -1,27 +1,19 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useElementHelper } from '@pimcore/studio-ui-bundle/modules/element'
+import type { ElementType } from '@pimcore/studio-ui-bundle'
 import { useToast } from '../../hooks/use-toast'
-
-type ElementType = 'asset' | 'data-object'
-
-interface PimcoreStudioApi {
-  element?: {
-    openAsset: (id: number) => Promise<void>
-    openDataObject: (id: number) => Promise<void>
-  }
-}
 
 interface OpenButtonProps {
   id: number
-  type: ElementType
-  // Optional label (e.g. a filename) rendered instead of the bare id, so a deep link can read as
-  // "photo.jpg" rather than "#1234". Falls back to the id.
-  label?: string
+  type: ElementType // asset folders open as 'asset'
+  label?: string // a filename to render instead of the bare id
 }
 
 export const OpenButton: React.FC<OpenButtonProps> = ({ id, type, label }) => {
   const { t } = useTranslation()
   const toast = useToast()
+  const { openElement } = useElementHelper()
   const [opening, setOpening] = useState(false)
 
   const handleClick = async (): Promise<void> => {
@@ -29,16 +21,7 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type, label }) => {
     setOpening(true)
 
     try {
-      const api = (window as unknown as { PimcoreStudio?: PimcoreStudioApi }).PimcoreStudio
-      if (api?.element != null) {
-        if (type === 'asset') {
-          await api.element.openAsset(id)
-        } else {
-          await api.element.openDataObject(id)
-        }
-      } else {
-        toast.warning(t('asset-pilot.open.api-unavailable', { type, id }))
-      }
+      await openElement({ id, type })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(t('asset-pilot.open.failed', { type, id, message: msg }))
