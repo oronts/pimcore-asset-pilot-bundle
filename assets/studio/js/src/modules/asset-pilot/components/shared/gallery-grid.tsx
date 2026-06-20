@@ -80,31 +80,38 @@ export function GalleryGrid<T>({ data, loading, error, empty, summary, page, pag
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
-        {cards.map(card => {
-          const selectable = selection != null && card.selectId != null
-          const isSelected = selectable && selection.selected.has(card.selectId as number)
-          return (
-            <div key={card.key} style={{ ...cardStyle, borderColor: isSelected ? '#1677ff' : '#f0f0f0', boxShadow: isSelected ? '0 0 0 1px #1677ff' : 'none' }}>
-              <div style={thumbWrapStyle}>
-                {selectable && (
-                  <input type="checkbox" checked={isSelected} onChange={() => selection.toggleSelect(card.selectId as number)} style={checkboxStyle} aria-label={card.fallbackLabel} />
-                )}
-                {card.badges != null && <div style={badgeStyle}>{card.badges}</div>}
-                <Thumbnail thumbnailId={card.thumbnailId} type={card.type} fallbackLabel={card.fallbackLabel} />
-              </div>
-              <div style={{ padding: '8px 10px' }}>
-                <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.title}</div>
-                {card.meta != null && <div style={{ marginTop: 4 }}>{card.meta}</div>}
-                {card.actions != null && <div style={{ marginTop: 8 }}>{card.actions}</div>}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      <GalleryCards cards={cards} selection={selection} />
       </>}
 
       <Pagination page={page} pages={pages} onPage={onPage} limit={limit} onLimit={onLimit} pageSizeOptions={pageSizeOptions} />
+    </div>
+  )
+}
+
+/** The responsive card grid only (no loading/empty/pagination), for tabs that own those themselves. */
+export function GalleryCards({ cards, selection }: { cards: GalleryCard[]; selection?: { selected: Set<number>; toggleSelect: (id: number) => void } }): React.ReactElement {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
+      {cards.map(card => {
+        const selectable = selection != null && card.selectId != null
+        const isSelected = selectable && selection.selected.has(card.selectId as number)
+        return (
+          <div key={card.key} style={{ ...cardStyle, borderColor: isSelected ? '#1677ff' : '#f0f0f0', boxShadow: isSelected ? '0 0 0 1px #1677ff' : 'none' }}>
+            <div style={thumbWrapStyle}>
+              {selectable && (
+                <input type="checkbox" checked={isSelected} onChange={() => selection.toggleSelect(card.selectId as number)} style={checkboxStyle} aria-label={card.fallbackLabel} />
+              )}
+              {card.badges != null && <div style={badgeStyle}>{card.badges}</div>}
+              <Thumbnail thumbnailId={card.thumbnailId} type={card.type} fallbackLabel={card.fallbackLabel} />
+            </div>
+            <div style={{ padding: '8px 10px' }}>
+              <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.title}</div>
+              {card.meta != null && <div style={{ marginTop: 4 }}>{card.meta}</div>}
+              {card.actions != null && <div style={{ marginTop: 8 }}>{card.actions}</div>}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

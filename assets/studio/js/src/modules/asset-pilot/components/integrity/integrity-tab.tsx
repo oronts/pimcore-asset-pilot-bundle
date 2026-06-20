@@ -11,6 +11,7 @@ import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { ConfirmDialog } from '../shared/confirm-dialog'
 import { OpenButton } from '../shared/open-button'
+import { GalleryCards, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { HealModal } from './heal-modal'
 
 export const IntegrityTab: React.FC = () => {
@@ -24,6 +25,7 @@ export const IntegrityTab: React.FC = () => {
   const [healing, setHealing] = useState(false)
   const [undoing, setUndoing] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
 
   if (loading) return <TableSkeleton rows={4} columns={4} />
   if (error != null) return (
@@ -76,8 +78,26 @@ export const IntegrityTab: React.FC = () => {
         )}
       </div>
 
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
+
       {data.items.length === 0
         ? <p style={{ fontSize: 13, color: '#8c8c8c', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+        : viewMode === 'gallery'
+        ? (
+          <GalleryCards
+            cards={data.items.map(item => ({
+              key: item.id,
+              selectId: item.id,
+              thumbnailId: item.id,
+              type: 'image',
+              fallbackLabel: item.path.split('.').pop() ?? 'FILE',
+              title: <OpenButton id={item.id} type="asset" />,
+              meta: <span style={{ fontSize: 11, color: '#fa541c' }}>{item.reason}</span>,
+              actions: perms.admin ? <button onClick={() => setUndoing(item.id)} style={actionBtnStyle}>{t('asset-pilot.integrity.undo')}</button> : undefined,
+            }))}
+            selection={{ selected, toggleSelect: toggle }}
+          />
+        )
         : (
           <ResponsiveTableWrapper>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>

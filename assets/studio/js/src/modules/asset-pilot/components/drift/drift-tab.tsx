@@ -7,6 +7,7 @@ import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { OpenButton } from '../shared/open-button'
+import { GalleryCards, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 
 export const DriftTab: React.FC = () => {
   const { t } = useTranslation()
@@ -14,6 +15,7 @@ export const DriftTab: React.FC = () => {
   const [selectedClass, setSelectedClass] = useState<string>('')
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
   const { data, loading, error } = useDrift(selectedClass || null, page, limit)
 
   const classes = useMemo(
@@ -44,6 +46,8 @@ export const DriftTab: React.FC = () => {
       </div>
       <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 16 }}>{t('asset-pilot.drift.hint')}</p>
 
+      {selectedClass !== '' && <ViewToggle mode={viewMode} onChange={setViewMode} />}
+
       {selectedClass === '' && (
         <EmptyState variant="no-data" title={t('asset-pilot.drift.choose')} description={t('asset-pilot.drift.choose-desc')} />
       )}
@@ -62,6 +66,24 @@ export const DriftTab: React.FC = () => {
               <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>{t('asset-pilot.drift.scanned', { count: data.objectsScanned })}</p>
               {data.items.length === 0
                 ? <p style={{ fontSize: 13, color: '#8c8c8c', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+                : viewMode === 'gallery'
+                ? (
+                  <GalleryCards
+                    cards={data.items.map(item => ({
+                      key: item.assetId,
+                      thumbnailId: item.assetId,
+                      type: 'image',
+                      fallbackLabel: item.currentPath.split('.').pop() ?? 'FILE',
+                      title: <OpenButton id={item.assetId} type="asset" />,
+                      meta: (
+                        <div style={{ fontSize: 11 }}>
+                          <div style={{ color: '#fa541c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.currentPath}</div>
+                          <div style={{ color: '#52c41a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.expectedPath}</div>
+                        </div>
+                      ),
+                    }))}
+                  />
+                )
                 : (
                   <ResponsiveTableWrapper>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
