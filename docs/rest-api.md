@@ -21,7 +21,6 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | `GET` | `/integrity` | View | Broken assets. Bounded scan (`?folder`, `?type`, `?extension`, `?page`, `?limit`) or check specific ids (`?ids=1,2,3`, max 50). Returns `{items[], scanned, broken, page, limit}` |
 | `POST` | `/integrity/heal` | Operate | Roll broken assets back to their last renderable version (`{ids[], dryRun?}`, max 50 ids). Returns `{dryRun, results[]}` |
 | `POST` | `/integrity/undo` | Admin | Reverse the most recent heal of one asset (`{assetId}`); 404 when there is no reversible heal |
-| `GET` | `/permissions` | View | Current user's permission set (a viewer-less user gets 403, which the Studio UI treats as no access) |
 
 ### Operations
 

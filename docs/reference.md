@@ -118,7 +118,6 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 | GET | `/assets/search`, `/assets/by-object/{objectId}`, `/assets/tags`, `/assets/{id}/tags` | View |
 | POST | `/assets/bulk-tag`, `/assets/bulk-property` | Operate |
 | POST / DELETE | `/assets/{id}/lock` | Operate |
-| GET | `/permissions` | any authenticated user (reports the caller's own flags) |
 
 ## Events
 

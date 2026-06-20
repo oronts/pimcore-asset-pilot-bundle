@@ -4,6 +4,7 @@ import { assetPilotApi } from '../../services/api'
 import type { MoveOperation } from '../../types'
 import { useToast } from '../../hooks/use-toast'
 import { useModalDismiss } from '../../hooks/use-modal-dismiss'
+import { usePermissions } from '../../hooks/use-permissions'
 
 interface RulePreviewModalProps {
   ruleName: string
@@ -13,6 +14,7 @@ interface RulePreviewModalProps {
 export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, onClose }) => {
   const { t } = useTranslation()
   const toast = useToast()
+  const { operate } = usePermissions()
   const [objectId, setObjectId] = useState('')
   const [results, setResults] = useState<MoveOperation[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -94,9 +96,11 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
                     ))}
                   </tbody>
                 </table>
-                <button onClick={() => { void applyNow() }} disabled={applying} style={applyBtnStyle}>
-                  {applying ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.apply-now')}
-                </button>
+                {operate && (
+                  <button onClick={() => { void applyNow() }} disabled={applying} style={applyBtnStyle}>
+                    {applying ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.apply-now')}
+                  </button>
+                )}
               </>
             )}
           </div>
