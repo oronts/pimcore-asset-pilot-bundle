@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetPilotApi } from '../services/api'
-import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, MergeStrategies, BrokenAssetsResponse, QuarantineResponse, StorageTrendResponse, EmptyFoldersResponse, DriftResponse } from '../types'
+import type { DashboardData, RuleData, RuleDetail, PaginatedAuditResponse, AuditFilters, ClassStat, PaginatedUnusedResponse, PaginatedAssetResponse, UnusedAssetFilters, UnusedAssetStats, TagItem, AssetSearchFilters, HealthReport, RuleOverlapResponse, DuplicatesResponse, DuplicateFilters, MergeStrategies, BrokenAssetsResponse, QuarantineResponse, QuarantineFilters, StorageTrendResponse, EmptyFoldersResponse, DriftResponse } from '../types'
 
 interface AsyncState<T> {
   data: T | null
@@ -89,8 +89,8 @@ export function useTags(): AsyncState<TagItem[]> {
   return useAsyncData(() => assetPilotApi.getAvailableTags())
 }
 
-export function useDuplicates(page: number, limit: number): AsyncState<DuplicatesResponse> {
-  return useAsyncData(() => assetPilotApi.getDuplicates(page, limit), [page, limit])
+export function useDuplicates(page: number, limit: number, filters: DuplicateFilters = {}): AsyncState<DuplicatesResponse> {
+  return useAsyncData(() => assetPilotApi.getDuplicates(page, limit, filters), [page, limit, filters.minCopies, filters.type])
 }
 
 export function useMergeStrategies(): AsyncState<MergeStrategies> {
@@ -101,8 +101,8 @@ export function useBrokenAssets(page: number, limit: number): AsyncState<BrokenA
   return useAsyncData(() => assetPilotApi.getBrokenAssets(page, limit), [page, limit])
 }
 
-export function useQuarantine(page: number, limit: number): AsyncState<QuarantineResponse> {
-  return useAsyncData(() => assetPilotApi.getQuarantine(page, limit), [page, limit])
+export function useQuarantine(page: number, limit: number, filters: QuarantineFilters = {}): AsyncState<QuarantineResponse> {
+  return useAsyncData(() => assetPilotApi.getQuarantine(page, limit, filters), [page, limit, filters.type, filters.before, filters.after])
 }
 
 export function useStorageTrends(type: string | undefined, limit: number): AsyncState<StorageTrendResponse> {

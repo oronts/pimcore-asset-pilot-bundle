@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDuplicates, useMergeStrategies } from '../../hooks/use-asset-pilot-api'
 import { usePermissions } from '../../hooks/use-permissions'
-import type { DuplicateGroup } from '../../types'
+import type { DuplicateGroup, DuplicateFilters } from '../../types'
 import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
@@ -11,6 +11,7 @@ import { OpenButton } from '../shared/open-button'
 import { assetPilotApi } from '../../services/api'
 import { formatBytes, truncate } from '../../utils/format'
 import { MergeModal } from './merge-modal'
+import { DuplicatesFilters } from './duplicates-filters'
 
 const LIMIT = 50
 
@@ -18,11 +19,13 @@ export const DuplicatesTab: React.FC = () => {
   const { t } = useTranslation()
   const perms = usePermissions()
   const [page, setPage] = useState(1)
-  const { data, loading, error, refetch } = useDuplicates(page, LIMIT)
+  const [filters, setFilters] = useState<DuplicateFilters>({})
+  const { data, loading, error, refetch } = useDuplicates(page, LIMIT, filters)
   const strategies = useMergeStrategies()
   const [selected, setSelected] = useState<DuplicateGroup | null>(null)
 
-  if (loading) return <TableSkeleton rows={4} columns={4} />
+  const onFilters = (next: DuplicateFilters): void => { setFilters(next); setPage(1) }
+
   if (error != null) return (
     <div>
       <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
@@ -30,59 +33,60 @@ export const DuplicatesTab: React.FC = () => {
     </div>
   )
 
-  if (data == null || data.items.length === 0) {
-    return (
-      <div>
-        <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 16 }}>{t('asset-pilot.duplicates.scan-hint')}</p>
-        <EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />
-      </div>
-    )
-  }
-
-  const pages = Math.max(1, Math.ceil(data.total / LIMIT))
+  const pages = data != null ? Math.max(1, Math.ceil(data.total / LIMIT)) : 1
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.duplicates.title', { count: data.total })}</h4>
-        <button onClick={() => assetPilotApi.exportDuplicates()} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
+        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.duplicates.title', { count: data?.total ?? 0 })}</h4>
+        <button onClick={() => assetPilotApi.exportDuplicates(filters)} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
       </div>
       <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 16 }}>{t('asset-pilot.duplicates.scan-hint')}</p>
 
-      <ResponsiveTableWrapper>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
-              <th style={thStyle}>{t('asset-pilot.duplicates.checksum')}</th>
-              <th style={thStyle}>{t('asset-pilot.columns.size')}</th>
-              <th style={{ ...thStyle, textAlign: 'center' }}>{t('asset-pilot.columns.copies')}</th>
-              <th style={thStyle}>{t('asset-pilot.duplicates.example')}</th>
-              <th style={thStyle}>{t('asset-pilot.common.actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map(group => (
-              <tr key={group.checksum} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{truncate(group.checksum, 16)}</td>
-                <td style={tdStyle}>{formatBytes(group.representative?.fileSize ?? group.fileSize)}</td>
-                <td style={{ ...tdStyle, textAlign: 'center' }}>{group.count}</td>
-                <td style={tdStyle}>
-                  {group.representative != null
-                    ? <OpenButton id={group.representative.id} type="asset" label={group.representative.filename} />
-                    : <span style={{ color: '#bfbfbf' }}>-</span>}
-                </td>
-                <td style={tdStyle}>
-                  {perms.admin
-                    ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button>
-                    : <span style={{ color: '#bfbfbf', fontSize: 12 }}>-</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </ResponsiveTableWrapper>
+      <DuplicatesFilters filters={filters} onChange={onFilters} />
 
-      <Pagination page={data.page} pages={pages} onPage={setPage} />
+      {loading
+        ? <TableSkeleton rows={4} columns={5} />
+        : data == null || data.items.length === 0
+          ? <EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />
+          : (
+            <>
+              <ResponsiveTableWrapper>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+                      <th style={thStyle}>{t('asset-pilot.duplicates.checksum')}</th>
+                      <th style={thStyle}>{t('asset-pilot.columns.size')}</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>{t('asset-pilot.columns.copies')}</th>
+                      <th style={thStyle}>{t('asset-pilot.duplicates.example')}</th>
+                      <th style={thStyle}>{t('asset-pilot.common.actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.items.map(group => (
+                      <tr key={group.checksum} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{truncate(group.checksum, 16)}</td>
+                        <td style={tdStyle}>{formatBytes(group.representative?.fileSize ?? group.fileSize)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>{group.count}</td>
+                        <td style={tdStyle}>
+                          {group.representative != null
+                            ? <OpenButton id={group.representative.id} type="asset" label={group.representative.filename} />
+                            : <span style={{ color: '#bfbfbf' }}>-</span>}
+                        </td>
+                        <td style={tdStyle}>
+                          {perms.admin
+                            ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button>
+                            : <span style={{ color: '#bfbfbf', fontSize: 12 }}>-</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ResponsiveTableWrapper>
+
+              <Pagination page={data.page} pages={pages} onPage={setPage} />
+            </>
+          )}
 
       {selected != null && (
         <MergeModal

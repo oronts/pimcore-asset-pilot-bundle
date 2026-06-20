@@ -314,6 +314,11 @@ export interface DuplicatesResponse {
   limit: number
 }
 
+export interface DuplicateFilters {
+  minCopies?: number
+  type?: string
+}
+
 export interface MergeStrategies {
   strategies: string[]
   default: string
@@ -377,6 +382,12 @@ export interface QuarantineResponse {
   total: number
   page: number
   pages: number
+}
+
+export interface QuarantineFilters {
+  type?: string
+  before?: string
+  after?: string
 }
 
 // Storage trends

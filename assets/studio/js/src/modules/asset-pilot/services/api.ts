@@ -26,11 +26,13 @@ import type {
   ReplayParams,
   ReplaySummary,
   DuplicatesResponse,
+  DuplicateFilters,
   MergeStrategies,
   MergeResult,
   BrokenAssetsResponse,
   HealResponse,
   QuarantineResponse,
+  QuarantineFilters,
   StorageTrendResponse,
   EmptyFoldersResponse,
   EmptyFolderDeleteResult,
@@ -237,15 +239,17 @@ export const assetPilotApi = {
     }),
 
   // Duplicates
-  getDuplicates: (page = 1, limit = 50) =>
-    request<DuplicatesResponse>(`/duplicates${buildQuery({ page, limit })}`),
+  getDuplicates: (page = 1, limit = 50, filters: DuplicateFilters = {}) =>
+    request<DuplicatesResponse>(`/duplicates${buildQuery({ page, limit, minCopies: filters.minCopies, type: filters.type })}`),
   getMergeStrategies: () => request<MergeStrategies>('/duplicates/strategies'),
   mergeDuplicates: (checksum: string, canonicalId?: number, strategy?: string, dryRun = false) =>
     request<MergeResult>('/duplicates/merge', {
       method: 'POST',
       body: JSON.stringify({ checksum, canonicalId, strategy, dryRun }),
     }),
-  exportDuplicates: (): void => { window.open(`${BASE_URL}/duplicates/export`, '_blank') },
+  exportDuplicates: (filters: DuplicateFilters = {}): void => {
+    window.open(`${BASE_URL}/duplicates/export${buildQuery({ minCopies: filters.minCopies, type: filters.type })}`, '_blank')
+  },
 
   // Integrity
   getBrokenAssets: (page = 1, limit = 25, filters: { folder?: string; type?: string; extension?: string } = {}) =>
@@ -256,11 +260,13 @@ export const assetPilotApi = {
     request<{ assetId: number; undone: boolean }>('/integrity/undo', { method: 'POST', body: JSON.stringify({ assetId }) }),
 
   // Quarantine
-  getQuarantine: (page = 1, limit = 50) =>
-    request<QuarantineResponse>(`/quarantine${buildQuery({ page, limit })}`),
+  getQuarantine: (page = 1, limit = 50, filters: QuarantineFilters = {}) =>
+    request<QuarantineResponse>(`/quarantine${buildQuery({ page, limit, type: filters.type, before: filters.before, after: filters.after })}`),
   restoreQuarantine: (assetId: number) =>
     request<{ message: string; assetId: number }>(`/quarantine/${assetId}/restore`, { method: 'POST' }),
-  exportQuarantine: (): void => { window.open(`${BASE_URL}/quarantine/export`, '_blank') },
+  exportQuarantine: (filters: QuarantineFilters = {}): void => {
+    window.open(`${BASE_URL}/quarantine/export${buildQuery({ type: filters.type, before: filters.before, after: filters.after })}`, '_blank')
+  },
 
   // Storage trends
   getStorageTrends: (type?: string, limit = 90) =>
