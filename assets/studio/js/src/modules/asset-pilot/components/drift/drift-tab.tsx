@@ -69,8 +69,8 @@ export const DriftTab: React.FC = () => {
                 : viewMode === 'gallery'
                 ? (
                   <GalleryCards
-                    cards={data.items.map(item => ({
-                      key: item.assetId,
+                    cards={data.items.map((item, i) => ({
+                      key: `${item.assetId}-${item.ruleName}-${i}`,
                       thumbnailId: item.assetId,
                       type: 'image',
                       fallbackLabel: item.currentPath.split('.').pop() ?? 'FILE',
@@ -96,8 +96,8 @@ export const DriftTab: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {data.items.map(item => (
-                          <tr key={item.assetId} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                        {data.items.map((item, i) => (
+                          <tr key={`${item.assetId}-${item.ruleName}-${i}`} style={{ borderBottom: '1px solid #f5f5f5' }}>
                             <td style={tdStyle}><OpenButton id={item.assetId} type="asset" /></td>
                             <td style={{ ...tdStyle, color: '#fa541c' }}><ExpandablePath path={item.currentPath} maxLength={36} /></td>
                             <td style={{ ...tdStyle, color: '#52c41a' }}><ExpandablePath path={item.expectedPath} maxLength={36} /></td>

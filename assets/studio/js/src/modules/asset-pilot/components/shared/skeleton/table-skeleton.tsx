@@ -18,7 +18,6 @@ const SKELETON_CSS = `
 export const TableSkeleton: React.FC<TableSkeletonProps> = ({ rows = 5, columns = 5, hasCheckbox = false }) => {
   injectStyles('ap-skeleton-styles', SKELETON_CSS)
 
-  const totalCols = hasCheckbox ? columns + 1 : columns
   const widths = [60, 120, 180, 100, 80, 140, 90, 70, 110, 100, 80, 60]
 
   return (

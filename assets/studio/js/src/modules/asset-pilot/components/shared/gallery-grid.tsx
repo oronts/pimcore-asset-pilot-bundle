@@ -49,7 +49,7 @@ interface Props<T> {
   page: number
   pages: number
   onPage: (page: number) => void
-  toCard: (item: T) => GalleryCard
+  toCard: (item: T, index: number) => GalleryCard
   selection?: Selection
   limit?: number
   onLimit?: (limit: number) => void
