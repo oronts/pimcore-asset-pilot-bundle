@@ -114,7 +114,7 @@ class NormalizeFilenamesService
         $this->loopGuard->markAssetProcessing($assetId);
         try {
             $asset->setFilename($filename);
-            $asset->save();
+            $asset->save(['versionNote' => 'Asset Pilot: normalized filename to ' . $filename]);
             $this->loopGuard->markAssetRecentlyMoved($assetId);
         } catch (UniqueConstraintViolationException $e) {
             throw new \RuntimeException(sprintf('An asset named "%s" already exists in this folder.', $filename), 0, $e);

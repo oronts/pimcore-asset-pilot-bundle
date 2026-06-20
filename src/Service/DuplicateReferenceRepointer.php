@@ -324,7 +324,7 @@ class DuplicateReferenceRepointer
 
     protected function saveObject(Concrete $object): void
     {
-        $object->save();
+        $object->save(['versionNote' => 'Asset Pilot: repointed asset reference (duplicate merge)']);
     }
 
     /**

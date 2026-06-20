@@ -253,7 +253,7 @@ class AssetOrganizer
             // the asset is shared between multiple objects. Only set it once the save actually lands.
             $this->loopGuard->markAssetProcessing($assetId);
             try {
-                $asset->save();
+                $asset->save(['versionNote' => 'Asset Pilot: organized by rule "' . $rule->name . '" -> ' . $plan->targetPath]);
                 $this->loopGuard->markAssetRecentlyMoved($assetId);
             } finally {
                 $this->loopGuard->unmarkAssetProcessing($assetId);

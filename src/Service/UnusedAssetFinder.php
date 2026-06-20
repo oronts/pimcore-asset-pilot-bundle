@@ -288,7 +288,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 }
 
                 $asset->setParent($folder);
-                $asset->save();
+                $asset->save(['versionNote' => 'Asset Pilot: moved unused asset to ' . $targetFolder]);
                 $movedIds[] = $id;
 
                 $this->logger->info('Asset Pilot: moved unused asset {id} to {path}', [

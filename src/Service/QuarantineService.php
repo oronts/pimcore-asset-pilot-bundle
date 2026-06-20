@@ -93,7 +93,7 @@ class QuarantineService
                 $originalPath = $asset->getRealFullPath();
                 $this->moveGuarded($asset, $assetId, static function () use ($asset, $folder): void {
                     $asset->setParent($folder);
-                });
+                }, 'Asset Pilot: quarantined to ' . $this->quarantineFolder);
                 $this->recordQuarantine($assetId, $originalPath);
                 $quarantined[] = $assetId;
             } catch (\Throwable $e) {
@@ -139,7 +139,7 @@ class QuarantineService
         $this->moveGuarded($asset, $assetId, static function () use ($asset, $folder, $filename): void {
             $asset->setParent($folder);
             $asset->setFilename($filename);
-        });
+        }, 'Asset Pilot: restored from quarantine');
         $this->deleteQuarantineRecord($assetId);
 
         $this->eventDispatcher->dispatch(
@@ -276,12 +276,12 @@ class QuarantineService
         return $this->contentScanner?->isReferencedInContent($asset) === true;
     }
 
-    protected function moveGuarded(Asset $asset, int $assetId, callable $mutate): void
+    protected function moveGuarded(Asset $asset, int $assetId, callable $mutate, string $note): void
     {
         $this->loopGuard->markAssetProcessing($assetId);
         try {
             $mutate();
-            $asset->save();
+            $asset->save(['versionNote' => $note]);
             $this->loopGuard->markAssetRecentlyMoved($assetId);
         } finally {
             $this->loopGuard->unmarkAssetProcessing($assetId);

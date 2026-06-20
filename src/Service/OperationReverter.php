@@ -153,7 +153,7 @@ class OperationReverter
     {
         $this->loopGuard->markAssetProcessing($assetId);
         try {
-            $asset->save();
+            $asset->save(['versionNote' => 'Asset Pilot: reverted a previous move']);
             $this->loopGuard->markAssetRecentlyMoved($assetId);
         } finally {
             $this->loopGuard->unmarkAssetProcessing($assetId);
