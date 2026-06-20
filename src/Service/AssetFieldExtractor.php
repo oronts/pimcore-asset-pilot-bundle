@@ -13,6 +13,7 @@ use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
 use Pimcore\Model\DataObject\Concrete;
+use Pimcore\Model\DataObject\Data\BlockElement;
 use Pimcore\Model\DataObject\Data\ElementMetadata;
 use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Pimcore\Model\DataObject\Data\ImageGallery;
@@ -36,6 +37,7 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         'advancedManyToManyRelation',
         'advancedManyToOneRelation',
         'manyToManyObjectRelation',
+        'block',
     ];
 
     /** @param string[] $locales locales to scan for localized fields; empty means all valid languages */
@@ -113,6 +115,11 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         // advancedMany*Relation fields wrap each target in ElementMetadata; unwrap to the element.
         if ($value instanceof ElementMetadata) {
             return $this->extractAssetsFromValue($value->getElement());
+        }
+
+        // Block fields hold rows of BlockElement (one per sub-field); unwrap to the held value.
+        if ($value instanceof BlockElement) {
+            return $this->extractAssetsFromValue($value->getData());
         }
 
         if (is_array($value)) {

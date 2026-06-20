@@ -12,6 +12,7 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\ClassDefinition\Data;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\Concrete;
+use Pimcore\Model\DataObject\Data\BlockElement;
 use Pimcore\Model\DataObject\Data\ElementMetadata;
 use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Pimcore\Model\DataObject\Fieldcollection;
@@ -94,6 +95,21 @@ class AssetFieldExtractorTest extends TestCase
     public function nullYieldsNothing(): void
     {
         self::assertSame([], $this->extractor->extractFrom(null));
+    }
+
+    #[Test]
+    public function unwrapsAssetsNestedInBlockElements(): void
+    {
+        $asset = $this->createMock(Asset::class);
+        $imageElement = $this->createMock(BlockElement::class);
+        $imageElement->method('getData')->willReturn($asset);
+        $textElement = $this->createMock(BlockElement::class);
+        $textElement->method('getData')->willReturn('a title');
+
+        // A block value is rows of [subFieldName => BlockElement].
+        $blockValue = [['image' => $imageElement, 'title' => $textElement]];
+
+        self::assertSame([$asset], $this->extractor->extractFrom($blockValue));
     }
 
     #[Test]
