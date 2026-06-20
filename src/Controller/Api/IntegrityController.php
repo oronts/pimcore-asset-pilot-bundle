@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
@@ -51,8 +52,7 @@ class IntegrityController
             }
         }
 
-        $page = max(1, $request->query->getInt('page', 1));
-        $limit = min(self::MAX_ITEMS, max(1, $request->query->getInt('limit', 25)));
+        [$page, $limit] = Pagination::fromRequest($request, self::MAX_ITEMS, 25);
 
         $filters = array_filter([
             'folder' => $request->query->get('folder'),

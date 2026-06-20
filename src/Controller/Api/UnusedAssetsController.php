@@ -8,6 +8,7 @@ use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\StorageTrendService;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Psr\Log\LoggerInterface;
@@ -36,8 +37,7 @@ class UnusedAssetsController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function list(Request $request): JsonResponse
     {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, 200);
 
         if ($request->query->has('minSize') || $request->query->has('maxSize')) {
             return new JsonResponse([

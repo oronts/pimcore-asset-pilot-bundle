@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
@@ -123,8 +124,7 @@ class AssetManagementController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function search(Request $request): JsonResponse
     {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, 200);
 
         $filters = [
             'q' => trim((string) $request->query->get('q', '')),

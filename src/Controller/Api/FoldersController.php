@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\EmptyFolderSweepService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,8 +27,7 @@ class FoldersController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function empty(Request $request): JsonResponse
     {
-        $page = max(1, $request->query->getInt('page', 1));
-        $limit = min(self::MAX_DELETE, max(1, $request->query->getInt('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, self::MAX_DELETE);
         $folder = $request->query->get('folder');
 
         try {

@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\RevertFailure;
 use Oronts\AssetPilotBundle\Exception\RevertException;
 use Oronts\AssetPilotBundle\Service\OperationReverter;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,8 +33,7 @@ class AuditController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function list(Request $request): JsonResponse
     {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(100, max(1, (int) $request->query->get('limit', 20)));
+        [$page, $limit] = Pagination::fromRequest($request, 100, 20);
 
         $filters = array_filter([
             'object_class' => $request->query->get('class'),

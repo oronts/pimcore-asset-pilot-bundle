@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
 use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -39,8 +40,7 @@ class DuplicatesController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function list(Request $request): JsonResponse
     {
-        $page = max(1, $request->query->getInt('page', 1));
-        $limit = min(self::MAX_LIMIT, max(1, $request->query->getInt('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, self::MAX_LIMIT);
         $minCopies = max(2, $request->query->getInt('minCopies', 2));
         $typeParam = $request->query->get('type');
         $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;

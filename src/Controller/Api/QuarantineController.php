@@ -8,6 +8,7 @@ use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -31,8 +32,7 @@ class QuarantineController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function list(Request $request): JsonResponse
     {
-        $page = max(1, $request->query->getInt('page', 1));
-        $limit = min(200, max(1, $request->query->getInt('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, 200);
 
         return new JsonResponse($this->quarantineService->listQuarantined($page, $limit, $this->filters($request)));
     }

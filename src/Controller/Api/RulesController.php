@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleOverlap;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LocationDriftService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
 use Oronts\AssetPilotBundle\Service\RulePortability;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -43,8 +44,7 @@ class RulesController
             return new JsonResponse(['error' => 'Query parameter "class" is required.'], JsonResponse::HTTP_BAD_REQUEST);
         }
 
-        $page = max(1, $request->query->getInt('page', 1));
-        $limit = min(200, max(1, $request->query->getInt('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, 200);
 
         try {
             $result = $this->driftService->driftForClass($className, $page, $limit);
