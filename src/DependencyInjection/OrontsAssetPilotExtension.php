@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\DependencyInjection;
 
+use Oronts\AssetPilotBundle\Action\RuleActionInterface;
+use Oronts\AssetPilotBundle\Engine\RuleProviderInterface;
+use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
+use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
+use Oronts\AssetPilotBundle\Notification\NotifierInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
@@ -12,6 +18,21 @@ use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
 
 class OrontsAssetPilotExtension extends Extension implements PrependExtensionInterface
 {
+    /**
+     * Extension seams a consumer plugs into by implementing the interface. Registered for
+     * container-wide autoconfiguration (not services.yaml `_instanceof`, which is file-scoped and so
+     * would only tag the bundle's own services) so a project service implementing one is auto-tagged,
+     * exactly as the docs promise. Strategy/filter stay explicit: they are keyed by an `alias` tag
+     * attribute that autoconfiguration cannot supply per service.
+     */
+    private const array AUTOCONFIGURED_SEAMS = [
+        RuleProviderInterface::class => 'oronts_asset_pilot.rule_provider',
+        HealthCheckInterface::class => 'oronts_asset_pilot.health_check',
+        RuleActionInterface::class => 'oronts_asset_pilot.rule_action',
+        IntegrityCheckerInterface::class => 'oronts_asset_pilot.integrity_checker',
+        NotifierInterface::class => 'oronts_asset_pilot.notifier',
+        DuplicateMergeStrategyInterface::class => 'oronts_asset_pilot.duplicate_merge_strategy',
+    ];
     public function prepend(ContainerBuilder $container): void
     {
         if ($container->hasExtension('pimcore_studio_ui')) {
@@ -95,6 +116,10 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
             $rules[] = $ruleConfig;
         }
         $container->setParameter('oronts_asset_pilot.rules', $rules);
+
+        foreach (self::AUTOCONFIGURED_SEAMS as $interface => $tag) {
+            $container->registerForAutoconfiguration($interface)->addTag($tag);
+        }
 
         $loader = new YamlFileLoader(
             $container,

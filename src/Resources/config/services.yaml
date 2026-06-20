@@ -6,30 +6,17 @@ services:
         bind:
             int $defaultBatchSize: '%oronts_asset_pilot.async.batch_size%'
 
+    # Strategy/filter are keyed by an `alias` tag attribute, so each implementation is tagged
+    # explicitly (below / by the consumer). The interface-only seams (rule_action, health_check,
+    # integrity_checker, notifier, duplicate_merge_strategy, rule_provider) are auto-tagged
+    # container-wide via registerForAutoconfiguration() in OrontsAssetPilotExtension, so a consumer
+    # service implementing one is picked up without touching this file.
     _instanceof:
         Oronts\AssetPilotBundle\Filter\AssetFilterInterface:
             tags: ['oronts_asset_pilot.filter']
 
         Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface:
             tags: ['oronts_asset_pilot.strategy']
-
-        Oronts\AssetPilotBundle\Engine\RuleProviderInterface:
-            tags: ['oronts_asset_pilot.rule_provider']
-
-        Oronts\AssetPilotBundle\Health\HealthCheckInterface:
-            tags: ['oronts_asset_pilot.health_check']
-
-        Oronts\AssetPilotBundle\Action\RuleActionInterface:
-            tags: ['oronts_asset_pilot.rule_action']
-
-        Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface:
-            tags: ['oronts_asset_pilot.integrity_checker']
-
-        Oronts\AssetPilotBundle\Notification\NotifierInterface:
-            tags: ['oronts_asset_pilot.notifier']
-
-        Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface:
-            tags: ['oronts_asset_pilot.duplicate_merge_strategy']
 
     # -- Core services ----------------------------------------------------------
 
