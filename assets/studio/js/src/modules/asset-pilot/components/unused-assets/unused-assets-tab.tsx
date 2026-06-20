@@ -99,6 +99,10 @@ export const UnusedAssetsTab: React.FC = () => {
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button onClick={() => assetPilotApi.exportUnused(filters)} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
+      </div>
+
       {stats != null && (
         <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <StatBox label={t('asset-pilot.unused.total-unused')} value={String(stats.totalCount)} />
@@ -169,6 +173,11 @@ export const UnusedAssetsTab: React.FC = () => {
         )}
     </div>
   )
+}
+
+const exportBtnStyle: React.CSSProperties = {
+  padding: '5px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff',
+  cursor: 'pointer', fontSize: 12, fontWeight: 500,
 }
 
 const StatBox: React.FC<{ label: string; value: string }> = ({ label, value }) => (

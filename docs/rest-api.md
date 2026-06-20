@@ -27,7 +27,6 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | Method | Endpoint | Permission | Description |
 |--------|----------|------------|-------------|
 | `POST` | `/organize` | Operate | Organize a single object |
-| `POST` | `/organize/preview` | View | Dry-run preview |
 | `POST` | `/organize/explain` | View | Detailed rule evaluation per asset |
 | `POST` | `/organize/bulk` | Operate | Bulk organize by class or IDs |
 | `POST` | `/operations/bulk-preview` | View | Paginated bulk preview |
@@ -128,10 +127,8 @@ Or with explicit IDs:
 
 | Method | Endpoint | Permission | Description |
 |--------|----------|------------|-------------|
-| `GET` | `/assets/search` | View | Search assets (params: `q`, `type`, `folder`, `objectId`, `page`, `limit`, `sort`, `order`) |
-| `GET` | `/assets/by-object/{objectId}` | View | Assets linked to a DataObject via dependencies (params: `page`, `limit`, `type`) |
+| `GET` | `/assets/search` | View | Search assets (params: `q`, `type`, `folder`, `objectId`, `extension`, `referenced`, `page`, `limit`, `sort`, `order`) |
 | `GET` | `/assets/tags` | View | List all available Pimcore tags |
-| `GET` | `/assets/{id}/tags` | View | Get tags for a specific asset |
 | `POST` | `/assets/{id}/lock` | Operate | Lock asset from organization |
 | `DELETE` | `/assets/{id}/lock` | Operate | Unlock asset |
 | `POST` | `/assets/bulk-tag` | Operate | Bulk assign tags to assets |
@@ -220,16 +217,5 @@ The 30/90-day cutoffs are defaults; tune them via `confidence.recently_uploaded_
 | Method | Endpoint | Permission | Description |
 |--------|----------|------------|-------------|
 | `GET` | `/audit` | View | Paginated audit entries (params: `page`, `limit`, `class`, `status`, `ruleName`, `sort`, `order`) |
-| `GET` | `/audit/stats` | View | Audit statistics |
 | `GET` | `/audit/export` | View | Export as CSV (params: `class`, `status`, `ruleName`) |
-| `GET` | `/audit/by-rule/{ruleName}/assets` | View | Distinct assets moved by a rule (params: `page`, `limit`, `since`, `class`) |
 | `POST` | `/audit/{id}/revert` | Admin | Revert a completed operation |
-
-#### Assets by rule parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `since` | `string` | Only include moves after this date (ISO format, e.g., `2026-02-01`) |
-| `class` | `string` | Filter by object class name |
-| `page` | `int` | Page number (default: 1) |
-| `limit` | `int` | Items per page (default: 50) |

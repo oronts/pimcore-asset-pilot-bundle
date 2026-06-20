@@ -22,7 +22,4 @@ interface RuleEngineInterface
 
     /** @return Rule[] */
     public function getRules(): array;
-
-    /** @return Rule[] */
-    public function findRulesForClass(string $className): array;
 }

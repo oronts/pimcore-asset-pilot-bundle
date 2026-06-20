@@ -119,24 +119,6 @@ class AssetManagementController
         }
     }
 
-    #[Route('/assets/by-object/{objectId}', name: 'oronts_asset_pilot_assets_by_object', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function assetsByObject(int $objectId, Request $request): JsonResponse
-    {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
-        $type = $request->query->get('type');
-
-        return new JsonResponse($this->searchService->findByObject(
-            $objectId,
-            $page,
-            $limit,
-            $type,
-            $request->query->get('sort'),
-            $request->query->get('order'),
-        ));
-    }
-
     #[Route('/assets/search', name: 'oronts_asset_pilot_assets_search', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
     public function search(Request $request): JsonResponse
@@ -178,21 +160,6 @@ class AssetManagementController
             return new JsonResponse($tags);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to load tags: {error}', ['error' => $e->getMessage()]);
-
-            return new JsonResponse([]);
-        }
-    }
-
-    #[Route('/assets/{id}/tags', name: 'oronts_asset_pilot_asset_tags', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function assetTags(int $id): JsonResponse
-    {
-        try {
-            $tags = array_map($this->serializeTag(...), Tag::getTagsForElement('asset', $id));
-
-            return new JsonResponse($tags);
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: failed to get asset tags: {error}', ['error' => $e->getMessage()]);
 
             return new JsonResponse([]);
         }

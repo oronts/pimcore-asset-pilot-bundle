@@ -15,9 +15,4 @@ readonly class HealResult
         public ?string $reason = null,
         public bool $dryRun = false,
     ) {}
-
-    public function isHealed(): bool
-    {
-        return $this->outcome === HealOutcome::Healed;
-    }
 }

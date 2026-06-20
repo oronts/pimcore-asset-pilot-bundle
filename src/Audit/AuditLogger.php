@@ -9,7 +9,6 @@ use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
-use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
 
@@ -375,70 +374,6 @@ class AuditLogger implements AuditLoggerInterface
         }
 
         return array_values($breakdown);
-    }
-
-    /**
-     * @return array{items: array, total: int, page: int, pages: int}
-     */
-    public function getDistinctAssetsByRule(string $ruleName, int $page = 1, int $limit = 50, array $filters = []): array
-    {
-        $offset = ($page - 1) * $limit;
-
-        try {
-            $qb = $this->connection->createQueryBuilder()
-                ->select('al.asset_id, MAX(al.asset_path_to) as last_path, MAX(al.created_at) as last_moved')
-                ->addSelect('a.path, a.filename, a.type, a.mimetype, a.modificationDate as modified_at')
-                ->from(self::TABLE_NAME, 'al')
-                ->innerJoin('al', PimcoreSchema::TABLE_ASSETS, 'a', 'al.asset_id = a.id')
-                ->where('al.rule_name = :rule')
-                ->andWhere('al.status = :status')
-                ->setParameter('rule', $ruleName)
-                ->setParameter('status', OperationStatus::Completed->value)
-                ->groupBy('al.asset_id, a.path, a.filename, a.type, a.mimetype, a.modificationDate')
-                ->orderBy('last_moved', 'DESC')
-                ->setFirstResult($offset)
-                ->setMaxResults($limit);
-
-            $countQb = $this->connection->createQueryBuilder()
-                ->select('COUNT(DISTINCT al.asset_id) as total')
-                ->from(self::TABLE_NAME, 'al')
-                ->where('al.rule_name = :rule')
-                ->andWhere('al.status = :status')
-                ->setParameter('rule', $ruleName)
-                ->setParameter('status', OperationStatus::Completed->value);
-
-            if (!empty($filters['since'])) {
-                $qb->andWhere('al.created_at >= :since')->setParameter('since', $filters['since']);
-                $countQb->andWhere('al.created_at >= :since')->setParameter('since', $filters['since']);
-            }
-
-            if (!empty($filters['object_class'])) {
-                $qb->andWhere('al.object_class = :class')->setParameter('class', $filters['object_class']);
-                $countQb->andWhere('al.object_class = :class')->setParameter('class', $filters['object_class']);
-            }
-
-            $total = (int) $countQb->executeQuery()->fetchOne();
-            $items = $qb->executeQuery()->fetchAllAssociative();
-
-            foreach ($items as &$item) {
-                $item['id'] = (int) $item['asset_id'];
-                $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
-                $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
-            }
-
-            return [
-                'items' => $items,
-                'total' => $total,
-                'page' => $page,
-                'pages' => $limit > 0 ? (int) ceil($total / $limit) : 0,
-            ];
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: failed to get assets by rule: {error}', [
-                'error' => $e->getMessage(),
-            ]);
-
-            return ['items' => [], 'total' => 0, 'page' => $page, 'pages' => 0];
-        }
     }
 
     public function getDistinctFailedObjects(array $filters = [], int $limit = 100): array

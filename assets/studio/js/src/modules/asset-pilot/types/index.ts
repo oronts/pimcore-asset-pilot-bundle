@@ -101,11 +101,6 @@ export interface AuditFilters {
   order?: 'asc' | 'desc'
 }
 
-export interface PreviewResponse {
-  objectId: number
-  operations: MoveOperation[]
-}
-
 export interface BulkPreviewObject {
   id: number
   key: string

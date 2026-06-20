@@ -231,15 +231,6 @@ class RuleEngine implements RuleEngineInterface
         return $this->sortedRules;
     }
 
-    /** @return Rule[] */
-    public function findRulesForClass(string $className): array
-    {
-        return array_values(array_filter(
-            $this->sortedRules,
-            static fn (Rule $rule): bool => $rule->enabled && ($rule->class === '*' || $rule->class === $className),
-        ));
-    }
-
     protected function matchesClass(Rule $rule, AbstractObject $object): bool
     {
         if ($rule->class === '*') {

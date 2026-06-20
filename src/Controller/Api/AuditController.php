@@ -58,13 +58,6 @@ class AuditController
         return new JsonResponse($result);
     }
 
-    #[Route('/audit/stats', name: 'oronts_asset_pilot_audit_stats', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function stats(): JsonResponse
-    {
-        return new JsonResponse($this->auditLogger->getStats());
-    }
-
     #[Route('/audit/export', name: 'oronts_asset_pilot_audit_export', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
     public function export(Request $request): StreamedResponse
@@ -99,23 +92,6 @@ class AuditController
             ['ID', 'Asset ID', 'From', 'To', 'Object ID', 'Class', 'Rule', 'Trigger', 'Status', 'Duration (ms)', 'Error', 'Date'],
             $rows,
         );
-    }
-
-    #[Route('/audit/by-rule/{ruleName}/assets', name: 'oronts_asset_pilot_audit_rule_assets', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function assetsByRule(string $ruleName, Request $request): JsonResponse
-    {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
-
-        $filters = array_filter([
-            'since' => $request->query->get('since'),
-            'object_class' => $request->query->get('class'),
-        ]);
-
-        $result = $this->auditLogger->getDistinctAssetsByRule($ruleName, $page, $limit, $filters);
-
-        return new JsonResponse($result);
     }
 
     #[Route('/audit/{id}/revert', name: 'oronts_asset_pilot_audit_revert', methods: ['POST'])]

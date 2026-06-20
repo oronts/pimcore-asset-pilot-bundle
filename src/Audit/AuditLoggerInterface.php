@@ -54,12 +54,6 @@ interface AuditLoggerInterface
     public function getDistinctFailedObjects(array $filters = [], int $limit = 100): array;
 
     /**
-     * @param array<string, mixed> $filters
-     * @return array{items: array<int, array<string, mixed>>, total: int, page: int, pages: int}
-     */
-    public function getDistinctAssetsByRule(string $ruleName, int $page = 1, int $limit = 50, array $filters = []): array;
-
-    /**
      * Keyset-paginated export cursor: yields rows newest-first in bounded pages (memory stays flat).
      *
      * @param array<string, mixed> $filters

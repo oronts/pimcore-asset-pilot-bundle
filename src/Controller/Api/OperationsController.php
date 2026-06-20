@@ -208,30 +208,6 @@ class OperationsController
         ]);
     }
 
-    #[Route('/organize/preview', name: 'oronts_asset_pilot_organize_preview', methods: ['POST'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function preview(Request $request): JsonResponse
-    {
-        $resolved = $this->resolveObjectFromBody($request);
-        if ($resolved instanceof JsonResponse) {
-            return $resolved;
-        }
-        [$object] = $resolved;
-
-        $operations = $this->organizer->dryRun($object, TriggerType::Api);
-
-        return new JsonResponse([
-            'objectId' => $object->getId(),
-            'operations' => array_map(static fn ($op) => [
-                'assetId' => $op->assetId,
-                'sourcePath' => $op->sourcePath,
-                'targetPath' => $op->targetPath,
-                'ruleName' => $op->ruleName,
-                'objectClass' => $op->objectClass,
-            ], $operations),
-        ]);
-    }
-
     #[Route('/organize/bulk', name: 'oronts_asset_pilot_organize_bulk', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function organizeBulk(Request $request): JsonResponse

@@ -348,21 +348,6 @@ class RuleEngineTest extends TestCase
         self::assertSame('de_DE', $matches[0]->locale);
     }
 
-    #[Test]
-    public function findRulesForClassReturnsMatchingEnabledRules(): void
-    {
-        $r1 = $this->createRule('product-rule', 'Product', 10);
-        $r2 = $this->createRule('category-rule', 'Category', 20);
-        $r3 = $this->createRule('disabled', 'Product', 5, enabled: false);
-        $r4 = $this->createRule('wildcard', '*', 1);
-
-        $engine = $this->createEngine([$r1, $r2, $r3, $r4]);
-
-        $result = $engine->findRulesForClass('Product');
-        self::assertCount(2, $result);
-        self::assertSame('product-rule', $result[0]->name);
-        self::assertSame('wildcard', $result[1]->name);
-    }
 
     #[Test]
     public function parsesArrayConfigToRules(): void

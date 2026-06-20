@@ -54,48 +54,6 @@ class AssetSearchService implements AssetSearchServiceInterface
     }
 
     /**
-     * @return array{items: array, total: int, page: int, pages: int}
-     */
-    public function findByObject(int $objectId, int $page = 1, int $limit = 50, ?string $type = null, ?string $sort = null, ?string $order = null): array
-    {
-        $offset = ($page - 1) * $limit;
-        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
-
-        try {
-            $depFilter = $this->objectDependencyFilter();
-
-            $qb = $this->createBaseQuery()
-                ->andWhere($depFilter)
-                ->setParameter('objId', $objectId)
-                ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
-                ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET)
-                ->orderBy($sortColumn, $sortDir)
-                ->setFirstResult($offset)
-                ->setMaxResults($limit);
-
-            $countQb = $this->createCountQuery()
-                ->andWhere($depFilter)
-                ->setParameter('objId', $objectId)
-                ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
-                ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET);
-
-            if (!empty($type)) {
-                $qb->andWhere('a.type = :type')->setParameter('type', $type);
-                $countQb->andWhere('a.type = :type')->setParameter('type', $type);
-            }
-
-            $total = (int) $countQb->executeQuery()->fetchOne();
-            $items = $this->hydrateItems($qb->executeQuery()->fetchAllAssociative());
-
-            return $this->paginatedResponse($items, $total, $page, $limit);
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: assets-by-object failed: {error}', ['error' => $e->getMessage()]);
-
-            return $this->paginatedResponse([], 0, $page, $limit);
-        }
-    }
-
-    /**
      * Summarize specific assets by id (filename, path, type, size, locked), keyed by id, for enriching
      * id-only listings such as the duplicate report. Folders are excluded by the base query and unknown
      * ids are simply absent from the result.

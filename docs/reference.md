@@ -106,16 +106,16 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 | GET | `/folders/empty`, `/storage/trends` | View |
 | POST | `/folders/empty/delete` | Operate |
 | POST | `/organize`, `/organize/bulk` | Operate |
-| POST | `/organize/preview`, `/organize/explain`, `/operations/bulk-preview` | View |
+| POST | `/organize/explain`, `/operations/bulk-preview` | View |
 | POST | `/operations/replay` | Operate |
 | GET | `/operations/status` | View |
-| GET | `/audit`, `/audit/stats`, `/audit/export`, `/audit/by-rule/{ruleName}/assets` | View |
+| GET | `/audit`, `/audit/export` | View |
 | POST | `/audit/{id}/revert` | Admin |
 | GET | `/unused-assets`, `/unused-assets/stats` | View |
 | POST | `/unused-assets/bulk-delete`, `/unused-assets/bulk-move`, `/unused-assets/bulk-quarantine` | Operate |
 | GET | `/quarantine` | View |
 | POST | `/quarantine/{assetId}/restore` | Operate |
-| GET | `/assets/search`, `/assets/by-object/{objectId}`, `/assets/tags`, `/assets/{id}/tags` | View |
+| GET | `/assets/search`, `/assets/tags` | View |
 | POST | `/assets/bulk-tag`, `/assets/bulk-property` | Operate |
 | POST / DELETE | `/assets/{id}/lock` | Operate |
 

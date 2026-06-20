@@ -10,7 +10,6 @@ import type {
   PaginatedAuditResponse,
   AuditEntry,
   AuditFilters,
-  PreviewResponse,
   ExplainResponse,
   PaginatedUnusedResponse,
   PaginatedAssetResponse,
@@ -116,11 +115,6 @@ export const assetPilotApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  previewOrganize: (objectId: number) =>
-    request<PreviewResponse>('/organize/preview', {
-      method: 'POST',
-      body: JSON.stringify({ objectId }),
-    }),
   organizeBulkPreview: (className: string, page = 1, limit = 50) =>
     request<BulkPreviewResponse>('/operations/bulk-preview', {
       method: 'POST',
@@ -212,17 +206,8 @@ export const assetPilotApi = {
         order: filters.order,
       })}`,
     ),
-  getAssetsByObject: (objectId: number, page = 1, limit = 50, type?: string) =>
-    request<PaginatedAssetResponse>(
-      `/assets/by-object/${objectId}${buildQuery({ page, limit, type })}`,
-    ),
-  getAssetsByRule: (ruleName: string, page = 1, limit = 50, since?: string, className?: string) =>
-    request<PaginatedAssetResponse>(
-      `/audit/by-rule/${encodeURIComponent(ruleName)}/assets${buildQuery({ page, limit, since, class: className })}`,
-    ),
   assetImagePreviewUrl: (id: number): string => `${getPrefix()}/assets/${id}/image/stream/preview`,
   getAvailableTags: () => request<TagItem[]>('/assets/tags'),
-  getAssetTags: (assetId: number) => request<TagItem[]>(`/assets/${assetId}/tags`),
   bulkTagAssets: (assetIds: number[], tagIds: number[], replace = false) =>
     request<BulkActionResult>('/assets/bulk-tag', {
       method: 'POST',
