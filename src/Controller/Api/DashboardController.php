@@ -7,7 +7,6 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
-use Pimcore\Bundle\StudioBackendBundle\Security\Service\SecurityServiceInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -19,7 +18,6 @@ class DashboardController
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly LoggerInterface $logger,
-        protected readonly SecurityServiceInterface $securityService,
     ) {}
 
     #[Route('/dashboard', name: 'oronts_asset_pilot_dashboard', methods: ['GET'])]
@@ -69,16 +67,4 @@ class DashboardController
         }
     }
 
-    #[Route('/permissions', name: 'oronts_asset_pilot_permissions', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function permissions(): JsonResponse
-    {
-        $user = $this->securityService->getCurrentUser();
-
-        return new JsonResponse([
-            'view' => $user->isAllowed(AssetPilotPermission::View->value),
-            'operate' => $user->isAllowed(AssetPilotPermission::Operate->value),
-            'admin' => $user->isAllowed(AssetPilotPermission::Admin->value),
-        ]);
-    }
 }

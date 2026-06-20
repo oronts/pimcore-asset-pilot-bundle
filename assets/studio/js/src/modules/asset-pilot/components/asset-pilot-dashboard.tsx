@@ -13,7 +13,6 @@ import { StorageTrendsTab } from './storage/storage-trends-tab'
 import { EmptyFoldersTab } from './folders/empty-folders-tab'
 import { DriftTab } from './drift/drift-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
-import { PermissionContext, usePermissionsFetch } from '../hooks/use-permissions'
 
 const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'integrity', 'quarantine', 'storage', 'folders', 'drift', 'management'] as const
 type TabKey = typeof tabKeys[number]
@@ -36,24 +35,8 @@ const tabLabelKeys: Record<TabKey, string> = {
 export const AssetPilotDashboard: React.FC = () => {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard')
-  const perms = usePermissionsFetch()
-
-  if (perms.loading) {
-    return <div style={{ padding: 24, color: '#8c8c8c', fontFamily: 'Inter, -apple-system, sans-serif' }}>{t('asset-pilot.common.loading')}</div>
-  }
-
-  if (!perms.view) {
-    return (
-      <div style={{ padding: 48, textAlign: 'center', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>&#128274;</div>
-        <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.permission.denied')}</h3>
-        <p style={{ margin: 0, fontSize: 13, color: '#8c8c8c' }}>{t('asset-pilot.permission.denied-desc')}</p>
-      </div>
-    )
-  }
 
   return (
-    <PermissionContext.Provider value={perms}>
     <ToastProvider>
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
       <div style={{ padding: '16px 24px 0', borderBottom: '1px solid #f0f0f0' }}>
@@ -110,6 +93,5 @@ export const AssetPilotDashboard: React.FC = () => {
       </div>
     </div>
     </ToastProvider>
-    </PermissionContext.Provider>
   )
 }

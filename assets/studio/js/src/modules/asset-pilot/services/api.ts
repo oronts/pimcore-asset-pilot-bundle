@@ -36,8 +36,9 @@ import type {
   EmptyFolderDeleteResult,
   DriftResponse,
 } from '../types'
+import { getPrefix } from '@pimcore/studio-ui-bundle/api'
 
-const BASE_URL = '/pimcore-studio/api/asset-pilot'
+const BASE_URL = `${getPrefix()}/asset-pilot`
 
 export class ApiError extends Error {
   constructor(
@@ -51,8 +52,9 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
   })
 
   if (!response.ok) {
@@ -260,10 +262,6 @@ export const assetPilotApi = {
   // Location drift
   getDrift: (className: string, page = 1, limit = 50) =>
     request<DriftResponse>(`/rules/drift${buildQuery({ class: className, page, limit })}`),
-
-  // Permissions
-  getPermissions: () =>
-    request<{ view: boolean; operate: boolean; admin: boolean }>('/permissions'),
 
   // Lock / Unlock
   lockAsset: (id: number) =>

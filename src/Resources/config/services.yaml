@@ -401,8 +401,6 @@ services:
         tags: ['controller.service_arguments']
 
     Oronts\AssetPilotBundle\Controller\Api\DashboardController:
-        arguments:
-            $securityService: '@Pimcore\Bundle\StudioBackendBundle\Security\Service\SecurityServiceInterface'
         tags: ['controller.service_arguments']
 
     Oronts\AssetPilotBundle\Service\AssetSearchService:

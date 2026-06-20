@@ -20,6 +20,7 @@ export const AssetPilotModule: AbstractModule = {
       label: 'Asset Pilot',
       order: 500,
       className: 'item-style-modifier',
+      permission: 'asset_pilot_view',
       widgetConfig: {
         name: 'Asset Pilot',
         id: 'asset-pilot-dashboard',
