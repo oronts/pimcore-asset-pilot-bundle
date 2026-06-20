@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
@@ -91,6 +92,42 @@ class AssetSearchService implements AssetSearchServiceInterface
             $this->logger->error('Asset Pilot: assets-by-object failed: {error}', ['error' => $e->getMessage()]);
 
             return $this->paginatedResponse([], 0, $page, $limit);
+        }
+    }
+
+    /**
+     * Summarize specific assets by id (filename, path, type, size, locked), keyed by id, for enriching
+     * id-only listings such as the duplicate report. Folders are excluded by the base query and unknown
+     * ids are simply absent from the result.
+     *
+     * @param list<int> $ids
+     * @return array<int, array<string, mixed>>
+     */
+    public function summarize(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        try {
+            $rows = $this->hydrateItems(
+                $this->createBaseQuery()
+                    ->andWhere('a.id IN (:ids)')
+                    ->setParameter('ids', $ids, ArrayParameterType::INTEGER)
+                    ->executeQuery()
+                    ->fetchAllAssociative(),
+            );
+
+            $byId = [];
+            foreach ($rows as $row) {
+                $byId[(int) $row['id']] = $row;
+            }
+
+            return $byId;
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: asset summarize failed: {error}', ['error' => $e->getMessage()]);
+
+            return [];
         }
     }
 

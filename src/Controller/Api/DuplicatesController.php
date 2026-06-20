@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
 use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
 use Psr\Log\LoggerInterface;
@@ -20,6 +21,7 @@ class DuplicatesController
     public function __construct(
         protected readonly DuplicateDetectionService $duplicates,
         protected readonly DuplicateMergeService $merge,
+        protected readonly AssetSearchServiceInterface $assets,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -36,14 +38,29 @@ class DuplicatesController
 
         try {
             $groups = $this->duplicates->findDuplicates($page, $limit);
+            $reps = $this->assets->summarize(array_values(array_filter(
+                array_map(static fn ($group): ?int => $group->assetIds[0] ?? null, $groups),
+            )));
 
             return new JsonResponse([
-                'items' => array_map(static fn ($group): array => [
-                    'checksum' => $group->checksum,
-                    'fileSize' => $group->fileSize,
-                    'count' => $group->count,
-                    'assetIds' => $group->assetIds,
-                ], $groups),
+                'items' => array_map(static function ($group) use ($reps): array {
+                    $repId = $group->assetIds[0] ?? null;
+                    $rep = $repId !== null ? ($reps[$repId] ?? null) : null;
+
+                    return [
+                        'checksum' => $group->checksum,
+                        'fileSize' => $group->fileSize,
+                        'count' => $group->count,
+                        'assetIds' => $group->assetIds,
+                        'representative' => $rep === null ? null : [
+                            'id' => (int) $rep['id'],
+                            'filename' => $rep['filename'],
+                            'fullPath' => $rep['full_path'],
+                            'fileSize' => (int) $rep['file_size'],
+                            'type' => $rep['type'],
+                        ],
+                    ];
+                }, $groups),
                 'total' => $this->duplicates->countDuplicateGroups(),
                 'page' => $page,
                 'limit' => $limit,
