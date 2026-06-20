@@ -20,7 +20,10 @@ export const DuplicatesFilters: React.FC<Props> = ({ filters, onChange }) => {
           type="number"
           min={2}
           value={filters.minCopies ?? ''}
-          onChange={e => onChange({ ...filters, minCopies: e.target.value !== '' ? Math.max(2, Number(e.target.value)) : undefined })}
+          onChange={e => {
+            const n = Number(e.target.value)
+            onChange({ ...filters, minCopies: e.target.value !== '' && Number.isFinite(n) ? Math.max(2, n) : undefined })
+          }}
           style={{ ...inputStyle, width: 90 }}
         />
       </Field>

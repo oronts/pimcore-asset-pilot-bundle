@@ -44,13 +44,6 @@ export const QuarantineTab: React.FC = () => {
     }
   }
 
-  if (error != null) return (
-    <div>
-      <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
-      <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
-    </div>
-  )
-
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -60,11 +53,18 @@ export const QuarantineTab: React.FC = () => {
 
       <QuarantineFiltersBar filters={filters} onChange={onFilters} />
 
-      {loading
-        ? <TableSkeleton rows={4} columns={4} />
-        : data == null || data.items.length === 0
-          ? <EmptyState variant="no-data" title={t('asset-pilot.quarantine.empty')} description={t('asset-pilot.quarantine.empty-desc')} />
-          : (
+      {error != null
+        ? (
+          <div>
+            <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+            <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
+          </div>
+        )
+        : loading
+          ? <TableSkeleton rows={4} columns={4} />
+          : data == null || data.items.length === 0
+            ? <EmptyState variant="no-data" title={t('asset-pilot.quarantine.empty')} description={t('asset-pilot.quarantine.empty-desc')} />
+            : (
             <>
               <ResponsiveTableWrapper>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>

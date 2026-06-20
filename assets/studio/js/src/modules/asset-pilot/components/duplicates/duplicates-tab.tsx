@@ -26,13 +26,6 @@ export const DuplicatesTab: React.FC = () => {
 
   const onFilters = (next: DuplicateFilters): void => { setFilters(next); setPage(1) }
 
-  if (error != null) return (
-    <div>
-      <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
-      <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
-    </div>
-  )
-
   const pages = data != null ? Math.max(1, Math.ceil(data.total / LIMIT)) : 1
 
   return (
@@ -45,11 +38,18 @@ export const DuplicatesTab: React.FC = () => {
 
       <DuplicatesFilters filters={filters} onChange={onFilters} />
 
-      {loading
-        ? <TableSkeleton rows={4} columns={5} />
-        : data == null || data.items.length === 0
-          ? <EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />
-          : (
+      {error != null
+        ? (
+          <div>
+            <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+            <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
+          </div>
+        )
+        : loading
+          ? <TableSkeleton rows={4} columns={5} />
+          : data == null || data.items.length === 0
+            ? <EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />
+            : (
             <>
               <ResponsiveTableWrapper>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
