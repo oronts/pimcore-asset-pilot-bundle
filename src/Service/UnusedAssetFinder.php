@@ -226,36 +226,9 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
         foreach ($assetIds as $id) {
             try {
-                $asset = $this->loadAsset($id);
+                [$asset, $error] = $this->guardMutation($id, 'delete', 'delete');
                 if ($asset === null) {
-                    $errors[$id] = 'Asset not found';
-                    $failed++;
-                    continue;
-                }
-
-                if ($asset instanceof Asset\Folder) {
-                    $errors[$id] = 'Cannot delete folders';
-                    $failed++;
-                    continue;
-                }
-
-                // Per-asset Pimcore workspace ACL (defence in depth over the flat operate permission).
-                // isAllowed() resolves the current user itself and returns true on CLI.
-                if (!$asset->isAllowed('delete')) {
-                    $errors[$id] = 'Not permitted to delete this asset';
-                    $failed++;
-                    continue;
-                }
-
-                // Verify it's actually unused (race condition safety)
-                if ($this->isReferenced($id)) {
-                    $errors[$id] = 'Asset is now referenced by an object';
-                    $failed++;
-                    continue;
-                }
-
-                if ($this->isReferencedInContent($asset)) {
-                    $errors[$id] = 'Asset is referenced in object content (text/WYSIWYG)';
+                    $errors[$id] = (string) $error;
                     $failed++;
                     continue;
                 }
@@ -307,36 +280,9 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
         foreach ($assetIds as $id) {
             try {
-                $asset = $this->loadAsset($id);
+                [$asset, $error] = $this->guardMutation($id, 'publish', 'move');
                 if ($asset === null) {
-                    $errors[$id] = 'Asset not found';
-                    $failed++;
-                    continue;
-                }
-
-                if ($asset instanceof Asset\Folder) {
-                    $errors[$id] = 'Cannot move folders';
-                    $failed++;
-                    continue;
-                }
-
-                if (!$asset->isAllowed('publish')) {
-                    $errors[$id] = 'Not permitted to move this asset';
-                    $failed++;
-                    continue;
-                }
-
-                // Re-verify it is still unused (it may have been referenced since the listing),
-                // mirroring deleteAssets — both are destructive paths and must recheck state.
-                if ($this->isReferenced($id)) {
-                    $errors[$id] = 'Asset is now referenced by an object';
-                    $failed++;
-                    continue;
-                }
-
-                // Moving changes the path, which would break a hard-coded path reference in content.
-                if ($this->isReferencedInContent($asset)) {
-                    $errors[$id] = 'Asset is referenced in object content (text/WYSIWYG)';
+                    $errors[$id] = (string) $error;
                     $failed++;
                     continue;
                 }
@@ -388,6 +334,47 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
     private function isReferencedInContent(Asset $asset): bool
     {
         return $this->contentScanner?->isReferencedInContent($asset) === true;
+    }
+
+    /**
+     * Shared pre-mutation guard for the destructive unused-asset paths. Both delete and move must
+     * re-verify the same state (exists, not a folder, per-asset workspace ACL, still unreferenced,
+     * not referenced in object content) so a single source keeps them from drifting. Returns the
+     * loaded asset when it is safe to act on, or an error string to record against the id.
+     *
+     * @param 'delete'|'publish' $aclPermission Pimcore workspace ACL checked for the current user
+     * @param 'delete'|'move'    $verb          used only for the human-readable error messages
+     *
+     * @return array{0: ?Asset, 1: ?string} [asset, null] when permitted, [null, error] otherwise
+     */
+    protected function guardMutation(int $id, string $aclPermission, string $verb): array
+    {
+        $asset = $this->loadAsset($id);
+        if ($asset === null) {
+            return [null, 'Asset not found'];
+        }
+
+        if ($asset instanceof Asset\Folder) {
+            return [null, sprintf('Cannot %s folders', $verb)];
+        }
+
+        // Per-asset Pimcore workspace ACL (defence in depth over the flat operate permission).
+        // isAllowed() resolves the current user itself and returns true on CLI.
+        if (!$asset->isAllowed($aclPermission)) {
+            return [null, sprintf('Not permitted to %s this asset', $verb)];
+        }
+
+        // Race-condition safety: it may have been referenced since the listing. Moving also changes
+        // the path, which would break a hard-coded path reference in object content.
+        if ($this->isReferenced($id)) {
+            return [null, 'Asset is now referenced by an object'];
+        }
+
+        if ($this->isReferencedInContent($asset)) {
+            return [null, 'Asset is referenced in object content (text/WYSIWYG)'];
+        }
+
+        return [$asset, null];
     }
 
     public function isReferenced(int $assetId): bool
