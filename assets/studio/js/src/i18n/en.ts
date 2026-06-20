@@ -30,6 +30,8 @@ export const en: Record<string, string> = {
   'asset-pilot.common.export-csv': 'Export CSV',
   'asset-pilot.common.type': 'Type',
   'asset-pilot.common.all-types': 'All Types',
+  'asset-pilot.common.per-page': '{{count}} / page',
+  'asset-pilot.common.per-page-label': 'Rows per page',
   'asset-pilot.common.showing': 'Showing {{count}} of {{total}}',
   'asset-pilot.common.page-info': 'page {{page}}/{{pages}}',
   'asset-pilot.common.no-data': 'No data available',

@@ -112,6 +112,8 @@ export const UnusedAssetsTab: React.FC = () => {
         loading={loading}
         error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
         onPage={goToPage}
+        limit={filters.limit}
+        onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
         tableId="unused"
         selection={{ selected, allSelected, toggleSelect, toggleAll }}
         sort={{ field: sortField, direction: sortDirection, onToggle: toggleSort }}

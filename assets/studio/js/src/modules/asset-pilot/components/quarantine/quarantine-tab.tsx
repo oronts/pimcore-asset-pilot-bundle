@@ -15,15 +15,14 @@ import { OpenButton } from '../shared/open-button'
 import { formatDate } from '../../utils/format'
 import { QuarantineFiltersBar } from './quarantine-filters'
 
-const LIMIT = 50
-
 export const QuarantineTab: React.FC = () => {
   const { t } = useTranslation()
   const perms = usePermissions()
   const toast = useToast()
   const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(50)
   const [filters, setFilters] = useState<QuarantineFilters>({})
-  const { data, loading, error, refetch } = useQuarantine(page, LIMIT, filters)
+  const { data, loading, error, refetch } = useQuarantine(page, limit, filters)
   const [restoring, setRestoring] = useState<QuarantineItem | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -93,7 +92,7 @@ export const QuarantineTab: React.FC = () => {
                 </table>
               </ResponsiveTableWrapper>
 
-              <Pagination page={data.page} pages={data.pages} onPage={setPage} />
+              <Pagination page={data.page} pages={data.pages} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
             </>
           )}
 

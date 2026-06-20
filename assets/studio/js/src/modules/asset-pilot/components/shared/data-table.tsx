@@ -36,12 +36,14 @@ interface DataTableProps<T extends { id: number }> {
   sort?: { field: string | null; direction: SortDirection; onToggle: (field: string) => void }
   minWidth?: number
   skeletonRows?: number
+  limit?: number
+  onLimit?: (limit: number) => void
 }
 
 const CHECKBOX = '__checkbox'
 
 export function DataTable<T extends { id: number }>({
-  columns, data, loading, error, onPage, tableId, empty, summary, selection, sort, minWidth = 700, skeletonRows = 5,
+  columns, data, loading, error, onPage, tableId, empty, summary, selection, sort, minWidth = 700, skeletonRows = 5, limit, onLimit,
 }: DataTableProps<T>): React.ReactElement {
   const [containerRef, containerWidth] = useContainerWidth()
 
@@ -93,7 +95,7 @@ export function DataTable<T extends { id: number }>({
             </ResponsiveTableWrapper>
           )}
 
-          <Pagination page={data.page} pages={data.pages} onPage={onPage} />
+          <Pagination page={data.page} pages={data.pages} onPage={onPage} limit={limit} onLimit={onLimit} />
         </>
       )}
     </div>

@@ -8,14 +8,13 @@ import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { OpenButton } from '../shared/open-button'
 
-const LIMIT = 50
-
 export const DriftTab: React.FC = () => {
   const { t } = useTranslation()
   const { data: rules } = useRules()
   const [selectedClass, setSelectedClass] = useState<string>('')
   const [page, setPage] = useState(1)
-  const { data, loading, error } = useDrift(selectedClass || null, page)
+  const [limit, setLimit] = useState(50)
+  const { data, loading, error } = useDrift(selectedClass || null, page, limit)
 
   const classes = useMemo(
     () => Array.from(new Set((rules ?? []).map(r => r.class))).sort(),
@@ -28,7 +27,7 @@ export const DriftTab: React.FC = () => {
   }
 
   // Page off objectsScanned, not the filtered drift rows, or later pages get skipped.
-  const hasNext = (data?.objectsScanned ?? 0) >= LIMIT
+  const hasNext = (data?.objectsScanned ?? 0) >= limit
 
   return (
     <div>
@@ -87,7 +86,7 @@ export const DriftTab: React.FC = () => {
                     </table>
                   </ResponsiveTableWrapper>
                 )}
-              <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} />
+              <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
             </>
           )
       )}

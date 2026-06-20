@@ -12,14 +12,13 @@ import { ExpandablePath } from '../shared/expandable-path'
 import { ConfirmDialog } from '../shared/confirm-dialog'
 import { OpenButton } from '../shared/open-button'
 
-const LIMIT = 50
-
 export const EmptyFoldersTab: React.FC = () => {
   const { t } = useTranslation()
   const perms = usePermissions()
   const toast = useToast()
   const [page, setPage] = useState(1)
-  const { data, loading, error, refetch } = useEmptyFolders(page, LIMIT)
+  const [limit, setLimit] = useState(50)
+  const { data, loading, error, refetch } = useEmptyFolders(page, limit)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -100,7 +99,7 @@ export const EmptyFoldersTab: React.FC = () => {
           </ResponsiveTableWrapper>
         )}
 
-      <Pagination page={data.page} pages={Math.max(1, data.items.length < LIMIT ? page : page + 1)} onPage={setPage} />
+      <Pagination page={data.page} pages={Math.max(1, data.items.length < limit ? page : page + 1)} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
 
       {confirming && (
         <ConfirmDialog

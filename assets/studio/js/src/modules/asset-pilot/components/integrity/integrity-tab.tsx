@@ -13,14 +13,13 @@ import { ConfirmDialog } from '../shared/confirm-dialog'
 import { OpenButton } from '../shared/open-button'
 import { HealModal } from './heal-modal'
 
-const LIMIT = 25
-
 export const IntegrityTab: React.FC = () => {
   const { t } = useTranslation()
   const perms = usePermissions()
   const toast = useToast()
   const [page, setPage] = useState(1)
-  const { data, loading, error, refetch } = useBrokenAssets(page, LIMIT)
+  const [limit, setLimit] = useState(25)
+  const { data, loading, error, refetch } = useBrokenAssets(page, limit)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [healing, setHealing] = useState(false)
   const [undoing, setUndoing] = useState<number | null>(null)
@@ -37,7 +36,7 @@ export const IntegrityTab: React.FC = () => {
   if (data == null) return null
 
   // Page off the scanned-source count, not the filtered broken rows, or later pages get skipped.
-  const hasNext = data.scanned >= LIMIT
+  const hasNext = data.scanned >= limit
   if (data.items.length === 0 && page === 1 && !hasNext) {
     return <EmptyState variant="no-data" title={t('asset-pilot.integrity.empty')} description={t('asset-pilot.integrity.empty-desc')} />
   }
@@ -110,7 +109,7 @@ export const IntegrityTab: React.FC = () => {
           </ResponsiveTableWrapper>
         )}
 
-      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} />
+      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
 
       {healing && (
         <HealModal

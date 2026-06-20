@@ -113,9 +113,9 @@ export function useEmptyFolders(page: number, limit: number): AsyncState<EmptyFo
   return useAsyncData(() => assetPilotApi.getEmptyFolders(page, limit), [page, limit])
 }
 
-export function useDrift(className: string | null, page: number): AsyncState<DriftResponse> {
+export function useDrift(className: string | null, page: number, limit = 50): AsyncState<DriftResponse> {
   return useAsyncData(
-    () => className != null && className !== '' ? assetPilotApi.getDrift(className, page) : Promise.reject(new Error('No class selected')),
-    [className, page],
+    () => className != null && className !== '' ? assetPilotApi.getDrift(className, page, limit) : Promise.reject(new Error('No class selected')),
+    [className, page, limit],
   )
 }

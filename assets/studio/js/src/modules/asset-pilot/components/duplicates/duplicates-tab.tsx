@@ -13,20 +13,19 @@ import { formatBytes, truncate } from '../../utils/format'
 import { MergeModal } from './merge-modal'
 import { DuplicatesFilters } from './duplicates-filters'
 
-const LIMIT = 50
-
 export const DuplicatesTab: React.FC = () => {
   const { t } = useTranslation()
   const perms = usePermissions()
   const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(50)
   const [filters, setFilters] = useState<DuplicateFilters>({})
-  const { data, loading, error, refetch } = useDuplicates(page, LIMIT, filters)
+  const { data, loading, error, refetch } = useDuplicates(page, limit, filters)
   const strategies = useMergeStrategies()
   const [selected, setSelected] = useState<DuplicateGroup | null>(null)
 
   const onFilters = (next: DuplicateFilters): void => { setFilters(next); setPage(1) }
 
-  const pages = data != null ? Math.max(1, Math.ceil(data.total / LIMIT)) : 1
+  const pages = data != null ? Math.max(1, Math.ceil(data.total / limit)) : 1
 
   return (
     <div>
@@ -84,7 +83,7 @@ export const DuplicatesTab: React.FC = () => {
                 </table>
               </ResponsiveTableWrapper>
 
-              <Pagination page={data.page} pages={pages} onPage={setPage} />
+              <Pagination page={data.page} pages={pages} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
             </>
           )}
 
