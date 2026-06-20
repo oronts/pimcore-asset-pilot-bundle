@@ -30,6 +30,16 @@ This creates:
   `asset_pilot_checksum`, and `asset_pilot_storage_snapshot` (with their indexes)
 - Three Pimcore permissions: `asset_pilot_view`, `asset_pilot_operate`, `asset_pilot_admin`
 
+Then clear the Pimcore data cache so Studio recognises the new permissions:
+
+```bash
+bin/console pimcore:cache:clear
+```
+
+Studio caches the set of known permission keys (`USER_PERMISSIONS`); until this runs, the
+`asset_pilot_*` permissions are unknown and every endpoint returns 403. Symfony's `cache:clear` does
+not clear the Pimcore data cache, so use the `pimcore:` command above.
+
 The bundle has no Doctrine migrations; the installer owns its schema and is **idempotent** (it creates
 a table when absent and otherwise adds only missing columns/indexes, never dropping data). When you
 upgrade to a bundle version that adds a table or column, re-run the same command to pick it up:

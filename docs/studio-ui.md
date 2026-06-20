@@ -2,7 +2,10 @@
 
 # Studio UI
 
-Asset Pilot integrates into Pimcore Studio as a Module Federation remote. The UI provides six tabs:
+Asset Pilot integrates into Pimcore Studio as a Module Federation remote, registered under
+Experience & E-commerce → Asset Pilot. It has a tab per feature (Dashboard, Rules, Operations, Audit
+Log, Unused Assets, Duplicates, Integrity, Quarantine, Storage, Empty Folders, Drift, Asset
+Management). The core tabs:
 
 | Tab | Description |
 |-----|-------------|
@@ -31,3 +34,46 @@ and `confidence.probably_unused_days` (see [Configuration](configuration.md)).
 ### Localization
 
 The Studio UI ships with English and German translations. All UI strings use the `asset-pilot.*` i18n namespace.
+
+### Permissions
+
+Asset Pilot uses Pimcore's own permission system, not a custom one:
+
+- The three permissions (`asset_pilot_view` / `asset_pilot_operate` / `asset_pilot_admin`) are
+  registered as Pimcore `Permission\Definition`s by the installer and appear under Settings →
+  Users/Roles (category "Asset Pilot"). Admins are allowed everything automatically.
+- **Menu visibility** is gated by the nav item's `permission: 'asset_pilot_view'` — Studio hides the
+  module for users without it.
+- **Button-level gating** (operate/admin) uses the SDK's `isAllowed()` from `@pimcore/studio-ui-bundle/modules/auth`.
+- **Enforcement** is server-side: every REST endpoint carries `#[IsGranted(AssetPilotPermission::*)]`
+  (read = View, mutating = Operate, revert/merge = Admin).
+
+The frontend calls the API with the studio session cookie (`credentials: 'same-origin'`) over
+`getPrefix()` — no custom token handling.
+
+> After `pimcore:bundle:install`, run `bin/console pimcore:cache:clear`. Studio caches the set of
+> known permission keys (`USER_PERMISSIONS`); without clearing the Pimcore data cache the newly
+> registered `asset_pilot_*` permissions are not recognised and every endpoint returns 403. Symfony's
+> `cache:clear` does not clear the Pimcore data cache.
+
+### Building the frontend
+
+The bundle ships the UI source under `assets/studio` but not the compiled bundle (`public/studio/build`
+is gitignored). Build it against the Studio version your project runs:
+
+```bash
+cd assets/studio
+# set @pimcore/studio-ui-bundle in package.json to match your installed pimcore/studio-ui-bundle
+npm install
+npm run build           # outputs public/studio/build/<id> (entrypoints.json + remoteEntry.js)
+```
+
+Then publish the bundle assets so the web server serves them, and clear caches:
+
+```bash
+bin/console assets:install          # hard-copy (use this; a symlink target outside the web root is not served)
+bin/console cache:clear
+```
+
+The module-registration API is shared across the studio 0.15 / 1.x / 2025.x lines, so the same source
+builds against any of them; only the npm SDK version needs to match the runtime.
