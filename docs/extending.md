@@ -329,6 +329,51 @@ class TenantRuleProvider implements RuleProviderInterface
 
 No service config is needed beyond autowiring; the interface tag is applied automatically.
 
+### Multi-tenant scoping
+
+The bundle stays tenant-agnostic: "tenant" is a consumer concept, so you wire it through the
+existing hooks rather than configuring it in the bundle. Three seams compose into full
+multi-tenancy, none of which require changing the bundle:
+
+1. **Route per tenant** — a [path-template variable](#add-path-template-variables) exposes the
+   tenant to `target_path`, so assets land under a per-tenant folder:
+
+   ```php
+   class TenantContextProvider implements ContextProviderInterface
+   {
+       public function getContext(AbstractObject $object, Asset $asset, ?string $locale = null): array
+       {
+           // Derive the tenant however your domain does (object field, folder, the acting user, ...).
+           return ['tenant' => $object instanceof Concrete ? ($object->get('tenant') ?? 'shared') : 'shared'];
+       }
+   }
+   ```
+
+   ```yaml
+   target_path: '/Assets/{{ tenant }}/{{ locale|default("shared") }}/{{ object.getKey()|safe_key }}'
+   ```
+
+2. **Match per tenant** — a rule `condition` reads the tenant straight off the object (conditions get
+   `object`, `asset`, `rule`, `locale`); combine it with the `locales` key for language:
+
+   ```yaml
+   acme_de_images:
+       class: Product
+       fields: [images]
+       condition: 'object.getTenant() == "acme"'
+       locales: [de]
+       target_path: '/Assets/acme/de/{{ object.getKey()|safe_key }}'
+   ```
+
+   For richer logic, register a [condition function](#add-functions-to-rule-conditions) such as
+   `tenant_of(object)`.
+
+3. **Generate rules per tenant** — when tenants are dynamic, emit one rule set per tenant from a
+   [rule provider](#programmatic-rules) instead of hand-writing YAML.
+
+Because every tenant hook is a tagged consumer service, the generic bundle carries no
+tenant-specific logic, and a single-tenant install simply omits the provider.
+
 ### Add a Health Check
 
 Contribute your own production-readiness probe to `asset-pilot:health` and `GET /health`. Implement
