@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\ProgressBar;
@@ -203,7 +204,7 @@ HELP
      */
     private function runForIds(SymfonyStyle $io, OutputInterface $output, string $byIds, string $action, string $moveTo, int $batchSize, bool $dryRun): int
     {
-        $ids = array_values(array_filter(array_map('intval', explode(',', $byIds)), static fn (int $id): bool => $id > 0));
+        $ids = BulkIds::fromCsv($byIds);
         if ($ids === []) {
             $io->error('--by-ids must list one or more positive asset ids.');
 

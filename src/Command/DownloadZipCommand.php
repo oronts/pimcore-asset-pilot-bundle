@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -99,7 +100,7 @@ class DownloadZipCommand extends Command
     /** @return int[] */
     private function ids(InputInterface $input, string $option): array
     {
-        return array_values(array_filter(array_map('intval', explode(',', (string) $input->getOption($option))), static fn (int $id): bool => $id > 0));
+        return BulkIds::fromCsv((string) $input->getOption($option));
     }
 
     private function stringOption(InputInterface $input, string $option): ?string

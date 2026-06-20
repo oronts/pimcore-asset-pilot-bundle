@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Controller\Api\Support\BulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -34,10 +34,7 @@ class IntegrityController
     public function brokenAssets(Request $request): JsonResponse
     {
         if ($request->query->has('ids')) {
-            $parsed = array_values(array_filter(
-                array_map('intval', explode(',', (string) $request->query->get('ids'))),
-                static fn (int $id): bool => $id > 0,
-            ));
+            $parsed = BulkIds::fromCsv((string) $request->query->get('ids'));
             if ($parsed === []) {
                 return new JsonResponse(['error' => 'ids must list one or more positive asset ids.'], JsonResponse::HTTP_BAD_REQUEST);
             }

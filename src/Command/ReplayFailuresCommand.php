@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Model\ReplayResult;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -45,7 +46,7 @@ class ReplayFailuresCommand extends Command
 
         $objectIds = $input->getOption('object-id');
         if ($objectIds !== null) {
-            $ids = array_values(array_filter(array_map('intval', explode(',', (string) $objectIds)), static fn (int $id): bool => $id > 0));
+            $ids = BulkIds::fromCsv((string) $objectIds);
             if ($ids === []) {
                 $io->error('--object-id must list one or more positive object ids.');
 

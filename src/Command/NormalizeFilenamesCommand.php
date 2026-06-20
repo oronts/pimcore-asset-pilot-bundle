@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Service\NormalizeFilenamesService;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -42,7 +43,7 @@ class NormalizeFilenamesCommand extends Command
 
         $byIds = $input->getOption('by-ids');
         if ($byIds !== null) {
-            $ids = array_values(array_filter(array_map('intval', explode(',', (string) $byIds)), static fn (int $id): bool => $id > 0));
+            $ids = BulkIds::fromCsv((string) $byIds);
             if ($ids === []) {
                 $io->error('--by-ids must list one or more positive asset ids.');
 

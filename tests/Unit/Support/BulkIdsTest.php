@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Oronts\AssetPilotBundle\Tests\Unit\Controller\Support;
+namespace Oronts\AssetPilotBundle\Tests\Unit\Support;
 
-use Oronts\AssetPilotBundle\Controller\Api\Support\BulkIds;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -70,5 +70,33 @@ class BulkIdsTest extends TestCase
         $cleaned = BulkIds::clean($raw);
 
         self::assertCount(BulkIds::MAX + 1, $cleaned);
+    }
+
+    #[Test]
+    public function fromCsvParsesAndCleansAList(): void
+    {
+        self::assertSame([1, 2, 3], BulkIds::fromCsv('1,2,3'));
+    }
+
+    #[Test]
+    public function fromCsvTrimsPaddedTokensSoSpacedInputSurvives(): void
+    {
+        self::assertSame([1, 2, 3], BulkIds::fromCsv('1, 2 , 3'));
+    }
+
+    #[Test]
+    public function fromCsvRejectsNonDigitTokensInsteadOfCoercing(): void
+    {
+        // "5abc"/"4.5" are dropped (not coerced to 5/4); dupes collapse; non-positive drop.
+        self::assertSame([6, 7], BulkIds::fromCsv('5abc,6,7,7,-1,0,4.5'));
+    }
+
+    #[Test]
+    public function fromCsvReturnsEmptyForNullOrBlank(): void
+    {
+        self::assertSame([], BulkIds::fromCsv(null));
+        self::assertSame([], BulkIds::fromCsv(''));
+        self::assertSame([], BulkIds::fromCsv('   '));
+        self::assertSame([], BulkIds::fromCsv('abc,-1,0'));
     }
 }

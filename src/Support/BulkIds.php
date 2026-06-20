@@ -2,8 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Oronts\AssetPilotBundle\Controller\Api\Support;
+namespace Oronts\AssetPilotBundle\Support;
 
+/**
+ * Sanitizes a client-supplied id list down to clean positive integers. Shared by the REST layer (JSON
+ * body / query arrays via clean(), comma-separated query params via fromCsv()) and the CLI commands
+ * (comma-separated options via fromCsv()), so HTTP and console id parsing follow one contract and
+ * cannot drift.
+ *
+ * @internal Not a documented extension seam; relocate-safe.
+ */
 final class BulkIds
 {
     public const int MAX = 1000;
@@ -47,5 +55,21 @@ final class BulkIds
         }
 
         return $ids;
+    }
+
+    /**
+     * Parse a comma-separated id string (a CLI option or a query param) into clean positive ints.
+     * Each token is trimmed first, so "1, 2, 3" is accepted; a non-digit token ("5abc") is rejected,
+     * never silently coerced to a number. Returns [] for null/blank input.
+     *
+     * @return list<int>
+     */
+    public static function fromCsv(?string $csv): array
+    {
+        if ($csv === null || trim($csv) === '') {
+            return [];
+        }
+
+        return self::clean(array_map('trim', explode(',', $csv)));
     }
 }

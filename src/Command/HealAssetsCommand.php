@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Command;
 use Oronts\AssetPilotBundle\Enum\HealOutcome;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -128,6 +129,6 @@ class HealAssetsCommand extends Command
             return null;
         }
 
-        return array_values(array_filter(array_map('intval', explode(',', (string) $raw)), static fn (int $id): bool => $id > 0));
+        return BulkIds::fromCsv((string) $raw);
     }
 }
