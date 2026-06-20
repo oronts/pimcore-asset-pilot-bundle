@@ -97,6 +97,21 @@ $result = $zipService->buildFromObjects([100, 101]);
 Stream `$result['path']` (e.g. a `BinaryFileResponse` with `deleteFileAfterSend(true)`) and it is
 cleaned up after the response.
 
+## CLI (non-blocking / cron / workers)
+
+For large sets or scheduled exports, build the archive off the request with `asset-pilot:download-zip`
+(same strategies and thumbnail options). The result is written to `--output`:
+
+```bash
+bin/console asset-pilot:download-zip --asset-ids=12,34,56 --strategy=folder --output=/exports/sel.zip
+bin/console asset-pilot:download-zip --folder-id=42 --thumbnail=web --output=/exports/folder.zip
+bin/console asset-pilot:download-zip --object-ids=100,101 --output=/exports/products.zip
+```
+
+Provide exactly one source (`--asset-ids` / `--folder-id` / `--object-ids`). For a multi-pod download
+of a pre-built archive, write `--output` to a shared volume, or create a Pimcore asset from the file
+so it is served through the configured (shared) asset storage adapter.
+
 ## Configuration
 
 ```yaml

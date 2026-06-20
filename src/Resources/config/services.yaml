@@ -299,6 +299,10 @@ services:
         tags:
             - { name: 'console.command' }
 
+    Oronts\AssetPilotBundle\Command\DownloadZipCommand:
+        tags:
+            - { name: 'console.command' }
+
     Oronts\AssetPilotBundle\Command\StatusCommand:
         tags:
             - { name: 'console.command' }
