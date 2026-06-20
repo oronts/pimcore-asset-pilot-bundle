@@ -9,7 +9,11 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
 use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
 use Pimcore\Model\DataObject\ClassDefinition;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
+use Pimcore\Model\DataObject\Fieldcollection;
+use Pimcore\Model\DataObject\Objectbrick;
 use Psr\Container\ContainerInterface;
 
 class ConfigValidator
@@ -96,17 +100,77 @@ class ConfigValidator
             $localizedFieldNames = array_keys($localizedFields->getFieldDefinitions());
         }
 
+        // Qualified names of fields nested in object bricks / field collections, matching what the
+        // extractor reports (e.g. "myBrick.image"), so a rule can constrain on a nested field.
+        $nestedFieldNames = $this->nestedFieldNames($classDef);
+
         foreach ($rule->fields as $field) {
             if (in_array($field, $fieldNames, true)) {
                 $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class}");
             } elseif (in_array($field, $localizedFieldNames, true)) {
                 $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class} (localized)");
+            } elseif (in_array($field, $nestedFieldNames, true)) {
+                $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class} (nested)");
             } else {
                 $results[] = new ValidationResult($rule->name, 'fields_exist', 'fail', "Field \"{$field}\" not found in {$rule->class}");
             }
         }
 
         return $results;
+    }
+
+    /**
+     * Qualified "container.field" names for every field nested in this class's object bricks and
+     * field collections (descending one level into a nested localized container), mirroring the
+     * names AssetFieldExtractor reports so a rule's `fields` constraint can target them.
+     *
+     * @return string[]
+     */
+    private function nestedFieldNames(ClassDefinition $classDef): array
+    {
+        $names = [];
+
+        foreach ($classDef->getFieldDefinitions() as $fieldDef) {
+            $nestedDefs = match (true) {
+                $fieldDef instanceof Objectbricks => $this->allowedDefinitions($fieldDef->getAllowedTypes(), Objectbrick\Definition::class),
+                $fieldDef instanceof Fieldcollections => $this->allowedDefinitions($fieldDef->getAllowedTypes(), Fieldcollection\Definition::class),
+                default => [],
+            };
+
+            foreach ($nestedDefs as $nestedDef) {
+                foreach ($nestedDef->getFieldDefinitions() as $sub) {
+                    if ($sub instanceof Localizedfields) {
+                        foreach (array_keys($sub->getFieldDefinitions()) as $inner) {
+                            $names[] = $fieldDef->getName() . '.' . $inner;
+                        }
+
+                        continue;
+                    }
+
+                    $names[] = $fieldDef->getName() . '.' . $sub->getName();
+                }
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * @param string[]                                           $types
+     * @param class-string<Objectbrick\Definition|Fieldcollection\Definition> $definitionClass
+     * @return array<Objectbrick\Definition|Fieldcollection\Definition>
+     */
+    private function allowedDefinitions(array $types, string $definitionClass): array
+    {
+        $defs = [];
+        foreach ($types as $type) {
+            $def = $definitionClass::getByKey($type);
+            if ($def !== null) {
+                $defs[] = $def;
+            }
+        }
+
+        return $defs;
     }
 
     /** @return ValidationResult[] */

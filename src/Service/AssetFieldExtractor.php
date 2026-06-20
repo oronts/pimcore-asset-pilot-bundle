@@ -223,22 +223,30 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
                 continue;
             }
 
-            $container = $this->readField($object, $fieldDef->getName());
-            if (!$container instanceof Objectbrick) {
-                continue;
-            }
-
-            foreach ($container->getItems() as $brick) {
-                if (!$brick instanceof Objectbrick\Data\AbstractData) {
+            try {
+                $container = $this->readField($object, $fieldDef->getName());
+                if (!$container instanceof Objectbrick) {
                     continue;
                 }
 
-                $brickDef = $this->objectbrickDefinition($brick->getType());
-                if ($brickDef === null) {
-                    continue;
-                }
+                foreach ($container->getItems() as $brick) {
+                    if (!$brick instanceof Objectbrick\Data\AbstractData) {
+                        continue;
+                    }
 
-                $this->collectAssetFields($brick, $brickDef->getFieldDefinitions(), $fieldDef->getName() . '.', $locales, $fields);
+                    $brickDef = $this->objectbrickDefinition($brick->getType());
+                    if ($brickDef === null) {
+                        continue;
+                    }
+
+                    $this->collectAssetFields($brick, $brickDef->getFieldDefinitions(), $fieldDef->getName() . '.', $locales, $fields);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('AssetFieldExtractor: failed to read object-brick {field} on object {id}: {error}', [
+                    'field' => $fieldDef->getName(),
+                    'id' => $object->getId(),
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
     }
@@ -254,22 +262,30 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
                 continue;
             }
 
-            $container = $this->readField($object, $fieldDef->getName());
-            if (!$container instanceof Fieldcollection) {
-                continue;
-            }
-
-            foreach ($container->getItems() as $item) {
-                if (!$item instanceof Fieldcollection\Data\AbstractData) {
+            try {
+                $container = $this->readField($object, $fieldDef->getName());
+                if (!$container instanceof Fieldcollection) {
                     continue;
                 }
 
-                $itemDef = $this->fieldcollectionDefinition($item->getType());
-                if ($itemDef === null) {
-                    continue;
-                }
+                foreach ($container->getItems() as $item) {
+                    if (!$item instanceof Fieldcollection\Data\AbstractData) {
+                        continue;
+                    }
 
-                $this->collectAssetFields($item, $itemDef->getFieldDefinitions(), $fieldDef->getName() . '.', $locales, $fields);
+                    $itemDef = $this->fieldcollectionDefinition($item->getType());
+                    if ($itemDef === null) {
+                        continue;
+                    }
+
+                    $this->collectAssetFields($item, $itemDef->getFieldDefinitions(), $fieldDef->getName() . '.', $locales, $fields);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('AssetFieldExtractor: failed to read field-collection {field} on object {id}: {error}', [
+                    'field' => $fieldDef->getName(),
+                    'id' => $object->getId(),
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
     }

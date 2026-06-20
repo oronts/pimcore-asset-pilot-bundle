@@ -3,11 +3,3 @@ parameters:
     paths:
         - src
     treatPhpDocTypesAsCertain: false
-    ignoreErrors:
-        # Pimcore generates getLocalizedFields() on classes that have localized fields; the base
-        # Concrete model does not declare it, so static analysis cannot see it. Guarded at runtime
-        # by the class definition having a 'localizedfields' field.
-        -
-            identifier: method.notFound
-            message: '#Call to an undefined method Pimcore\\Model\\DataObject\\Concrete::getLocalizedFields\(\)#'
-            path: src/Service/AssetFieldExtractor.php
