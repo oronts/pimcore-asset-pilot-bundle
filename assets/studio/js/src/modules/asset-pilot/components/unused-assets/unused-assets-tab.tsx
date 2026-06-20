@@ -64,6 +64,23 @@ export const UnusedAssetsTab: React.FC = () => {
     }
   }
 
+  const handleBulkQuarantine = async (): Promise<void> => {
+    if (selected.size === 0) return
+    setActionLoading(true)
+    try {
+      const result = await assetPilotApi.bulkQuarantineAssets([...selected])
+      const msg = t('asset-pilot.unused.quarantined-result', { quarantined: result.quarantined ?? 0, failed: result.failed })
+      if (result.failed > 0) toast.warning(msg)
+      else toast.success(msg)
+      clear()
+      refetch()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const hasFilters = filters.type != null || filters.extension != null || filters.before != null || filters.after != null || filters.folder != null || filters.confidence != null
 
   const goToPage = (page: number): void => {
@@ -122,6 +139,7 @@ export const UnusedAssetsTab: React.FC = () => {
           assetIds={[...selected]}
           onDelete={handleBulkDelete}
           onMove={handleBulkMove}
+          onQuarantine={handleBulkQuarantine}
           onDeselect={() => clear()}
           onLockDone={() => { clear(); refetch() }}
         />

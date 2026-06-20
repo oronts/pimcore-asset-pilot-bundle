@@ -214,17 +214,20 @@ export const de: Record<string, string> = {
   'asset-pilot.unused.folder-placeholder': '/pfad/zum/ordner',
   'asset-pilot.unused.deleted-result': 'Gelöscht: {{deleted}}, Fehlgeschlagen: {{failed}}',
   'asset-pilot.unused.moved-result': 'Verschoben: {{moved}}, Fehlgeschlagen: {{failed}}',
+  'asset-pilot.unused.quarantined-result': 'In Quarantäne: {{quarantined}}, Fehlgeschlagen: {{failed}}',
 
   // Bulk Actions
   'asset-pilot.bulk.selected': '{{count}} Asset(s) ausgewählt',
   'asset-pilot.bulk.delete': 'Ausgewählte löschen',
   'asset-pilot.bulk.move': 'Ausgewählte verschieben',
+  'asset-pilot.bulk.quarantine': 'In Quarantäne verschieben',
   'asset-pilot.bulk.delete-confirm': '{{count}} Asset(s) dauerhaft löschen?',
   'asset-pilot.bulk.deleting': 'Wird gelöscht...',
   'asset-pilot.bulk.confirm-delete': 'Löschen bestätigen',
   'asset-pilot.bulk.target-folder': '/ziel/ordner',
   'asset-pilot.bulk.moving': 'Wird verschoben...',
   'asset-pilot.bulk.confirm-move': 'Verschieben bestätigen',
+  'asset-pilot.bulk.confirm-quarantine': 'Quarantäne bestätigen',
   'asset-pilot.bulk.deselect-all': 'Alle abwählen',
   'asset-pilot.bulk.select-all': 'Alle auswählen',
 
@@ -282,6 +285,8 @@ export const de: Record<string, string> = {
   'asset-pilot.confirm.delete-description': 'Dadurch werden {{count}} Asset(s) dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.',
   'asset-pilot.confirm.move-title': 'Verschieben bestätigen',
   'asset-pilot.confirm.move-description': 'Dadurch werden {{count}} Asset(s) nach {{folder}} verschoben.',
+  'asset-pilot.confirm.quarantine-title': 'Quarantäne bestätigen',
+  'asset-pilot.confirm.quarantine-description': 'Dadurch werden {{count}} ungenutzte Asset(s) in Quarantäne verschoben. Sie können später wiederhergestellt werden.',
   'asset-pilot.confirm.organize-title': 'Massenorganisation bestätigen',
   'asset-pilot.confirm.organize-description': 'Dies organisiert Assets für alle aufgelisteten Objekte. Dateien können an neue Speicherorte verschoben werden.',
 

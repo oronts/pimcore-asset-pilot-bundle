@@ -11,11 +11,12 @@ interface BulkActionBarProps {
   assetIds: number[]
   onDelete: () => void
   onMove: (targetFolder: string) => void
+  onQuarantine: () => void
   onDeselect: () => void
   onLockDone?: () => void
 }
 
-export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, assetIds, onDelete, onMove, onDeselect, onLockDone }) => {
+export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, assetIds, onDelete, onMove, onQuarantine, onDeselect, onLockDone }) => {
   const { t } = useTranslation()
   const toast = useToast()
   const { operate } = usePermissions()
@@ -23,6 +24,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
   const [showMoveForm, setShowMoveForm] = useState(false)
   const [targetFolder, setTargetFolder] = useState('/archive/unused')
   const [showMoveConfirm, setShowMoveConfirm] = useState(false)
+  const [showQuarantineConfirm, setShowQuarantineConfirm] = useState(false)
   const [lockLoading, setLockLoading] = useState(false)
 
   const handleBulkLock = async (): Promise<void> => {
@@ -76,6 +78,9 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
             </button>
             <button onClick={() => setShowMoveForm(true)} disabled={isDisabled} style={moveBtnStyle}>
               {t('asset-pilot.bulk.move')}
+            </button>
+            <button onClick={() => setShowQuarantineConfirm(true)} disabled={isDisabled} style={quarantineBtnStyle}>
+              {t('asset-pilot.bulk.quarantine')}
             </button>
             <button onClick={() => { void handleBulkLock() }} disabled={isDisabled} style={lockBtnStyle}>
               {lockLoading ? t('asset-pilot.lock.locking') : t('asset-pilot.lock.lock-selected')}
@@ -136,6 +141,19 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
           onCancel={() => setShowMoveConfirm(false)}
         />
       )}
+
+      {showQuarantineConfirm && (
+        <ConfirmDialog
+          title={t('asset-pilot.confirm.quarantine-title')}
+          description={t('asset-pilot.confirm.quarantine-description', { count })}
+          confirmLabel={t('asset-pilot.bulk.confirm-quarantine')}
+          cancelLabel={t('asset-pilot.common.cancel')}
+          variant="warning"
+          loading={loading}
+          onConfirm={() => { onQuarantine(); setShowQuarantineConfirm(false) }}
+          onCancel={() => setShowQuarantineConfirm(false)}
+        />
+      )}
     </div>
   )
 }
@@ -147,6 +165,10 @@ const deleteBtnStyle: React.CSSProperties = {
 const moveBtnStyle: React.CSSProperties = {
   padding: '4px 12px', border: '1px solid #91caff', borderRadius: 4, background: '#e6f4ff',
   color: '#0958d9', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+}
+const quarantineBtnStyle: React.CSSProperties = {
+  padding: '4px 12px', border: '1px solid #ffc069', borderRadius: 4, background: '#fff7e6',
+  color: '#ad6800', cursor: 'pointer', fontSize: 12, fontWeight: 500,
 }
 const lockBtnStyle: React.CSSProperties = {
   padding: '4px 12px', border: '1px solid #ffd591', borderRadius: 4, background: '#fff7e6',

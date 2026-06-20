@@ -214,17 +214,20 @@ export const en: Record<string, string> = {
   'asset-pilot.unused.folder-placeholder': '/path/to/folder',
   'asset-pilot.unused.deleted-result': 'Deleted: {{deleted}}, Failed: {{failed}}',
   'asset-pilot.unused.moved-result': 'Moved: {{moved}}, Failed: {{failed}}',
+  'asset-pilot.unused.quarantined-result': 'Quarantined: {{quarantined}}, Failed: {{failed}}',
 
   // Bulk Actions (shared for unused + management)
   'asset-pilot.bulk.selected': '{{count}} asset(s) selected',
   'asset-pilot.bulk.delete': 'Delete Selected',
   'asset-pilot.bulk.move': 'Move Selected',
+  'asset-pilot.bulk.quarantine': 'Quarantine Selected',
   'asset-pilot.bulk.delete-confirm': 'Delete {{count}} asset(s) permanently?',
   'asset-pilot.bulk.deleting': 'Deleting...',
   'asset-pilot.bulk.confirm-delete': 'Confirm Delete',
   'asset-pilot.bulk.target-folder': '/target/folder',
   'asset-pilot.bulk.moving': 'Moving...',
   'asset-pilot.bulk.confirm-move': 'Confirm Move',
+  'asset-pilot.bulk.confirm-quarantine': 'Confirm Quarantine',
   'asset-pilot.bulk.deselect-all': 'Deselect All',
   'asset-pilot.bulk.select-all': 'Select all',
 
@@ -282,6 +285,8 @@ export const en: Record<string, string> = {
   'asset-pilot.confirm.delete-description': 'This will permanently delete {{count}} asset(s). This action cannot be undone.',
   'asset-pilot.confirm.move-title': 'Confirm Move',
   'asset-pilot.confirm.move-description': 'This will move {{count}} asset(s) to {{folder}}.',
+  'asset-pilot.confirm.quarantine-title': 'Confirm Quarantine',
+  'asset-pilot.confirm.quarantine-description': 'This will move {{count}} unused asset(s) to quarantine. They can be restored later.',
   'asset-pilot.confirm.organize-title': 'Confirm Bulk Organize',
   'asset-pilot.confirm.organize-description': 'This will organize assets for all listed objects. This may move files to new locations.',
 

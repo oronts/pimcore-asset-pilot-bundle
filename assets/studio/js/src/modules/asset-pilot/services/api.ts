@@ -178,6 +178,11 @@ export const assetPilotApi = {
       method: 'POST',
       body: JSON.stringify({ assetIds, targetFolder }),
     }),
+  bulkQuarantineAssets: (assetIds: number[]) =>
+    request<BulkActionResult>('/unused-assets/bulk-quarantine', {
+      method: 'POST',
+      body: JSON.stringify({ assetIds }),
+    }),
   exportUnused: (filters: UnusedAssetFilters = {}): void => {
     const query = buildQuery({
       type: filters.type,

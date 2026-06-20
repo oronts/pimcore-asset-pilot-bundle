@@ -171,6 +171,7 @@ export interface UnusedAssetStats {
 export interface BulkActionResult {
   deleted?: number
   moved?: number
+  quarantined?: number
   tagged?: number
   updated?: number
   failed: number
