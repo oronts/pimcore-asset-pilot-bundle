@@ -163,9 +163,9 @@ services:
             $recentlyUploadedDays: '%oronts_asset_pilot.confidence.recently_uploaded_days%'
             $probablyUnusedDays: '%oronts_asset_pilot.confidence.probably_unused_days%'
 
-    # -- Asset organizer (with protection params) ------------------------------
+    # -- Move planner (shared gate-decision source for dry-run + live) ----------
 
-    Oronts\AssetPilotBundle\Service\AssetOrganizer:
+    Oronts\AssetPilotBundle\Service\MovePlanner:
         arguments:
             $excludeFolders: '%oronts_asset_pilot.protection.exclude_folders%'
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
