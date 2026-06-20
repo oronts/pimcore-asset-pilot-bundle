@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\RevertFailure;
 use Oronts\AssetPilotBundle\Exception\RevertException;
@@ -19,6 +20,8 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class AuditController
 {
+    use StreamsCsv;
+
     public function __construct(
         protected readonly AuditLoggerInterface $auditLogger,
         protected readonly LoggerInterface $logger,
@@ -72,13 +75,9 @@ class AuditController
             'rule_name' => $request->query->get('ruleName'),
         ]);
 
-        return new StreamedResponse(function () use ($filters) {
-            $handle = fopen('php://output', 'w');
-            fputcsv($handle, ['ID', 'Asset ID', 'From', 'To', 'Object ID', 'Class', 'Rule', 'Trigger', 'Status', 'Duration (ms)', 'Error', 'Date']);
-
-            $written = 0;
+        $rows = (function () use ($filters): \Generator {
             foreach ($this->auditLogger->iterateForExport($filters) as $item) {
-                fputcsv($handle, array_map($this->sanitizeCsvCell(...), [
+                yield [
                     $item['id'] ?? '',
                     $item['asset_id'] ?? '',
                     $item['asset_path_from'] ?? '',
@@ -91,18 +90,15 @@ class AuditController
                     $item['duration_ms'] ?? '',
                     $item['error_message'] ?? '',
                     $item['created_at'] ?? '',
-                ]));
-
-                if ((++$written % 1000) === 0) {
-                    flush();
-                }
+                ];
             }
+        })();
 
-            fclose($handle);
-        }, Response::HTTP_OK, [
-            'Content-Type' => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="asset-pilot-audit-' . date('Y-m-d') . '.csv"',
-        ]);
+        return $this->streamCsv(
+            'asset-pilot-audit-' . date('Y-m-d') . '.csv',
+            ['ID', 'Asset ID', 'From', 'To', 'Object ID', 'Class', 'Rule', 'Trigger', 'Status', 'Duration (ms)', 'Error', 'Date'],
+            $rows,
+        );
     }
 
     #[Route('/audit/by-rule/{ruleName}/assets', name: 'oronts_asset_pilot_audit_rule_assets', methods: ['GET'])]
@@ -149,16 +145,4 @@ class AuditController
         };
     }
 
-    // A cell starting with = + - @ (or a control char) is executed as a formula by Excel/Sheets;
-    // prefix it with a quote to neutralize CSV formula injection.
-    protected function sanitizeCsvCell(mixed $value): string
-    {
-        $value = (string) $value;
-
-        if ($value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r", "\n"], true)) {
-            return "'" . $value;
-        }
-
-        return $value;
-    }
 }

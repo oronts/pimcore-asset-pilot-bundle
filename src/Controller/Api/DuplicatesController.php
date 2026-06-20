@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
@@ -11,12 +12,16 @@ use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class DuplicatesController
 {
+    use StreamsCsv;
+
     private const int MAX_LIMIT = 100;
+    private const int EXPORT_PAGE = 200;
 
     public function __construct(
         protected readonly DuplicateDetectionService $duplicates,
@@ -70,6 +75,38 @@ class DuplicatesController
 
             return new JsonResponse(['error' => 'Failed to list duplicate assets.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Stream the whole duplicate report as CSV (checksum, copies, size, wasted bytes, asset ids), paged
+     * lazily so the export stays memory-flat regardless of how many groups exist.
+     */
+    #[Route('/duplicates/export', name: 'oronts_asset_pilot_duplicates_export', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function export(): StreamedResponse
+    {
+        $rows = (function (): \Generator {
+            $page = 1;
+            do {
+                $groups = $this->duplicates->findDuplicates($page, self::EXPORT_PAGE);
+                foreach ($groups as $group) {
+                    yield [
+                        $group->checksum,
+                        $group->count,
+                        $group->fileSize,
+                        $group->fileSize * max(0, $group->count - 1),
+                        implode(';', $group->assetIds),
+                    ];
+                }
+                ++$page;
+            } while (count($groups) === self::EXPORT_PAGE);
+        })();
+
+        return $this->streamCsv(
+            'asset-pilot-duplicates-' . date('Y-m-d') . '.csv',
+            ['Checksum', 'Copies', 'File Size (bytes)', 'Wasted (bytes)', 'Asset IDs'],
+            $rows,
+        );
     }
 
     /**

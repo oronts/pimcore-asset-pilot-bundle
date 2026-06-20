@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\StorageTrendService;
@@ -13,12 +14,16 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class UnusedAssetsController
 {
     use HandlesBulkIds;
+    use StreamsCsv;
+
+    private const int EXPORT_PAGE = 200;
 
     public function __construct(
         private readonly UnusedAssetFinderInterface $unusedAssetFinder,
@@ -69,6 +74,47 @@ class UnusedAssetsController
         // cached live computation when nothing has been captured yet.
         return new JsonResponse(
             $this->storageTrend->latestUnusedStats() ?? $this->unusedAssetFinder->getUnusedStatsCached(),
+        );
+    }
+
+    /**
+     * Stream the unused-asset listing as CSV (id, path, type, size, modified), honoring the same
+     * filters as the list endpoint, paged lazily so it stays memory-flat.
+     */
+    #[Route('/unused-assets/export', name: 'oronts_asset_pilot_unused_assets_export', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function export(Request $request): StreamedResponse
+    {
+        $filters = array_filter([
+            'type' => $request->query->get('type'),
+            'extension' => $request->query->get('extension'),
+            'before' => $request->query->get('before'),
+            'after' => $request->query->get('after'),
+            'folder' => $request->query->get('folder'),
+            'confidence' => $request->query->get('confidence'),
+        ], static fn ($v) => $v !== null && $v !== '');
+
+        $rows = (function () use ($filters): \Generator {
+            $page = 1;
+            do {
+                $result = $this->unusedAssetFinder->findUnused($filters, $page, self::EXPORT_PAGE);
+                foreach ($result['items'] as $item) {
+                    yield [
+                        $item['id'] ?? '',
+                        $item['full_path'] ?? '',
+                        $item['type'] ?? '',
+                        $item['file_size'] ?? '',
+                        $item['modified_at'] ?? '',
+                    ];
+                }
+                ++$page;
+            } while (count($result['items']) === self::EXPORT_PAGE);
+        })();
+
+        return $this->streamCsv(
+            'asset-pilot-unused-' . date('Y-m-d') . '.csv',
+            ['ID', 'Path', 'Type', 'File Size (bytes)', 'Modified'],
+            $rows,
         );
     }
 

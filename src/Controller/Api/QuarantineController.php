@@ -4,16 +4,22 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class QuarantineController
 {
+    use StreamsCsv;
+
+    private const int EXPORT_PAGE = 200;
+
     public function __construct(
         protected readonly QuarantineService $quarantineService,
         protected readonly LoggerInterface $logger,
@@ -27,6 +33,37 @@ class QuarantineController
         $limit = min(200, max(1, $request->query->getInt('limit', 50)));
 
         return new JsonResponse($this->quarantineService->listQuarantined($page, $limit));
+    }
+
+    /**
+     * Stream the quarantine list as CSV (asset id, filename, original path, type, quarantined-at).
+     */
+    #[Route('/quarantine/export', name: 'oronts_asset_pilot_quarantine_export', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function export(): StreamedResponse
+    {
+        $rows = (function (): \Generator {
+            $page = 1;
+            do {
+                $result = $this->quarantineService->listQuarantined($page, self::EXPORT_PAGE);
+                foreach ($result['items'] as $item) {
+                    yield [
+                        $item['asset_id'] ?? '',
+                        $item['filename'] ?? '',
+                        $item['original_path'] ?? '',
+                        $item['type'] ?? '',
+                        $item['quarantined_at'] ?? '',
+                    ];
+                }
+                ++$page;
+            } while (count($result['items']) === self::EXPORT_PAGE);
+        })();
+
+        return $this->streamCsv(
+            'asset-pilot-quarantine-' . date('Y-m-d') . '.csv',
+            ['Asset ID', 'Filename', 'Original Path', 'Type', 'Quarantined At'],
+            $rows,
+        );
     }
 
     #[Route('/quarantine/{assetId}/restore', name: 'oronts_asset_pilot_quarantine_restore', methods: ['POST'], requirements: ['assetId' => '\d+'])]

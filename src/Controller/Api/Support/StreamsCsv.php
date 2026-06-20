@@ -1,0 +1,57 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Controller\Api\Support;
+
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+/**
+ * Stream tabular data to the client as a CSV download. Shared by every list controller so exports
+ * behave identically: cells are formula-injection-neutralised and the output buffer is flushed every
+ * 1000 rows, so an arbitrarily large export stays memory-flat. Pass a generator for `$rows` to page a
+ * data source lazily.
+ */
+trait StreamsCsv
+{
+    /**
+     * @param list<string>                $header
+     * @param iterable<array<int, mixed>> $rows
+     */
+    protected function streamCsv(string $filename, array $header, iterable $rows): StreamedResponse
+    {
+        return new StreamedResponse(function () use ($header, $rows): void {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, $header);
+
+            $written = 0;
+            foreach ($rows as $row) {
+                fputcsv($handle, array_map($this->sanitizeCsvCell(...), $row));
+                if ((++$written % 1000) === 0) {
+                    flush();
+                }
+            }
+
+            fclose($handle);
+        }, Response::HTTP_OK, [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => sprintf('attachment; filename="%s"', $filename),
+        ]);
+    }
+
+    /**
+     * A cell starting with = + - @ (or a control char) is executed as a formula by Excel/Sheets;
+     * prefix it with a quote to neutralise CSV formula injection.
+     */
+    protected function sanitizeCsvCell(mixed $value): string
+    {
+        $value = (string) $value;
+
+        if ($value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r", "\n"], true)) {
+            return "'" . $value;
+        }
+
+        return $value;
+    }
+}
