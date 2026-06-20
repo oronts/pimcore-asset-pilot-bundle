@@ -12,7 +12,7 @@ import { DataTable, type DataColumn } from '../shared/data-table'
 import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
 import { useRowSelection } from '../../hooks/use-row-selection'
-import { useCart } from '../../hooks/use-cart'
+import { useCart, CART_MAX } from '../../hooks/use-cart'
 import { formatBytes, formatDate } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
 import { AssetCartBar } from './asset-cart-bar'
@@ -32,8 +32,9 @@ export const AssetManagementTab: React.FC = () => {
   const cart = useCart()
 
   const addSelectionToCart = (): void => {
-    cart.add([...selected])
+    const capped = cart.add([...selected])
     toast.success(t('asset-pilot.cart.added', { count: selected.size }))
+    if (capped) toast.warning(t('asset-pilot.cart.full', { max: CART_MAX }))
     clear()
   }
 

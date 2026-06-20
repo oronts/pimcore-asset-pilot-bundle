@@ -245,6 +245,7 @@ export const en: Record<string, string> = {
   'asset-pilot.cart.in-cart': '{{count}} asset(s) in cart',
   'asset-pilot.cart.download': 'Download cart as ZIP',
   'asset-pilot.cart.clear': 'Clear cart',
+  'asset-pilot.cart.full': 'Cart is capped at {{max}} assets; extra ones were not added.',
   'asset-pilot.management.tags-title': 'Assign Tags',
   'asset-pilot.management.tags-search': 'Search tags...',
   'asset-pilot.management.tags-replace': 'Replace existing tags',

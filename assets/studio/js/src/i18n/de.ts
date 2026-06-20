@@ -245,6 +245,7 @@ export const de: Record<string, string> = {
   'asset-pilot.cart.in-cart': '{{count}} Asset(s) im Warenkorb',
   'asset-pilot.cart.download': 'Warenkorb als ZIP herunterladen',
   'asset-pilot.cart.clear': 'Warenkorb leeren',
+  'asset-pilot.cart.full': 'Warenkorb ist auf {{max}} Assets begrenzt; weitere wurden nicht hinzugefügt.',
   'asset-pilot.management.tags-title': 'Tags zuweisen',
   'asset-pilot.management.tags-search': 'Tags suchen...',
   'asset-pilot.management.tags-replace': 'Vorhandene Tags ersetzen',
