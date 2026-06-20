@@ -51,6 +51,13 @@ services:
             - '../../Installer.php'
             - '../../Webpack/'
 
+    # -- Installer (container service so the migrations DependencyFactory is injected)
+    Oronts\AssetPilotBundle\Installer:
+        public: true
+        arguments:
+            $bundle: "@=service('kernel').getBundle('OrontsAssetPilotBundle')"
+            $db: '@doctrine.dbal.default_connection'
+
     # -- Interface aliases (autowiring) ------------------------------------------
 
     Oronts\AssetPilotBundle\Filter\AssetFilterInterface: '@Oronts\AssetPilotBundle\Filter\CompositeFilter'
