@@ -8,6 +8,7 @@ use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
+use Oronts\AssetPilotBundle\Merge\RepointReport;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
 use Psr\Log\LoggerInterface;
 
@@ -61,18 +62,25 @@ class DuplicateMergeService
         $canonical = $this->pickCanonical($group, $canonicalId);
         $copies = array_values(array_filter($group->assetIds, static fn (int $id): bool => $id !== $canonical));
 
+        // A non-repointing strategy (isolate) leaves references intact; the repointer is skipped.
+        $repoints = $strategy->repointsReferences();
+
         $dispositions = [];
         foreach ($copies as $copyId) {
-            $report = $this->repointer->repoint($copyId, $canonical, $dryRun);
+            $report = $repoints
+                ? $this->repointer->repoint($copyId, $canonical, $dryRun)
+                : new RepointReport($copyId, $canonical, 0, []);
 
             if ($dryRun) {
                 // A dry run cannot recompute dependencies (nothing is saved), so it never claims the
                 // copy is disposable: it only reports what would be rewritten and what plainly cannot.
-                $reason = sprintf(
-                    'dry run: %d object reference(s) would be repointed%s; nested/advanced references are verified only on --apply',
-                    $report->repointedObjects,
-                    $report->blocked === [] ? '' : sprintf('; %d reference(s) cannot be rewritten (%s)', count($report->blocked), implode('; ', $report->blocked)),
-                );
+                $reason = $repoints
+                    ? sprintf(
+                        'dry run: %d object reference(s) would be repointed%s; nested/advanced references are verified only on --apply',
+                        $report->repointedObjects,
+                        $report->blocked === [] ? '' : sprintf('; %d reference(s) cannot be rewritten (%s)', count($report->blocked), implode('; ', $report->blocked)),
+                    )
+                    : 'dry run: references are left intact; the copy would be quarantined only if it is already unreferenced';
                 $dispositions[] = new CopyDisposition($copyId, DispositionOutcome::Skipped, $reason);
                 continue;
             }

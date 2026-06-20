@@ -28,6 +28,11 @@ class IsolateUnreferencedStrategy implements DuplicateMergeStrategyInterface
         return 'isolate';
     }
 
+    public function repointsReferences(): bool
+    {
+        return false;
+    }
+
     public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
     {
         if ($this->dependencies->dependentObjectIds($copyId, 1) !== []) {

@@ -20,14 +20,19 @@ use Psr\Log\NullLogger;
 class DuplicateMergeServiceTest extends TestCase
 {
     /** @param \ArrayObject<int, int>|null $disposed records copy ids handed to the strategy */
-    private function strategy(string $name, ?\ArrayObject $disposed = null): DuplicateMergeStrategyInterface
+    private function strategy(string $name, ?\ArrayObject $disposed = null, bool $repoints = true): DuplicateMergeStrategyInterface
     {
-        return new class ($name, $disposed) implements DuplicateMergeStrategyInterface {
-            public function __construct(private readonly string $n, private readonly ?\ArrayObject $disposed) {}
+        return new class ($name, $disposed, $repoints) implements DuplicateMergeStrategyInterface {
+            public function __construct(private readonly string $n, private readonly ?\ArrayObject $disposed, private readonly bool $repoints) {}
 
             public function name(): string
             {
                 return $this->n;
+            }
+
+            public function repointsReferences(): bool
+            {
+                return $this->repoints;
             }
 
             public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
@@ -63,6 +68,21 @@ class DuplicateMergeServiceTest extends TestCase
         self::assertSame([7, 9], $disposed->getArrayCopy());
         self::assertCount(2, $outcome->dispositions);
         self::assertSame(DispositionOutcome::Quarantined, $outcome->dispositions[0]->outcome);
+    }
+
+    #[Test]
+    public function doesNotRepointWhenTheStrategyOptsOut(): void
+    {
+        $disposed = new \ArrayObject();
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        // A non-repointing strategy (e.g. isolate) must leave references intact: the repointer never runs.
+        $repointer->expects(self::never())->method('repoint');
+
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $outcome = $this->service($repointer, [$this->strategy('isolate', $disposed, repoints: false)])->merge($group, strategyName: 'isolate');
+
+        self::assertSame([9], $disposed->getArrayCopy(), 'the copy is still handed to the strategy for disposal');
+        self::assertSame(3, $outcome->canonicalId);
     }
 
     #[Test]

@@ -28,6 +28,11 @@ class RepointAndDeleteStrategy implements DuplicateMergeStrategyInterface
         return 'delete';
     }
 
+    public function repointsReferences(): bool
+    {
+        return true;
+    }
+
     public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
     {
         if (!$report->fullyRepointed) {
