@@ -81,7 +81,7 @@ export function useUnusedStats(): AsyncState<UnusedAssetStats> {
 export function useAssetSearch(filters: AssetSearchFilters): AsyncState<PaginatedAssetResponse> {
   return useAsyncData(
     () => assetPilotApi.searchAssets(filters),
-    [filters.page, filters.limit, filters.q, filters.type, filters.folder, filters.objectId, filters.sort, filters.order],
+    [filters.page, filters.limit, filters.q, filters.type, filters.folder, filters.objectId, filters.extension, filters.referenced, filters.sort, filters.order],
   )
 }
 

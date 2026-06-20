@@ -110,6 +110,28 @@ export const AssetManagementTab: React.FC = () => {
           />
         </FilterField>
 
+        <FilterField label={t('asset-pilot.management.extension-filter')}>
+          <input
+            type="text"
+            value={filters.extension ?? ''}
+            onChange={e => { setFilters(f => ({ ...f, extension: e.target.value || undefined, page: 1 })); clear() }}
+            placeholder={t('asset-pilot.management.extension-placeholder')}
+            style={{ ...inputStyle, width: 90 }}
+          />
+        </FilterField>
+
+        <FilterField label={t('asset-pilot.management.relation-filter')}>
+          <select
+            value={filters.referenced ?? ''}
+            onChange={e => { setFilters(f => ({ ...f, referenced: (e.target.value || undefined) as AssetSearchFilters['referenced'], page: 1 })); clear() }}
+            style={selectStyle}
+          >
+            <option value="">{t('asset-pilot.management.relation-all')}</option>
+            <option value="referenced">{t('asset-pilot.management.relation-referenced')}</option>
+            <option value="unreferenced">{t('asset-pilot.management.relation-unreferenced')}</option>
+          </select>
+        </FilterField>
+
         <button onClick={handleSearch} style={searchBtnStyle}>{t('asset-pilot.management.search-btn')}</button>
       </div>
 

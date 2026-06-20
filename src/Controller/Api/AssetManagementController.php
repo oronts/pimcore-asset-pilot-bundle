@@ -149,6 +149,8 @@ class AssetManagementController
             'type' => $request->query->get('type'),
             'folder' => $request->query->get('folder'),
             'objectId' => $request->query->getInt('objectId'),
+            'extension' => $request->query->get('extension'),
+            'referenced' => $request->query->get('referenced'),
         ];
 
         return new JsonResponse($this->searchService->search(

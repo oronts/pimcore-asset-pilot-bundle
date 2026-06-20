@@ -227,6 +227,8 @@ export interface AssetSearchFilters {
   type?: string
   folder?: string
   objectId?: number
+  extension?: string
+  referenced?: 'referenced' | 'unreferenced'
   page?: number
   limit?: number
   sort?: string

@@ -23,7 +23,7 @@ class AssetSearchService implements AssetSearchServiceInterface
     ) {}
 
     /**
-     * @param array{q?: string, type?: string, folder?: string, objectId?: int} $filters
+     * @param array{q?: string, type?: string, folder?: string, objectId?: int, extension?: string, referenced?: string} $filters
      * @return array{items: array, total: int, page: int, pages: int}
      */
     public function search(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array
@@ -184,6 +184,24 @@ class AssetSearchService implements AssetSearchServiceInterface
                 ->setParameter('objId', $objectId)
                 ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
                 ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET);
+        }
+
+        if (!empty($filters['extension'])) {
+            $qb->andWhere('a.filename LIKE :ext')
+                ->setParameter('ext', '%.' . Like::escape(ltrim((string) $filters['extension'], '.')));
+        }
+
+        // Relations filter: keep only assets that are (or are not) referenced by any data object.
+        $referenced = $filters['referenced'] ?? '';
+        if ($referenced === 'referenced' || $referenced === 'unreferenced') {
+            $operator = $referenced === 'referenced' ? 'IN' : 'NOT IN';
+            $qb->andWhere(sprintf(
+                'a.id %s (SELECT d.targetid FROM %s d WHERE d.targettype = :refTgt AND d.sourcetype = :refSrc)',
+                $operator,
+                PimcoreSchema::TABLE_DEPENDENCIES,
+            ))
+                ->setParameter('refTgt', PimcoreSchema::ELEMENT_TYPE_ASSET)
+                ->setParameter('refSrc', PimcoreSchema::ELEMENT_TYPE_OBJECT);
         }
     }
 

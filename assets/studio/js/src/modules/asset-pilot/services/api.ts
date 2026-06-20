@@ -204,6 +204,8 @@ export const assetPilotApi = {
         type: filters.type,
         folder: filters.folder,
         objectId: filters.objectId,
+        extension: filters.extension,
+        referenced: filters.referenced,
         page: filters.page,
         limit: filters.limit,
         sort: filters.sort,
