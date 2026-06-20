@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -132,7 +133,7 @@ class QuarantineService
 
         $originalDir = \dirname($originalPath);
         if (!$asset->isAllowed('publish') || !$this->targetAllowsCreate($originalDir)) {
-            throw new \RuntimeException('Not permitted to restore this asset to its original location.');
+            throw new NotPermittedException('Not permitted to restore this asset to its original location.');
         }
 
         $folder = $this->resolveFolder($originalDir);

@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
@@ -192,6 +193,15 @@ class QuarantineServiceTest extends TestCase
 
         self::assertTrue($service->restore(5));
         self::assertSame([5], $service->removed);
+    }
+
+    #[Test]
+    public function restoreThrowsNotPermittedWhenTheUserMayNotPublish(): void
+    {
+        $service = $this->service([5 => $this->asset('/Quarantine/a.jpg', allowed: false)], [5 => '/Products/a.jpg']);
+
+        $this->expectException(NotPermittedException::class);
+        $service->restore(5);
     }
 
     #[Test]

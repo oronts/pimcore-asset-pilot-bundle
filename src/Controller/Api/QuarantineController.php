@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -88,6 +89,8 @@ class QuarantineController
             }
 
             return new JsonResponse(['message' => 'Asset restored.', 'assetId' => $assetId]);
+        } catch (NotPermittedException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to restore asset {id} from quarantine.', ['id' => $assetId, 'exception' => $e]);
 
