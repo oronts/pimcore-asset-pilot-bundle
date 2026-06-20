@@ -21,6 +21,7 @@ readonly class Rule
         public array $filters,
         public array $options = [],
         public array $actions = [],
+        public array $locales = [],
     ) {}
 
     public static function fromConfig(string $name, array $config): self
@@ -38,6 +39,7 @@ readonly class Rule
             filters: $config['filters'] ?? [],
             options: $config['options'] ?? [],
             actions: $config['actions'] ?? [],
+            locales: $config['locales'] ?? [],
         );
     }
 
@@ -61,6 +63,7 @@ readonly class Rule
             'filters' => $this->filters,
             'options' => $this->options,
             'actions' => $this->actions,
+            'locales' => $this->locales,
         ];
     }
 }

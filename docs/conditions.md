@@ -2,7 +2,7 @@
 
 # Expression Language
 
-Rule conditions use Symfony ExpressionLanguage. Three variables are available: `object`, `asset`, and `rule`.
+Rule conditions use Symfony ExpressionLanguage. Four variables are available: `object`, `asset`, `rule`, and `locale` (the field locale for a localized asset field, e.g. `en`/`de`, or `null` for a non-localized field). For example, `locale == "de"` matches only the German variant of a localized field. To restrict a whole rule to specific locales without a condition, use the rule's `locales` key (see [Configuration](configuration.md)).
 
 ### Built-in Functions
 

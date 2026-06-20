@@ -90,7 +90,11 @@ class RuleEngine implements RuleEngineInterface
                 continue;
             }
 
-            if (!$this->conditionEvaluator->evaluate($object, $asset, $rule)) {
+            if (!$this->matchesLocale($rule, $locale)) {
+                continue;
+            }
+
+            if (!$this->conditionEvaluator->evaluate($object, $asset, $rule, $locale)) {
                 continue;
             }
 
@@ -144,11 +148,16 @@ class RuleEngine implements RuleEngineInterface
                 continue;
             }
 
+            if (!$this->matchesLocale($rule, $locale)) {
+                $evaluations[] = $this->rejected($rule, 'locale_mismatch', filterDetails: 'locale "' . ($locale ?? 'none') . '" not in [' . implode(', ', $rule->locales) . ']');
+                continue;
+            }
+
             $conditionResult = null;
             $conditionError = null;
             if ($rule->condition !== null && $rule->condition !== '') {
                 try {
-                    $conditionResult = $this->conditionEvaluator->evaluateStrict($object, $asset, $rule);
+                    $conditionResult = $this->conditionEvaluator->evaluateStrict($object, $asset, $rule, $locale);
                 } catch (\Throwable $e) {
                     $conditionResult = false;
                     $conditionError = $e->getMessage();
@@ -252,5 +261,18 @@ class RuleEngine implements RuleEngineInterface
         }
 
         return in_array($fieldName, $rule->fields, true);
+    }
+
+    /**
+     * A rule with no `locales` matches any locale (and non-localized fields). A locale-scoped rule
+     * matches only its listed locales, so it never touches a non-localized field (locale null).
+     */
+    protected function matchesLocale(Rule $rule, ?string $locale): bool
+    {
+        if ($rule->locales === []) {
+            return true;
+        }
+
+        return $locale !== null && in_array($locale, $rule->locales, true);
     }
 }

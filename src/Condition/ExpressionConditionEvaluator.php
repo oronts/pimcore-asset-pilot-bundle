@@ -27,10 +27,10 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         protected readonly iterable $functionProviders = [],
     ) {}
 
-    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
+    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool
     {
         try {
-            return $this->evaluateStrict($object, $asset, $rule);
+            return $this->evaluateStrict($object, $asset, $rule, $locale);
         } catch (\Throwable $e) {
             $this->logger->warning('Condition evaluation failed for rule "{rule}": {error}', [
                 'rule' => $rule->name,
@@ -43,7 +43,7 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         }
     }
 
-    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule): bool
+    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool
     {
         if ($rule->condition === null || $rule->condition === '') {
             return true;
@@ -55,6 +55,7 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
                 'object' => $object,
                 'asset' => $asset,
                 'rule' => $rule,
+                'locale' => $locale,
             ],
         );
 
@@ -74,7 +75,7 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
      */
     public function validateSyntax(string $expression): void
     {
-        $this->getExpressionLanguage()->parse($expression, ['object', 'asset', 'rule']);
+        $this->getExpressionLanguage()->parse($expression, ['object', 'asset', 'rule', 'locale']);
     }
 
     protected function getCompiledExpression(string $expression): \Symfony\Component\ExpressionLanguage\ParsedExpression
@@ -82,7 +83,7 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         if (!isset($this->compiledCache[$expression])) {
             $this->compiledCache[$expression] = $this->getExpressionLanguage()->parse(
                 $expression,
-                ['object', 'asset', 'rule'],
+                ['object', 'asset', 'rule', 'locale'],
             );
         }
 

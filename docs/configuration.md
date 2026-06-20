@@ -32,6 +32,9 @@ oronts_asset_pilot:
             target_path: '/Products/{{ object.getItemNumber() }}/Documents{{ locale ? "/" ~ locale : "" }}'
             strategy: always
             priority: 70
+            # Optional: restrict this rule to specific locales of a localized field. Empty (default)
+            # means all locales, and the rule then also applies to non-localized fields.
+            locales: [en, de]
 
     naming:
         collision_pattern: counter

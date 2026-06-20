@@ -52,6 +52,28 @@ class RuleEngineTest extends TestCase
     }
 
     #[Test]
+    public function aLocaleScopedRuleOnlyMatchesItsDeclaredLocales(): void
+    {
+        $this->conditionEvaluator->method('evaluate')->willReturn(true);
+        $this->filter->method('accept')->willReturn(true);
+        $this->pathResolver->method('resolve')->willReturn('/x');
+
+        $scoped = new Rule(
+            name: 'de-only', class: 'Product', fields: [], condition: null,
+            targetPath: '/t', strategy: MoveStrategy::Always, callback: null,
+            priority: 10, enabled: true, filters: [], options: [], actions: [], locales: ['de'],
+        );
+        $engine = $this->createEngine([$scoped]);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $asset = $this->createMock(Asset::class);
+
+        self::assertCount(1, $engine->matchField($object, $asset, 'image', 'de'), 'matches its declared locale');
+        self::assertCount(0, $engine->matchField($object, $asset, 'image', 'en'), 'skips other locales');
+        self::assertCount(0, $engine->matchField($object, $asset, 'image', null), 'a locale-scoped rule skips non-localized fields');
+    }
+
+    #[Test]
     public function sortedRulesByPriorityDescending(): void
     {
         $r1 = $this->createRule('low', 'Product', 1);

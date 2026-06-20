@@ -37,6 +37,18 @@ class ExpressionConditionEvaluatorTest extends TestCase
     }
 
     #[Test]
+    public function conditionCanBranchOnTheLocale(): void
+    {
+        $rule = $this->createRule('locale == "de"');
+        $object = $this->createMock(AbstractObject::class);
+        $asset = $this->createMock(Asset::class);
+
+        self::assertTrue($this->evaluator->evaluate($object, $asset, $rule, 'de'));
+        self::assertFalse($this->evaluator->evaluate($object, $asset, $rule, 'en'));
+        self::assertFalse($this->evaluator->evaluate($object, $asset, $rule, null));
+    }
+
+    #[Test]
     public function aTaggedFunctionProviderExtendsTheConditionLanguage(): void
     {
         $provider = new class () implements ExpressionFunctionProviderInterface {
