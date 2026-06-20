@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\Concrete;
 use Pimcore\Model\DataObject\Data\ElementMetadata;
 use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Psr\Log\NullLogger;
@@ -24,6 +25,24 @@ class AssetFieldExtractorTest extends TestCase
             public function extractFrom(mixed $value): array
             {
                 return $this->extractAssetsFromValue($value);
+            }
+
+            /**
+             * @param \Pimcore\Model\DataObject\ClassDefinition\Data[] $fieldDefs
+             * @param string[]                                         $locales
+             * @return \Oronts\AssetPilotBundle\Model\AssetFieldInfo[]
+             */
+            public function collect(object $holder, array $fieldDefs, string $prefix, array $locales): array
+            {
+                $fields = [];
+                $this->collectAssetFields($holder, $fieldDefs, $prefix, $locales, $fields);
+
+                return $fields;
+            }
+
+            public function read(object $holder, string $fieldName): mixed
+            {
+                return $this->readField($holder, $fieldName);
             }
         };
     }
@@ -70,6 +89,71 @@ class AssetFieldExtractorTest extends TestCase
     public function nullYieldsNothing(): void
     {
         self::assertSame([], $this->extractor->extractFrom(null));
+    }
+
+    #[Test]
+    public function readFieldPrefersGetValueForFieldName(): void
+    {
+        $asset = $this->createMock(Asset::class);
+        $holder = $this->createMock(Concrete::class);
+        $holder->method('getValueForFieldName')->with('image')->willReturn($asset);
+
+        self::assertSame($asset, $this->extractor->read($holder, 'image'));
+    }
+
+    #[Test]
+    public function readFieldFallsBackToTheGetterWhenNoValueForFieldName(): void
+    {
+        $holder = new class () {
+            public function getCover(): string
+            {
+                return 'cover-value';
+            }
+        };
+
+        self::assertSame('cover-value', $this->extractor->read($holder, 'cover'));
+    }
+
+    #[Test]
+    public function readFieldReturnsNullWhenNeitherAccessorExists(): void
+    {
+        self::assertNull($this->extractor->read(new \stdClass(), 'whatever'));
+    }
+
+    #[Test]
+    public function collectQualifiesNestedAssetFieldNamesWithThePrefix(): void
+    {
+        $asset = $this->createMock(Asset::class);
+        $holder = $this->createMock(Concrete::class);
+        $holder->method('getValueForFieldName')->with('image')->willReturn($asset);
+
+        $fields = $this->extractor->collect($holder, [$this->assetFieldDef('image', 'image')], 'productBrick.', ['en']);
+
+        self::assertCount(1, $fields);
+        self::assertSame('productBrick.image', $fields[0]->fieldName);
+        self::assertNull($fields[0]->locale);
+        self::assertSame('image', $fields[0]->fieldType);
+        self::assertSame([$asset], $fields[0]->assets);
+    }
+
+    #[Test]
+    public function collectSkipsNonAssetFields(): void
+    {
+        $holder = $this->createMock(Concrete::class);
+        $holder->method('getValueForFieldName')->willReturn('some text');
+
+        $fields = $this->extractor->collect($holder, [$this->assetFieldDef('name', 'input')], '', ['en']);
+
+        self::assertSame([], $fields);
+    }
+
+    private function assetFieldDef(string $name, string $fieldType): \Pimcore\Model\DataObject\ClassDefinition\Data
+    {
+        $def = $this->createMock(\Pimcore\Model\DataObject\ClassDefinition\Data::class);
+        $def->method('getName')->willReturn($name);
+        $def->method('getFieldType')->willReturn($fieldType);
+
+        return $def;
     }
 
     #[Test]
