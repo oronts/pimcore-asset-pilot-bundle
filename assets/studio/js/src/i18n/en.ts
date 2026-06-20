@@ -224,6 +224,7 @@ export const en: Record<string, string> = {
   'asset-pilot.bulk.moving': 'Moving...',
   'asset-pilot.bulk.confirm-move': 'Confirm Move',
   'asset-pilot.bulk.deselect-all': 'Deselect All',
+  'asset-pilot.bulk.select-all': 'Select all',
 
   // Asset Management
   'asset-pilot.management.search-placeholder': 'Search by filename or path...',
@@ -241,6 +242,8 @@ export const en: Record<string, string> = {
   'asset-pilot.management.object-id-placeholder': 'e.g. 42',
   'asset-pilot.management.assets-for-object': 'Assets for object #{{id}}',
   'asset-pilot.management.search-btn': 'Search',
+  'asset-pilot.management.view-list': 'List',
+  'asset-pilot.management.view-gallery': 'Gallery',
   'asset-pilot.management.no-results': 'No assets found. Try a different search.',
   'asset-pilot.management.assign-tags': 'Assign Tags',
   'asset-pilot.management.set-property': 'Set Property',

@@ -220,6 +220,7 @@ export const assetPilotApi = {
     request<PaginatedAssetResponse>(
       `/audit/by-rule/${encodeURIComponent(ruleName)}/assets${buildQuery({ page, limit, since, class: className })}`,
     ),
+  assetImagePreviewUrl: (id: number): string => `${getPrefix()}/assets/${id}/image/stream/preview`,
   getAvailableTags: () => request<TagItem[]>('/assets/tags'),
   getAssetTags: (assetId: number) => request<TagItem[]>(`/assets/${assetId}/tags`),
   bulkTagAssets: (assetIds: number[], tagIds: number[], replace = false) =>

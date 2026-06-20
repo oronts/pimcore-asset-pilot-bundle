@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAssetSearch } from '../../hooks/use-asset-pilot-api'
 import type { AssetItem, AssetSearchFilters } from '../../types'
 import { BulkAssetActions } from './bulk-asset-actions'
+import { AssetGallery } from './asset-gallery'
 import { OpenButton } from '../shared/open-button'
 import { TypeBadge } from '../shared/type-badge'
 import { Highlight } from '../shared/highlight'
@@ -30,6 +31,7 @@ export const AssetManagementTab: React.FC = () => {
   const { data, loading, error, refetch } = useAssetSearch(mergedFilters)
   const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
   const cart = useCart()
+  const [viewMode, setViewMode] = useState<'list' | 'gallery'>('list')
 
   const addSelectionToCart = (): void => {
     const capped = cart.add([...selected])
@@ -64,6 +66,20 @@ export const AssetManagementTab: React.FC = () => {
     { key: 'size', label: t('asset-pilot.columns.size'), priority: 2, cellStyle: { whiteSpace: 'nowrap' }, cell: a => formatBytes(a.file_size) },
     { key: 'modified', label: t('asset-pilot.columns.modified'), priority: 3, sortField: 'modified_at', cellStyle: { fontSize: 11, color: '#8c8c8c', whiteSpace: 'nowrap' }, cell: a => formatDate(a.modified_at, true) },
   ]
+
+  const summary = (
+    <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+      {t('asset-pilot.common.showing', { count: data?.items.length ?? 0, total: data?.total ?? 0 })} — {t('asset-pilot.common.page-info', { page: data?.page ?? 1, pages: data?.pages ?? 1 })}
+    </div>
+  )
+
+  const emptyState = (
+    <EmptyState
+      variant={filters.q ? 'empty-search' : 'no-results'}
+      title={filters.q ? t('asset-pilot.empty.empty-search-title') : t('asset-pilot.management.no-results')}
+      description={filters.q ? t('asset-pilot.empty.empty-search-desc') : undefined}
+    />
+  )
 
   return (
     <div>
@@ -141,30 +157,43 @@ export const AssetManagementTab: React.FC = () => {
         <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} onAddToCart={addSelectionToCart} />
       )}
 
-      <DataTable
-        columns={columns}
-        data={data}
-        loading={loading}
-        error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
-        onPage={goToPage}
-        limit={filters.limit}
-        onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
-        tableId="management"
-        selection={{ selected, allSelected, toggleSelect, toggleAll }}
-        sort={{ field: sortField, direction: sortDirection, onToggle: toggleSort }}
-        summary={(
-          <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
-            {t('asset-pilot.common.showing', { count: data?.items.length ?? 0, total: data?.total ?? 0 })} — {t('asset-pilot.common.page-info', { page: data?.page ?? 1, pages: data?.pages ?? 1 })}
-          </div>
-        )}
-        empty={(
-          <EmptyState
-            variant={filters.q ? 'empty-search' : 'no-results'}
-            title={filters.q ? t('asset-pilot.empty.empty-search-title') : t('asset-pilot.management.no-results')}
-            description={filters.q ? t('asset-pilot.empty.empty-search-desc') : undefined}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'inline-flex', border: '1px solid #d9d9d9', borderRadius: 6, overflow: 'hidden' }}>
+          <button onClick={() => setViewMode('list')} style={viewMode === 'list' ? viewBtnActiveStyle : viewBtnStyle}>{t('asset-pilot.management.view-list')}</button>
+          <button onClick={() => setViewMode('gallery')} style={viewMode === 'gallery' ? viewBtnActiveStyle : viewBtnStyle}>{t('asset-pilot.management.view-gallery')}</button>
+        </div>
+      </div>
+
+      {viewMode === 'list'
+        ? (
+          <DataTable
+            columns={columns}
+            data={data}
+            loading={loading}
+            error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onPage={goToPage}
+            limit={filters.limit}
+            onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
+            tableId="management"
+            selection={{ selected, allSelected, toggleSelect, toggleAll }}
+            sort={{ field: sortField, direction: sortDirection, onToggle: toggleSort }}
+            summary={summary}
+            empty={emptyState}
+          />
+        )
+        : (
+          <AssetGallery
+            data={data}
+            loading={loading}
+            error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onPage={goToPage}
+            limit={filters.limit}
+            onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
+            selection={{ selected, allSelected, toggleSelect, toggleAll }}
+            summary={summary}
+            empty={emptyState}
           />
         )}
-      />
     </div>
   )
 }
@@ -179,3 +208,5 @@ const FilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ l
 const inputStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
 const selectStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
 const searchBtnStyle: React.CSSProperties = { padding: '5px 16px', border: '1px solid #1677ff', borderRadius: 6, background: '#1677ff', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500, alignSelf: 'flex-end' }
+const viewBtnStyle: React.CSSProperties = { padding: '4px 12px', border: 'none', background: '#fff', color: '#595959', cursor: 'pointer', fontSize: 12 }
+const viewBtnActiveStyle: React.CSSProperties = { ...viewBtnStyle, background: '#1677ff', color: '#fff', fontWeight: 500 }
