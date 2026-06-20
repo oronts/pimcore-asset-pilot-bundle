@@ -12,6 +12,7 @@ import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { ConfirmDialog } from '../shared/confirm-dialog'
 import { OpenButton } from '../shared/open-button'
+import { GalleryGrid, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { formatDate } from '../../utils/format'
 import { QuarantineFiltersBar } from './quarantine-filters'
 
@@ -21,6 +22,7 @@ export const QuarantineTab: React.FC = () => {
   const toast = useToast()
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [filters, setFilters] = useState<QuarantineFilters>({})
   const { data, loading, error, refetch } = useQuarantine(page, limit, filters)
   const [restoring, setRestoring] = useState<QuarantineItem | null>(null)
@@ -52,7 +54,32 @@ export const QuarantineTab: React.FC = () => {
 
       <QuarantineFiltersBar filters={filters} onChange={onFilters} />
 
-      {error != null
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
+
+      {viewMode === 'gallery'
+        ? (
+          <GalleryGrid
+            data={data}
+            loading={loading}
+            error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            empty={<EmptyState variant="no-data" title={t('asset-pilot.quarantine.empty')} description={t('asset-pilot.quarantine.empty-desc')} />}
+            page={data?.page ?? 1}
+            pages={data?.pages ?? 1}
+            onPage={setPage}
+            limit={limit}
+            onLimit={n => { setLimit(n); setPage(1) }}
+            toCard={item => ({
+              key: item.asset_id,
+              thumbnailId: item.asset_id,
+              type: item.type,
+              fallbackLabel: item.filename.split('.').pop() ?? item.type,
+              title: <OpenButton id={item.asset_id} type="asset" label={item.filename} />,
+              meta: <span style={{ fontSize: 11, color: '#8c8c8c' }}>{formatDate(item.quarantined_at, true)}</span>,
+              actions: perms.operate ? <button onClick={() => setRestoring(item)} style={actionBtnStyle}>{t('asset-pilot.quarantine.restore')}</button> : undefined,
+            })}
+          />
+        )
+        : error != null
         ? (
           <div>
             <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>

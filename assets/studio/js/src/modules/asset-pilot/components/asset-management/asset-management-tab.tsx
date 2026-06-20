@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAssetSearch } from '../../hooks/use-asset-pilot-api'
 import type { AssetItem, AssetSearchFilters } from '../../types'
 import { BulkAssetActions } from './bulk-asset-actions'
-import { AssetGallery } from './asset-gallery'
+import { GalleryGrid, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { OpenButton } from '../shared/open-button'
 import { TypeBadge } from '../shared/type-badge'
 import { Highlight } from '../shared/highlight'
@@ -31,7 +31,7 @@ export const AssetManagementTab: React.FC = () => {
   const { data, loading, error, refetch } = useAssetSearch(mergedFilters)
   const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
   const cart = useCart()
-  const [viewMode, setViewMode] = useState<'list' | 'gallery'>('list')
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
 
   const addSelectionToCart = (): void => {
     const capped = cart.add([...selected])
@@ -157,12 +157,7 @@ export const AssetManagementTab: React.FC = () => {
         <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} onAddToCart={addSelectionToCart} />
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <div style={{ display: 'inline-flex', border: '1px solid #d9d9d9', borderRadius: 6, overflow: 'hidden' }}>
-          <button onClick={() => setViewMode('list')} style={viewMode === 'list' ? viewBtnActiveStyle : viewBtnStyle}>{t('asset-pilot.management.view-list')}</button>
-          <button onClick={() => setViewMode('gallery')} style={viewMode === 'gallery' ? viewBtnActiveStyle : viewBtnStyle}>{t('asset-pilot.management.view-gallery')}</button>
-        </div>
-      </div>
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
 
       {viewMode === 'list'
         ? (
@@ -182,16 +177,28 @@ export const AssetManagementTab: React.FC = () => {
           />
         )
         : (
-          <AssetGallery
+          <GalleryGrid
             data={data}
             loading={loading}
             error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            empty={emptyState}
+            summary={summary}
+            page={data?.page ?? 1}
+            pages={data?.pages ?? 1}
             onPage={goToPage}
             limit={filters.limit}
             onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
             selection={{ selected, allSelected, toggleSelect, toggleAll }}
-            summary={summary}
-            empty={emptyState}
+            toCard={a => ({
+              key: a.id,
+              selectId: a.id,
+              thumbnailId: a.id,
+              type: a.type,
+              fallbackLabel: a.filename.split('.').pop() ?? a.type,
+              title: <OpenButton id={a.id} type="asset" label={a.filename} />,
+              meta: <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><TypeBadge type={a.type} /><span style={{ fontSize: 11, color: '#8c8c8c' }}>{formatBytes(a.file_size)}</span></div>,
+              badges: a.locked ? <LockBadge /> : undefined,
+            })}
           />
         )}
     </div>
@@ -208,5 +215,3 @@ const FilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ l
 const inputStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
 const selectStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
 const searchBtnStyle: React.CSSProperties = { padding: '5px 16px', border: '1px solid #1677ff', borderRadius: 6, background: '#1677ff', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500, alignSelf: 'flex-end' }
-const viewBtnStyle: React.CSSProperties = { padding: '4px 12px', border: 'none', background: '#fff', color: '#595959', cursor: 'pointer', fontSize: 12 }
-const viewBtnActiveStyle: React.CSSProperties = { ...viewBtnStyle, background: '#1677ff', color: '#fff', fontWeight: 500 }

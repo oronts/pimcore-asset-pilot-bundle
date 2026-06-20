@@ -7,6 +7,7 @@ import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
+import { GalleryGrid, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { OpenButton } from '../shared/open-button'
 import { assetPilotApi } from '../../services/api'
 import { formatBytes, truncate } from '../../utils/format'
@@ -19,6 +20,7 @@ export const DuplicatesTab: React.FC = () => {
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
   const [filters, setFilters] = useState<DuplicateFilters>({})
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
   const { data, loading, error, refetch } = useDuplicates(page, limit, filters)
   const strategies = useMergeStrategies()
   const [selected, setSelected] = useState<DuplicateGroup | null>(null)
@@ -37,7 +39,35 @@ export const DuplicatesTab: React.FC = () => {
 
       <DuplicatesFilters filters={filters} onChange={onFilters} />
 
-      {error != null
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
+
+      {viewMode === 'gallery'
+        ? (
+          <GalleryGrid
+            data={data}
+            loading={loading}
+            error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            empty={<EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />}
+            page={data?.page ?? 1}
+            pages={pages}
+            onPage={setPage}
+            limit={limit}
+            onLimit={n => { setLimit(n); setPage(1) }}
+            pageSizeOptions={[20, 50, 100]}
+            toCard={group => ({
+              key: group.checksum,
+              thumbnailId: group.representative?.id,
+              type: group.representative?.type ?? 'unknown',
+              fallbackLabel: group.representative?.filename.split('.').pop() ?? 'DUP',
+              title: group.representative != null
+                ? <OpenButton id={group.representative.id} type="asset" label={group.representative.filename} />
+                : <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{truncate(group.checksum, 16)}</span>,
+              meta: <span style={{ fontSize: 11, color: '#8c8c8c' }}>{t('asset-pilot.columns.copies')}: {group.count} · {formatBytes(group.representative?.fileSize ?? group.fileSize)}</span>,
+              actions: perms.admin ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button> : undefined,
+            })}
+          />
+        )
+        : error != null
         ? (
           <div>
             <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
