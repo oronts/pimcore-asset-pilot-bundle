@@ -109,7 +109,7 @@ export const IntegrityTab: React.FC = () => {
           </ResponsiveTableWrapper>
         )}
 
-      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
+      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} pageSizeOptions={[20, 25, 50]} />
 
       {healing && (
         <HealModal

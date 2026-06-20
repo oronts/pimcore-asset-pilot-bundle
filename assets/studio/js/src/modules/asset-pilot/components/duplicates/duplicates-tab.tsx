@@ -83,7 +83,7 @@ export const DuplicatesTab: React.FC = () => {
                 </table>
               </ResponsiveTableWrapper>
 
-              <Pagination page={data.page} pages={pages} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
+              <Pagination page={data.page} pages={pages} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} pageSizeOptions={[20, 50, 100]} />
             </>
           )}
 

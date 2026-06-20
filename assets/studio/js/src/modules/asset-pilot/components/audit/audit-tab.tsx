@@ -132,6 +132,7 @@ export const AuditTab: React.FC = () => {
             onPage={p => setFilters(f => ({ ...f, page: p }))}
             limit={filters.limit}
             onLimit={n => setFilters(f => ({ ...f, limit: n, page: 1 }))}
+            pageSizeOptions={[20, 50, 100]}
           />
         </>
       )}
