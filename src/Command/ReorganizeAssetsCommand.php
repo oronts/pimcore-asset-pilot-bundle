@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
-use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -19,6 +19,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ReorganizeAssetsCommand extends Command
 {
+    use ValidatesCliBulkIds;
+
     public function __construct(
         private readonly AssetReorganizer $reorganizer,
     ) {
@@ -49,10 +51,8 @@ class ReorganizeAssetsCommand extends Command
         }
 
         if ($byIds !== null) {
-            $ids = BulkIds::fromCsv((string) $byIds);
-            if ($ids === []) {
-                $io->error('--by-ids must list one or more positive asset ids.');
-
+            $ids = $this->validatedCsvIds($io, (string) $byIds, '--by-ids');
+            if ($ids === null) {
                 return Command::INVALID;
             }
             $result = $this->reorganizer->reorganizeAssets($ids, $async);

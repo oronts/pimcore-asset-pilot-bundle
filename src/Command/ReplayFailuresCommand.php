@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Model\ReplayResult;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
-use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -20,6 +20,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ReplayFailuresCommand extends Command
 {
+    use ValidatesCliBulkIds;
+
     public function __construct(
         private readonly FailureReplayService $replay,
     ) {
@@ -46,10 +48,8 @@ class ReplayFailuresCommand extends Command
 
         $objectIds = $input->getOption('object-id');
         if ($objectIds !== null) {
-            $ids = BulkIds::fromCsv((string) $objectIds);
-            if ($ids === []) {
-                $io->error('--object-id must list one or more positive object ids.');
-
+            $ids = $this->validatedCsvIds($io, (string) $objectIds, '--object-id');
+            if ($ids === null) {
                 return Command::INVALID;
             }
 

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Service\AssetZipService;
-use Oronts\AssetPilotBundle\Support\BulkIds;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -26,6 +26,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class DownloadZipCommand extends Command
 {
+    use ValidatesCliBulkIds;
+
     public function __construct(
         private readonly AssetZipService $zipService,
     ) {
@@ -66,12 +68,22 @@ class DownloadZipCommand extends Command
 
             return Command::INVALID;
         }
+        $source = $sources[array_key_first($sources)];
+
+        $ids = [];
+        if ($source === 'asset-ids' || $source === 'object-ids') {
+            $validated = $this->validatedCsvIds($io, (string) $input->getOption($source), '--' . $source);
+            if ($validated === null) {
+                return Command::INVALID;
+            }
+            $ids = $validated;
+        }
 
         try {
-            $result = match ($sources[array_key_first($sources)]) {
-                'asset-ids' => $this->zipService->buildFromAssetIds($this->ids($input, 'asset-ids'), $options),
+            $result = match ($source) {
+                'asset-ids' => $this->zipService->buildFromAssetIds($ids, $options),
                 'folder-id' => $this->zipService->buildFromFolder((int) $input->getOption('folder-id'), !$input->getOption('non-recursive'), $options),
-                default => $this->zipService->buildFromObjects($this->ids($input, 'object-ids'), $options),
+                default => $this->zipService->buildFromObjects($ids, $options),
             };
         } catch (\Throwable $e) {
             $io->error('Failed to build the archive: ' . $e->getMessage());
@@ -95,12 +107,6 @@ class DownloadZipCommand extends Command
         $io->success(sprintf('Wrote %d asset(s) (%d skipped) to %s', $result['added'], $result['skipped'], $outputPath));
 
         return Command::SUCCESS;
-    }
-
-    /** @return int[] */
-    private function ids(InputInterface $input, string $option): array
-    {
-        return BulkIds::fromCsv((string) $input->getOption($option));
     }
 
     private function stringOption(InputInterface $input, string $option): ?string

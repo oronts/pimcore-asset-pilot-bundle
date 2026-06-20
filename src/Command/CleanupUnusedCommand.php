@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
-use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\ProgressBar;
@@ -22,6 +22,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class CleanupUnusedCommand extends Command
 {
+    use ValidatesCliBulkIds;
+
     public function __construct(
         private readonly UnusedAssetFinderInterface $unusedAssetFinder,
     ) {
@@ -204,10 +206,8 @@ HELP
      */
     private function runForIds(SymfonyStyle $io, OutputInterface $output, string $byIds, string $action, string $moveTo, int $batchSize, bool $dryRun): int
     {
-        $ids = BulkIds::fromCsv($byIds);
-        if ($ids === []) {
-            $io->error('--by-ids must list one or more positive asset ids.');
-
+        $ids = $this->validatedCsvIds($io, $byIds, '--by-ids');
+        if ($ids === null) {
             return Command::INVALID;
         }
 

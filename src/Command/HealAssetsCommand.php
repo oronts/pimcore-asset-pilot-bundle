@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Enum\HealOutcome;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
-use Oronts\AssetPilotBundle\Support\BulkIds;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -21,6 +21,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class HealAssetsCommand extends Command
 {
+    use ValidatesCliBulkIds;
+
     public function __construct(
         private readonly AssetIntegrityService $integrity,
         private readonly VersionRollbackHealer $healer,
@@ -45,11 +47,12 @@ class HealAssetsCommand extends Command
         $io = new SymfonyStyle($input, $output);
 
         $rawIds = $input->getOption('by-ids');
-        $byIds = $this->parseIds($rawIds);
-        if ($rawIds !== null && $byIds === []) {
-            $io->error('--by-ids must list one or more positive asset ids.');
-
-            return Command::INVALID;
+        $byIds = null;
+        if ($rawIds !== null) {
+            $byIds = $this->validatedCsvIds($io, (string) $rawIds, '--by-ids');
+            if ($byIds === null) {
+                return Command::INVALID;
+            }
         }
 
         if ($input->getOption('undo')) {
@@ -120,15 +123,4 @@ class HealAssetsCommand extends Command
         return Command::SUCCESS;
     }
 
-    /**
-     * @return list<int>|null null when the option is absent; INVALID handling is left to the caller
-     */
-    private function parseIds(mixed $raw): ?array
-    {
-        if ($raw === null) {
-            return null;
-        }
-
-        return BulkIds::fromCsv((string) $raw);
-    }
 }
