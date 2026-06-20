@@ -4,6 +4,12 @@
 
 Asset Pilot is built around interfaces. Swap out any component by implementing the interface and registering it as a service.
 
+> The interface-based seams below (rule action, health check, integrity checker, notifier, duplicate
+> merge strategy, rule provider) are auto-tagged container-wide, so implementing the interface is
+> enough as long as your service has `autoconfigure: true` (the Symfony default). If you register the
+> service with `autoconfigure: false`, add the seam's tag yourself (the tag name is listed with each
+> seam). Strategies and filters are always tagged explicitly because they are keyed by a tag `alias`.
+
 ### Custom Filter
 
 Restrict which assets a rule applies to. All registered filters run inside `CompositeFilter` using AND logic — the first rejection short-circuits evaluation.
