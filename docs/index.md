@@ -20,6 +20,7 @@ Documentation for the Pimcore 12 Asset Pilot bundle. For a project overview and 
   permission, tag, and service.
 - [Commands](commands.md): every `asset-pilot:*` console command, with cron examples.
 - [REST API](rest-api.md): the Studio backend endpoints under `/pimcore-studio/api/asset-pilot`.
+- [Asset downloads (zip)](asset-downloads.md): joint zip download with pluggable layout strategies and thumbnails.
 - [Path Templates](path-templates.md): Twig templates, context variables, custom filters and functions.
 - [Conditions](conditions.md): ExpressionLanguage condition syntax and built-in functions.
 - [Permissions](permissions.md): the three permission levels and what they gate.

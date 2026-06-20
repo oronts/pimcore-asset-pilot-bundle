@@ -71,6 +71,20 @@ class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->arrayNode('zip')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('default_strategy')
+                            ->defaultValue('flat')
+                            ->info('Default download-archive layout: flat, folder, type, or a custom oronts_asset_pilot.zip_strategy name.')
+                        ->end()
+                        ->integerNode('max_assets')
+                            ->defaultValue(1000)
+                            ->min(1)
+                            ->info('Maximum number of assets packed into one download archive.')
+                        ->end()
+                    ->end()
+                ->end()
             ->end();
     }
 

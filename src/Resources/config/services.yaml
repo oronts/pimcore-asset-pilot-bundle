@@ -172,6 +172,14 @@ services:
         tags:
             - { name: 'kernel.reset', method: 'reset' }
 
+    # -- Asset download archive (zip) -------------------------------------------
+
+    Oronts\AssetPilotBundle\Service\AssetZipService:
+        arguments:
+            $strategies: !tagged_iterator oronts_asset_pilot.zip_strategy
+            $defaultStrategy: '%oronts_asset_pilot.zip.default_strategy%'
+            $maxAssets: '%oronts_asset_pilot.zip.max_assets%'
+
     # -- Integrity (broken-asset detection) -------------------------------------
 
     Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker:

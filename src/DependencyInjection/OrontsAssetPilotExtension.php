@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Notification\NotifierInterface;
+use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
@@ -32,6 +33,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         IntegrityCheckerInterface::class => 'oronts_asset_pilot.integrity_checker',
         NotifierInterface::class => 'oronts_asset_pilot.notifier',
         DuplicateMergeStrategyInterface::class => 'oronts_asset_pilot.duplicate_merge_strategy',
+        ZipEntryStrategyInterface::class => 'oronts_asset_pilot.zip_strategy',
     ];
     public function prepend(ContainerBuilder $container): void
     {
@@ -108,6 +110,10 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         // Stats caching (read-only dashboard/metrics/unused-storage panels)
         $container->setParameter('oronts_asset_pilot.cache.stats_ttl', $config['cache']['stats_ttl']);
         $container->setParameter('oronts_asset_pilot.cache.unused_stats_ttl', $config['cache']['unused_stats_ttl']);
+
+        // Download-archive (zip) layout + bounds
+        $container->setParameter('oronts_asset_pilot.zip.default_strategy', $config['zip']['default_strategy']);
+        $container->setParameter('oronts_asset_pilot.zip.max_assets', $config['zip']['max_assets']);
 
         // Process rules into Rule objects
         $rules = [];

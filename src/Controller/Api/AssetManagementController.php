@@ -11,9 +11,13 @@ use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
+use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,7 +36,48 @@ class AssetManagementController
         private readonly AssetPropertyService $propertyService,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly AssetZipService $zipService,
     ) {}
+
+    #[Route('/assets/download-zip', name: 'oronts_asset_pilot_assets_download_zip', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function downloadZip(Request $request): Response
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
+        }
+
+        $options = new ZipBuildOptions(
+            strategy: is_string($data['strategy'] ?? null) ? $data['strategy'] : null,
+            thumbnail: is_string($data['thumbnail'] ?? null) ? $data['thumbnail'] : null,
+        );
+
+        try {
+            $result = $this->zipService->buildFromAssetIds($assetIds, $options);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: zip download failed: {error}', ['error' => $e->getMessage()]);
+
+            return new JsonResponse(['error' => 'Failed to build the archive.'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        if ($result['added'] === 0 || $result['path'] === null) {
+            return new JsonResponse(['error' => 'No downloadable assets in the selection.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $response = new BinaryFileResponse($result['path']);
+        $response->deleteFileAfterSend(true);
+        $response->headers->set('Content-Type', 'application/zip');
+        $response->setContentDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, 'assets.zip');
+
+        return $response;
+    }
 
     #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_lock_asset', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
