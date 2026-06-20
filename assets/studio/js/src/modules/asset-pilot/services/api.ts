@@ -268,4 +268,29 @@ export const assetPilotApi = {
     request<{ message: string; assetId: number }>(`/assets/${id}/lock`, { method: 'POST' }),
   unlockAsset: (id: number) =>
     request<{ message: string; assetId: number }>(`/assets/${id}/lock`, { method: 'DELETE' }),
+
+  // Download selected assets jointly as a zip (the content-manager "cart").
+  downloadZip: async (assetIds: number[], options: { strategy?: string; thumbnail?: string } = {}): Promise<void> => {
+    const response = await fetch(`${BASE_URL}/assets/download-zip`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetIds, ...options }),
+    })
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string }
+      throw new ApiError(body.error ?? `Download failed (${response.status})`, response.status)
+    }
+
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'assets.zip'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  },
 }
