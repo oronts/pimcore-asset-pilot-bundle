@@ -191,17 +191,18 @@ class AssetSearchService implements AssetSearchServiceInterface
                 ->setParameter('ext', '%.' . Like::escape(ltrim((string) $filters['extension'], '.')));
         }
 
-        // Relations filter: keep only assets that are (or are not) referenced by any data object.
+        // Relations filter: keep only assets that are (or are not) referenced by any element. Uses the
+        // same source-agnostic NOT EXISTS predicate as UnusedAssetFinder, so "unreferenced" here means
+        // exactly what "unused" means on the Unused Assets tab (and is null-safe, unlike NOT IN).
         $referenced = $filters['referenced'] ?? '';
         if ($referenced === 'referenced' || $referenced === 'unreferenced') {
-            $operator = $referenced === 'referenced' ? 'IN' : 'NOT IN';
+            $operator = $referenced === 'referenced' ? 'EXISTS' : 'NOT EXISTS';
             $qb->andWhere(sprintf(
-                'a.id %s (SELECT d.targetid FROM %s d WHERE d.targettype = :refTgt AND d.sourcetype = :refSrc)',
+                '%s (SELECT 1 FROM %s d WHERE d.targetid = a.id AND d.targettype = :refTgt)',
                 $operator,
                 PimcoreSchema::TABLE_DEPENDENCIES,
             ))
-                ->setParameter('refTgt', PimcoreSchema::ELEMENT_TYPE_ASSET)
-                ->setParameter('refSrc', PimcoreSchema::ELEMENT_TYPE_OBJECT);
+                ->setParameter('refTgt', PimcoreSchema::ELEMENT_TYPE_ASSET);
         }
     }
 

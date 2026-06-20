@@ -20,12 +20,14 @@ class AssetSearchServiceTest extends TestCase
         $conn->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, path TEXT, filename TEXT, type TEXT, mimetype TEXT, creationDate INTEGER, modificationDate INTEGER)');
         $conn->executeStatement('CREATE TABLE properties (cid INTEGER, ctype TEXT, name TEXT, data TEXT)');
         $conn->executeStatement('CREATE TABLE dependencies (sourceid INTEGER, sourcetype TEXT, targetid INTEGER, targettype TEXT)');
-        foreach ([[1, 'a.png', 'image'], [2, 'b.pdf', 'document'], [3, 'c.jpg', 'image']] as [$id, $fn, $type]) {
+        foreach ([[1, 'a.png', 'image'], [2, 'b.pdf', 'document'], [3, 'c.jpg', 'image'], [4, 'd.png', 'image']] as [$id, $fn, $type]) {
             $conn->insert('assets', ['id' => $id, 'path' => '/x/', 'filename' => $fn, 'type' => $type, 'mimetype' => '', 'creationDate' => 0, 'modificationDate' => $id]);
         }
-        // A data object references assets 1 and 3; asset 2 is unreferenced.
+        // An object references assets 1 and 3; a document references asset 4 (any element counts as a
+        // reference, matching UnusedAssetFinder); asset 2 is unreferenced.
         $conn->insert('dependencies', ['sourceid' => 100, 'sourcetype' => 'object', 'targetid' => 1, 'targettype' => 'asset']);
         $conn->insert('dependencies', ['sourceid' => 100, 'sourcetype' => 'object', 'targetid' => 3, 'targettype' => 'asset']);
+        $conn->insert('dependencies', ['sourceid' => 200, 'sourcetype' => 'document', 'targetid' => 4, 'targettype' => 'asset']);
 
         return new class ($conn, new NullLogger()) extends AssetSearchService {
             protected function fileSize(string $fullPath): int
@@ -49,9 +51,9 @@ class AssetSearchServiceTest extends TestCase
     {
         $service = $this->service();
 
-        self::assertSame([1, 3], $this->ids($service->search(['referenced' => 'referenced'])));
+        self::assertSame([1, 3, 4], $this->ids($service->search(['referenced' => 'referenced'])), 'object- and document-referenced both count');
         self::assertSame([2], $this->ids($service->search(['referenced' => 'unreferenced'])));
-        self::assertSame([1, 2, 3], $this->ids($service->search([])), 'no filter returns every asset');
+        self::assertSame([1, 2, 3, 4], $this->ids($service->search([])), 'no filter returns every asset');
     }
 
     #[Test]
@@ -60,6 +62,6 @@ class AssetSearchServiceTest extends TestCase
         $service = $this->service();
 
         self::assertSame([2], $this->ids($service->search(['extension' => 'pdf'])));
-        self::assertSame([1], $this->ids($service->search(['extension' => '.png'])), 'a leading dot is tolerated');
+        self::assertSame([1, 4], $this->ids($service->search(['extension' => '.png'])), 'a leading dot is tolerated');
     }
 }
