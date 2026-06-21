@@ -7,7 +7,7 @@
     "build": "rsbuild build",
     "check-types": "tsc --noEmit"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "devDependencies": {
     "@module-federation/rsbuild-plugin": "^0.14.0",
@@ -15,10 +15,11 @@
     "@rsbuild/plugin-react": "^1.3.1",
     "@types/react-dom": "18.3.x",
     "@types/webpack-env": "^1.18.4",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "uuid": "^10.0.0"
   },
   "dependencies": {
-    "@pimcore/studio-ui-bundle": "file:../../../../vendor/pimcore/studio-ui-bundle/public/build/studio-npm-package.tgz",
+    "@pimcore/studio-ui-bundle": "0.15.17",
     "i18next": "^23.16.8",
     "react": "18.3.x",
     "react-dom": "18.3.x",

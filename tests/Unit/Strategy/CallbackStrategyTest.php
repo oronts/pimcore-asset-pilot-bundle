@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Strategy;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Strategy\CallbackStrategy;
+use Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -144,6 +145,34 @@ class CallbackStrategyTest extends TestCase
         self::assertSame($asset, $receivedArgs[0]);
         self::assertSame($object, $receivedArgs[1]);
         self::assertSame($rule, $receivedArgs[2]);
+    }
+
+    #[Test]
+    public function delegatesToAConflictStrategyInterfaceService(): void
+    {
+        $custom = new class () implements ConflictStrategyInterface {
+            public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+            {
+                return true;
+            }
+
+            public function supports(MoveStrategy $strategy): bool
+            {
+                return false;
+            }
+        };
+
+        $container = $this->createMock(ContainerInterface::class);
+        $container->method('has')->with('app.custom_strategy')->willReturn(true);
+        $container->method('get')->with('app.custom_strategy')->willReturn($custom);
+
+        $strategy = new CallbackStrategy($container, new NullLogger());
+
+        self::assertTrue($strategy->resolve(
+            $this->createMock(Asset::class),
+            $this->createMock(AbstractObject::class),
+            $this->createRule('app.custom_strategy'),
+        ));
     }
 
     #[Test]

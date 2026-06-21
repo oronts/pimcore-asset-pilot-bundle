@@ -1,15 +1,19 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useElementHelper } from '@pimcore/studio-ui-bundle/modules/element'
+import type { ElementType } from '@pimcore/studio-ui-bundle'
 import { useToast } from '../../hooks/use-toast'
-
-type ElementType = 'asset' | 'data-object'
 
 interface OpenButtonProps {
   id: number
-  type: ElementType
+  type: ElementType // asset folders open as 'asset'
+  label?: string // a filename to render instead of the bare id
 }
 
-export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
+export const OpenButton: React.FC<OpenButtonProps> = ({ id, type, label }) => {
+  const { t } = useTranslation()
   const toast = useToast()
+  const { openElement } = useElementHelper()
   const [opening, setOpening] = useState(false)
 
   const handleClick = async (): Promise<void> => {
@@ -17,19 +21,10 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
     setOpening(true)
 
     try {
-      const api = (window as any).PimcoreStudio
-      if (api?.element != null) {
-        if (type === 'asset') {
-          await api.element.openAsset(id)
-        } else {
-          await api.element.openDataObject(id)
-        }
-      } else {
-        toast.warning(`Pimcore Studio API not available — cannot open ${type} #${id}`)
-      }
+      await openElement({ id, type })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      toast.error(`Failed to open ${type} #${id}: ${msg}`)
+      toast.error(t('asset-pilot.open.failed', { type, id, message: msg }))
     } finally {
       setOpening(false)
     }
@@ -40,9 +35,9 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type }) => {
       onClick={() => { void handleClick() }}
       disabled={opening}
       style={{ ...linkStyle, opacity: opening ? 0.5 : 1 }}
-      title={`Open ${type} #${id}`}
+      title={t('asset-pilot.open.title', { type, id })}
     >
-      {id}
+      {label ?? id}
     </button>
   )
 }

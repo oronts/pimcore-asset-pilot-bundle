@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
-use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
-use Psr\Log\LoggerInterface;
+use Pimcore\Model\DataObject\Concrete;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -25,10 +25,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class DebugRuleCommand extends Command
 {
     public function __construct(
-        private readonly RuleEngine $ruleEngine,
-        private readonly AssetFieldExtractor $fieldExtractor,
+        private readonly RuleEngineInterface $ruleEngine,
+        private readonly AssetFieldExtractorInterface $fieldExtractor,
         private readonly NamingStrategyInterface $namingStrategy,
-        private readonly LoggerInterface $logger,
     ) {
         parent::__construct();
     }
@@ -62,7 +61,8 @@ class DebugRuleCommand extends Command
         $fieldFilter = $input->getOption('field');
         $assetIdFilter = $input->getOption('asset-id');
 
-        $io->title(sprintf('Asset Pilot — Rule Debugger for %s #%d', $object->getClassName(), $object->getId()));
+        $className = $object instanceof Concrete ? $object->getClassName() : 'Folder';
+        $io->title(sprintf('Asset Pilot — Rule Debugger for %s #%d', $className, $object->getId()));
 
         if ($assetIdFilter !== null) {
             $asset = Asset::getById((int) $assetIdFilter);
@@ -129,8 +129,7 @@ class DebugRuleCommand extends Command
         $rows = [];
         foreach ($evaluations as $eval) {
             $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-            $detail = $this->formatDetail($eval);
-            $rows[] = [$eval->ruleName, $resultLabel, $detail];
+            $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
         }
 
         $io->table(['Rule', 'Result', 'Detail'], $rows);
@@ -145,22 +144,5 @@ class DebugRuleCommand extends Command
         }
 
         $io->newLine();
-    }
-
-    private function formatDetail(RuleEvaluation $eval): string
-    {
-        if ($eval->matched) {
-            return '-> ' . ($eval->resolvedPath ?? '(unknown path)');
-        }
-
-        return match ($eval->rejectionReason) {
-            'disabled' => 'disabled',
-            'class_mismatch' => 'class_mismatch: ' . ($eval->filterDetails ?? ''),
-            'field_mismatch' => 'field_mismatch: ' . ($eval->filterDetails ?? ''),
-            'condition_failed' => 'condition_failed: ' . ($eval->conditionExpression ?? '') .
-                ($eval->conditionError !== null ? ' (error: ' . $eval->conditionError . ')' : ''),
-            'filter_rejected' => 'filter_rejected: ' . ($eval->filterDetails ?? ''),
-            default => $eval->rejectionReason ?? 'unknown',
-        };
     }
 }

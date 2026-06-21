@@ -4,8 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
-use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
+use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
+use Oronts\AssetPilotBundle\Service\StorageTrendService;
+use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,17 +20,31 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class UnusedAssetsController
 {
+    use HandlesBulkIds;
+    use StreamsCsv;
+
+    private const int EXPORT_PAGE = 200;
+    private const int MAX_EXPORT_PAGES = 10000;
+
     public function __construct(
-        private readonly UnusedAssetFinder $unusedAssetFinder,
+        private readonly UnusedAssetFinderInterface $unusedAssetFinder,
+        private readonly QuarantineService $quarantineService,
         private readonly LoggerInterface $logger,
+        private readonly StorageTrendService $storageTrend,
     ) {}
 
     #[Route('/unused-assets', name: 'oronts_asset_pilot_unused_assets', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
     public function list(Request $request): JsonResponse
     {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, 200);
+
+        if ($request->query->has('minSize') || $request->query->has('maxSize')) {
+            return new JsonResponse([
+                'error' => 'Size filtering (minSize/maxSize) is not supported: the Pimcore assets '
+                    . 'table has no size column. Filter by type, extension, folder, or date instead.',
+            ], Response::HTTP_BAD_REQUEST);
+        }
 
         $filters = array_filter([
             'type' => $request->query->get('type'),
@@ -33,12 +52,16 @@ class UnusedAssetsController
             'before' => $request->query->get('before'),
             'after' => $request->query->get('after'),
             'folder' => $request->query->get('folder'),
-            'minSize' => $request->query->get('minSize') ? (int) $request->query->get('minSize') : null,
-            'maxSize' => $request->query->get('maxSize') ? (int) $request->query->get('maxSize') : null,
             'confidence' => $request->query->get('confidence'),
         ], static fn ($v) => $v !== null && $v !== '');
 
-        $result = $this->unusedAssetFinder->findUnused($filters, $page, $limit);
+        $result = $this->unusedAssetFinder->findUnused(
+            $filters,
+            $page,
+            $limit,
+            $request->query->get('sort'),
+            $request->query->get('order'),
+        );
 
         return new JsonResponse($result);
     }
@@ -47,7 +70,58 @@ class UnusedAssetsController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function stats(): JsonResponse
     {
-        return new JsonResponse($this->unusedAssetFinder->getUnusedStats());
+        // Prefer the materialised snapshot (two indexed reads, no catalog scan); fall back to the
+        // cached live computation when nothing has been captured yet.
+        return new JsonResponse(
+            $this->storageTrend->latestUnusedStats() ?? $this->unusedAssetFinder->getUnusedStatsCached(),
+        );
+    }
+
+    /**
+     * Stream the unused-asset listing as CSV (id, path, type, size, modified), honoring the same
+     * filters as the list endpoint, paged lazily so it stays memory-flat.
+     */
+    #[Route('/unused-assets/export', name: 'oronts_asset_pilot_unused_assets_export', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function export(Request $request): Response
+    {
+        if ($request->query->has('minSize') || $request->query->has('maxSize')) {
+            return new JsonResponse([
+                'error' => 'Size filtering (minSize/maxSize) is not supported: the Pimcore assets '
+                    . 'table has no size column. Filter by type, extension, folder, or date instead.',
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
+        $filters = array_filter([
+            'type' => $request->query->get('type'),
+            'extension' => $request->query->get('extension'),
+            'before' => $request->query->get('before'),
+            'after' => $request->query->get('after'),
+            'folder' => $request->query->get('folder'),
+            'confidence' => $request->query->get('confidence'),
+        ], static fn ($v) => $v !== null && $v !== '');
+
+        $rows = (function () use ($filters): \Generator {
+            $page = 1;
+            do {
+                $result = $this->unusedAssetFinder->findUnused($filters, $page, self::EXPORT_PAGE);
+                foreach ($result['items'] as $item) {
+                    yield [
+                        $item['id'] ?? '',
+                        $item['full_path'] ?? '',
+                        $item['type'] ?? '',
+                        $item['file_size'] ?? '',
+                        $item['modified_at'] ?? '',
+                    ];
+                }
+            } while (count($result['items']) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
+        })();
+
+        return $this->streamCsv(
+            'asset-pilot-unused-' . date('Y-m-d') . '.csv',
+            ['ID', 'Path', 'Type', 'File Size (bytes)', 'Modified'],
+            $rows,
+        );
     }
 
     #[Route('/unused-assets/bulk-delete', name: 'oronts_asset_pilot_unused_assets_bulk_delete', methods: ['POST'])]
@@ -60,12 +134,10 @@ class UnusedAssetsController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
-
-        $assetIds = array_map('intval', $assetIds);
 
         $this->logger->info('Asset Pilot: bulk delete requested for {count} unused assets', [
             'count' => count($assetIds),
@@ -86,18 +158,16 @@ class UnusedAssetsController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
         $targetFolder = $data['targetFolder'] ?? '';
 
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
 
         if (empty($targetFolder)) {
             return new JsonResponse(['error' => 'targetFolder is required'], Response::HTTP_BAD_REQUEST);
         }
-
-        $assetIds = array_map('intval', $assetIds);
 
         $this->logger->info('Asset Pilot: bulk move requested for {count} unused assets to {folder}', [
             'count' => count($assetIds),
@@ -107,5 +177,27 @@ class UnusedAssetsController
         $result = $this->unusedAssetFinder->moveAssets($assetIds, $targetFolder);
 
         return new JsonResponse($result);
+    }
+
+    #[Route('/unused-assets/bulk-quarantine', name: 'oronts_asset_pilot_unused_assets_bulk_quarantine', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function bulkQuarantine(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
+        }
+
+        $this->logger->info('Asset Pilot: bulk quarantine requested for {count} unused assets', [
+            'count' => count($assetIds),
+        ]);
+
+        return new JsonResponse($this->quarantineService->quarantine($assetIds));
     }
 }

@@ -4,25 +4,81 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\PropertyType;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
-use Oronts\AssetPilotBundle\Service\AssetSearchService;
+use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
+use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
+use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AssetManagementController
 {
+    use HandlesBulkIds;
+
+    private const int MAX_TAGS = 500;
+
     public function __construct(
-        private readonly AssetSearchService $searchService,
+        private readonly AssetSearchServiceInterface $searchService,
         private readonly AssetPropertyService $propertyService,
         private readonly LoggerInterface $logger,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly AssetZipService $zipService,
     ) {}
+
+    #[Route('/assets/download-zip', name: 'oronts_asset_pilot_assets_download_zip', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function downloadZip(Request $request): Response
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
+        }
+
+        $options = new ZipBuildOptions(
+            strategy: is_string($data['strategy'] ?? null) ? $data['strategy'] : null,
+            thumbnail: is_string($data['thumbnail'] ?? null) ? $data['thumbnail'] : null,
+        );
+
+        try {
+            $result = $this->zipService->buildFromAssetIds($assetIds, $options);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: zip download failed: {error}', ['error' => $e->getMessage()]);
+
+            return new JsonResponse(['error' => 'Failed to build the archive.'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        if ($result['added'] === 0 || $result['path'] === null) {
+            return new JsonResponse(['error' => 'No downloadable assets in the selection.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $response = new BinaryFileResponse($result['path']);
+        $response->deleteFileAfterSend(true);
+        $response->headers->set('Content-Type', 'application/zip');
+        $response->setContentDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, 'assets.zip');
+
+        return $response;
+    }
 
     #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_lock_asset', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
@@ -64,32 +120,28 @@ class AssetManagementController
         }
     }
 
-    #[Route('/assets/by-object/{objectId}', name: 'oronts_asset_pilot_assets_by_object', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function assetsByObject(int $objectId, Request $request): JsonResponse
-    {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
-        $type = $request->query->get('type');
-
-        return new JsonResponse($this->searchService->findByObject($objectId, $page, $limit, $type));
-    }
-
     #[Route('/assets/search', name: 'oronts_asset_pilot_assets_search', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
     public function search(Request $request): JsonResponse
     {
-        $page = max(1, (int) $request->query->get('page', 1));
-        $limit = min(200, max(1, (int) $request->query->get('limit', 50)));
+        [$page, $limit] = Pagination::fromRequest($request, 200);
 
         $filters = [
             'q' => trim((string) $request->query->get('q', '')),
             'type' => $request->query->get('type'),
             'folder' => $request->query->get('folder'),
             'objectId' => $request->query->getInt('objectId'),
+            'extension' => $request->query->get('extension'),
+            'referenced' => $request->query->get('referenced'),
         ];
 
-        return new JsonResponse($this->searchService->search($filters, $page, $limit));
+        return new JsonResponse($this->searchService->search(
+            $filters,
+            $page,
+            $limit,
+            $request->query->get('sort'),
+            $request->query->get('order'),
+        ));
     }
 
     #[Route('/assets/tags', name: 'oronts_asset_pilot_available_tags', methods: ['GET'])]
@@ -98,15 +150,11 @@ class AssetManagementController
     {
         try {
             $listing = new Tag\Listing();
-            $tags = [];
+            $listing->setLimit(self::MAX_TAGS);
+            $tags = array_map($this->serializeTag(...), $listing->getTags());
 
-            foreach ($listing->getTags() as $tag) {
-                $tags[] = [
-                    'id' => $tag->getId(),
-                    'name' => $tag->getName(),
-                    'parentId' => $tag->getParentId(),
-                    'path' => $tag->getFullIdPath(),
-                ];
+            if (count($tags) === self::MAX_TAGS) {
+                $this->logger->warning('Asset Pilot: tag list capped at {max}; some tags are not returned.', ['max' => self::MAX_TAGS]);
             }
 
             return new JsonResponse($tags);
@@ -117,29 +165,17 @@ class AssetManagementController
         }
     }
 
-    #[Route('/assets/{id}/tags', name: 'oronts_asset_pilot_asset_tags', methods: ['GET'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function assetTags(int $id): JsonResponse
+    /**
+     * @return array{id: int|null, name: string, parentId: int|null, path: string}
+     */
+    private function serializeTag(Tag $tag): array
     {
-        try {
-            $tags = Tag::getTagsForElement('asset', $id);
-            $result = [];
-
-            foreach ($tags as $tag) {
-                $result[] = [
-                    'id' => $tag->getId(),
-                    'name' => $tag->getName(),
-                    'parentId' => $tag->getParentId(),
-                    'path' => $tag->getFullIdPath(),
-                ];
-            }
-
-            return new JsonResponse($result);
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: failed to get asset tags: {error}', ['error' => $e->getMessage()]);
-
-            return new JsonResponse([]);
-        }
+        return [
+            'id' => $tag->getId(),
+            'name' => $tag->getName(),
+            'parentId' => $tag->getParentId(),
+            'path' => $tag->getFullIdPath(),
+        ];
     }
 
     #[Route('/assets/bulk-tag', name: 'oronts_asset_pilot_bulk_tag', methods: ['POST'])]
@@ -152,20 +188,17 @@ class AssetManagementController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
-        $tagIds = $data['tagIds'] ?? [];
         $replace = (bool) ($data['replace'] ?? false);
 
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
 
-        if (empty($tagIds) || !is_array($tagIds)) {
-            return new JsonResponse(['error' => 'tagIds array is required'], Response::HTTP_BAD_REQUEST);
+        $tagIds = $this->validatedBulkIds($data['tagIds'] ?? null, 'tagIds');
+        if ($tagIds instanceof JsonResponse) {
+            return $tagIds;
         }
-
-        $assetIds = array_map('intval', $assetIds);
-        $tagIds = array_map('intval', $tagIds);
 
         try {
             Tag::batchAssignTagsToElement('asset', $assetIds, $tagIds, $replace);
@@ -175,6 +208,11 @@ class AssetManagementController
                 'tags' => count($tagIds),
                 'replace' => $replace ? 'yes' : 'no',
             ]);
+
+            $this->eventDispatcher->dispatch(
+                new AssetMutationEvent($assetIds, 'tag', ['tagIds' => $tagIds, 'replace' => $replace]),
+                AssetPilotEvents::ASSETS_TAGGED,
+            );
 
             return new JsonResponse([
                 'tagged' => count($assetIds),
@@ -202,25 +240,23 @@ class AssetManagementController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = $data['assetIds'] ?? [];
         $name = trim((string) ($data['name'] ?? ''));
-        $type = trim((string) ($data['type'] ?? 'text'));
+        $type = trim((string) ($data['type'] ?? PropertyType::Text->value));
         $value = $data['data'] ?? '';
 
-        if (empty($assetIds) || !is_array($assetIds)) {
-            return new JsonResponse(['error' => 'assetIds array is required'], Response::HTTP_BAD_REQUEST);
+        $assetIds = $this->validatedBulkIds($data['assetIds'] ?? null, 'assetIds');
+        if ($assetIds instanceof JsonResponse) {
+            return $assetIds;
         }
 
         if ($name === '') {
             return new JsonResponse(['error' => 'name is required'], Response::HTTP_BAD_REQUEST);
         }
 
-        $allowedTypes = ['text', 'bool', 'select'];
-        if (!in_array($type, $allowedTypes, true)) {
-            return new JsonResponse(['error' => 'type must be one of: ' . implode(', ', $allowedTypes)], Response::HTTP_BAD_REQUEST);
+        if (!in_array($type, PropertyType::values(), true)) {
+            return new JsonResponse(['error' => 'type must be one of: ' . implode(', ', PropertyType::values())], Response::HTTP_BAD_REQUEST);
         }
 
-        $assetIds = array_map('intval', $assetIds);
         $result = $this->propertyService->bulkSetProperty($assetIds, $name, $type, $value);
 
         return new JsonResponse([

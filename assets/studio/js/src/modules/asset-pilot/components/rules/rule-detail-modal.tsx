@@ -2,6 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRuleDetail } from '../../hooks/use-asset-pilot-api'
 import { StrategyTag, StatusTag } from '../shared/status-tag'
+import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 
 interface RuleDetailModalProps {
   ruleName: string
@@ -11,10 +12,11 @@ interface RuleDetailModalProps {
 export const RuleDetailModal: React.FC<RuleDetailModalProps> = ({ ruleName, onClose }) => {
   const { t } = useTranslation()
   const { data: rule, loading, error } = useRuleDetail(ruleName)
+  const modalRef = useModalDismiss<HTMLDivElement>(onClose)
 
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.rule-detail.title', { name: ruleName })}</h3>
           <button onClick={onClose} style={closeBtnStyle}>&times;</button>

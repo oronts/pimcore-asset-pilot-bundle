@@ -7,7 +7,9 @@ namespace Oronts\AssetPilotBundle\Condition;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
 
 class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
@@ -17,33 +19,18 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
     /** @var array<string, \Symfony\Component\ExpressionLanguage\ParsedExpression> */
     protected array $compiledCache = [];
 
+    /**
+     * @param iterable<ExpressionFunctionProviderInterface> $functionProviders consumer-tagged providers
+     */
     public function __construct(
         protected readonly LoggerInterface $logger,
+        protected readonly iterable $functionProviders = [],
     ) {}
 
-    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule): bool
+    public function evaluate(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool
     {
-        if ($rule->condition === null || $rule->condition === '') {
-            return true;
-        }
-
         try {
-            $result = (bool) $this->getExpressionLanguage()->evaluate(
-                $this->getCompiledExpression($rule->condition),
-                [
-                    'object' => $object,
-                    'asset' => $asset,
-                    'rule' => $rule,
-                ],
-            );
-
-            $this->logger->debug('Condition "{condition}" evaluated to {result} for rule "{rule}".', [
-                'condition' => $rule->condition,
-                'result' => $result ? 'true' : 'false',
-                'rule' => $rule->name,
-            ]);
-
-            return $result;
+            return $this->evaluateStrict($object, $asset, $rule, $locale);
         } catch (\Throwable $e) {
             $this->logger->warning('Condition evaluation failed for rule "{rule}": {error}', [
                 'rule' => $rule->name,
@@ -56,12 +43,47 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         }
     }
 
+    public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool
+    {
+        if ($rule->condition === null || $rule->condition === '') {
+            return true;
+        }
+
+        $result = (bool) $this->getExpressionLanguage()->evaluate(
+            $this->getCompiledExpression($rule->condition),
+            [
+                'object' => $object,
+                'asset' => $asset,
+                'rule' => $rule,
+                'locale' => $locale,
+            ],
+        );
+
+        $this->logger->debug('Condition "{condition}" evaluated to {result} for rule "{rule}".', [
+            'condition' => $rule->condition,
+            'result' => $result ? 'true' : 'false',
+            'rule' => $rule->name,
+        ]);
+
+        return $result;
+    }
+
+    /**
+     * Parse-only check used by config validation. Uses the same configured ExpressionLanguage as
+     * evaluate(), so a condition calling the bundle's own functions (is_image, asset_type, ...) is
+     * not falsely reported as a syntax error. Throws on invalid syntax.
+     */
+    public function validateSyntax(string $expression): void
+    {
+        $this->getExpressionLanguage()->parse($expression, ['object', 'asset', 'rule', 'locale']);
+    }
+
     protected function getCompiledExpression(string $expression): \Symfony\Component\ExpressionLanguage\ParsedExpression
     {
         if (!isset($this->compiledCache[$expression])) {
             $this->compiledCache[$expression] = $this->getExpressionLanguage()->parse(
                 $expression,
-                ['object', 'asset', 'rule'],
+                ['object', 'asset', 'rule', 'locale'],
             );
         }
 
@@ -76,6 +98,10 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
 
         $this->expressionLanguage = new ExpressionLanguage();
         $this->registerFunctions();
+
+        foreach ($this->functionProviders as $provider) {
+            $this->expressionLanguage->registerProvider($provider);
+        }
 
         return $this->expressionLanguage;
     }
@@ -107,7 +133,7 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
         $el->register(
             'object_class',
             static fn (string $object): string => sprintf('(%s)->getClassName()', $object),
-            static fn (array $vars, AbstractObject $object): string => $object->getClassName(),
+            static fn (array $vars, AbstractObject $object): string => $object instanceof Concrete ? ($object->getClassName() ?? '') : '',
         );
 
         $el->register(

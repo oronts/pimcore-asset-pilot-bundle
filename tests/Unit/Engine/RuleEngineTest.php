@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Engine;
 
 use Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface;
+use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -52,6 +52,28 @@ class RuleEngineTest extends TestCase
     }
 
     #[Test]
+    public function aLocaleScopedRuleOnlyMatchesItsDeclaredLocales(): void
+    {
+        $this->conditionEvaluator->method('evaluate')->willReturn(true);
+        $this->filter->method('accept')->willReturn(true);
+        $this->pathResolver->method('resolve')->willReturn('/x');
+
+        $scoped = new Rule(
+            name: 'de-only', class: 'Product', fields: [], condition: null,
+            targetPath: '/t', strategy: MoveStrategy::Always, callback: null,
+            priority: 10, enabled: true, filters: [], options: [], actions: [], locales: ['de'],
+        );
+        $engine = $this->createEngine([$scoped]);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $asset = $this->createMock(Asset::class);
+
+        self::assertCount(1, $engine->matchField($object, $asset, 'image', 'de'), 'matches its declared locale');
+        self::assertCount(0, $engine->matchField($object, $asset, 'image', 'en'), 'skips other locales');
+        self::assertCount(0, $engine->matchField($object, $asset, 'image', null), 'a locale-scoped rule skips non-localized fields');
+    }
+
+    #[Test]
     public function sortedRulesByPriorityDescending(): void
     {
         $r1 = $this->createRule('low', 'Product', 1);
@@ -64,6 +86,36 @@ class RuleEngineTest extends TestCase
         self::assertSame('high', $rules[0]->name);
         self::assertSame('mid', $rules[1]->name);
         self::assertSame('low', $rules[2]->name);
+    }
+
+    #[Test]
+    public function ruleProvidersContributeRulesMergedAndSortedByPriority(): void
+    {
+        $configRule = $this->createRule('config', 'Product', 50);
+        $providedRule = $this->createRule('provided', 'Product', 90);
+
+        $provider = new class ($providedRule) implements \Oronts\AssetPilotBundle\Engine\RuleProviderInterface {
+            public function __construct(private readonly Rule $rule) {}
+
+            public function getRules(): iterable
+            {
+                return [$this->rule];
+            }
+        };
+
+        $engine = new RuleEngine(
+            rules: [$configRule],
+            conditionEvaluator: $this->conditionEvaluator,
+            pathResolver: $this->pathResolver,
+            filter: $this->filter,
+            logger: new NullLogger(),
+            ruleProviders: [$provider],
+        );
+
+        $rules = $engine->getRules();
+        self::assertCount(2, $rules);
+        self::assertSame('provided', $rules[0]->name);
+        self::assertSame('config', $rules[1]->name);
     }
 
     #[Test]
@@ -296,21 +348,6 @@ class RuleEngineTest extends TestCase
         self::assertSame('de_DE', $matches[0]->locale);
     }
 
-    #[Test]
-    public function findRulesForClassReturnsMatchingEnabledRules(): void
-    {
-        $r1 = $this->createRule('product-rule', 'Product', 10);
-        $r2 = $this->createRule('category-rule', 'Category', 20);
-        $r3 = $this->createRule('disabled', 'Product', 5, enabled: false);
-        $r4 = $this->createRule('wildcard', '*', 1);
-
-        $engine = $this->createEngine([$r1, $r2, $r3, $r4]);
-
-        $result = $engine->findRulesForClass('Product');
-        self::assertCount(2, $result);
-        self::assertSame('product-rule', $result[0]->name);
-        self::assertSame('wildcard', $result[1]->name);
-    }
 
     #[Test]
     public function parsesArrayConfigToRules(): void

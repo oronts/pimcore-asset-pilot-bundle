@@ -20,8 +20,8 @@ class RuleTest extends TestCase
             name: 'test_rule',
             class: 'Product',
             fields: ['productImages'],
-            condition: 'object.getSapId() != null',
-            targetPath: '/Products/{{ sapId }}/Images',
+            condition: 'object.getProductCode() != null',
+            targetPath: '/Products/{{ productCode }}/Images',
             strategy: MoveStrategy::Always,
             callback: null,
             priority: 100,
@@ -32,8 +32,8 @@ class RuleTest extends TestCase
         self::assertSame('test_rule', $rule->name);
         self::assertSame('Product', $rule->class);
         self::assertSame(['productImages'], $rule->fields);
-        self::assertSame('object.getSapId() != null', $rule->condition);
-        self::assertSame('/Products/{{ sapId }}/Images', $rule->targetPath);
+        self::assertSame('object.getProductCode() != null', $rule->condition);
+        self::assertSame('/Products/{{ productCode }}/Images', $rule->targetPath);
         self::assertSame(MoveStrategy::Always, $rule->strategy);
         self::assertNull($rule->callback);
         self::assertSame(100, $rule->priority);
@@ -46,19 +46,20 @@ class RuleTest extends TestCase
     {
         $rule = Rule::fromConfig('my_rule', [
             'class' => 'Product',
-            'target_path' => '/Assets/{{ sapId }}',
+            'target_path' => '/Assets/{{ productCode }}',
         ]);
 
         self::assertSame('my_rule', $rule->name);
         self::assertSame('Product', $rule->class);
         self::assertSame([], $rule->fields);
         self::assertNull($rule->condition);
-        self::assertSame('/Assets/{{ sapId }}', $rule->targetPath);
+        self::assertSame('/Assets/{{ productCode }}', $rule->targetPath);
         self::assertSame(MoveStrategy::Always, $rule->strategy);
         self::assertNull($rule->callback);
-        self::assertSame(0, $rule->priority);
+        self::assertSame(10, $rule->priority);
         self::assertTrue($rule->enabled);
         self::assertSame([], $rule->filters);
+        self::assertSame([], $rule->options);
     }
 
     #[Test]
@@ -74,6 +75,7 @@ class RuleTest extends TestCase
             'priority' => 50,
             'enabled' => false,
             'filters' => ['types' => ['image'], 'max_size' => 10485760],
+            'options' => ['threshold' => 5, 'mode' => 'strict'],
         ]);
 
         self::assertSame('full_rule', $rule->name);
@@ -85,6 +87,7 @@ class RuleTest extends TestCase
         self::assertSame(50, $rule->priority);
         self::assertFalse($rule->enabled);
         self::assertSame(['types' => ['image'], 'max_size' => 10485760], $rule->filters);
+        self::assertSame(['threshold' => 5, 'mode' => 'strict'], $rule->options);
     }
 
     #[Test]
@@ -99,5 +102,31 @@ class RuleTest extends TestCase
 
         self::assertSame(MoveStrategy::Callback, $rule->strategy);
         self::assertSame('my.service', $rule->callback);
+    }
+
+    #[Test]
+    public function toConfigArrayOmitsTheNameAndRebuildsViaFromConfig(): void
+    {
+        $rule = Rule::fromConfig('full_rule', [
+            'class' => 'Category',
+            'fields' => ['images', 'documents'],
+            'condition' => 'object.getId() > 0',
+            'target_path' => '/Categories/{{ className }}',
+            'strategy' => 'first_assignment',
+            'callback' => 'app.my_callback',
+            'priority' => 50,
+            'enabled' => false,
+            'filters' => ['types' => ['image'], 'max_size' => 10485760],
+            'options' => ['threshold' => 5, 'mode' => 'strict'],
+        ]);
+
+        $config = $rule->toConfigArray();
+
+        self::assertArrayNotHasKey('name', $config, 'name is the rule-set key, not part of the per-rule config');
+        self::assertSame('first_assignment', $config['strategy'], 'strategy serializes to its enum value');
+
+        // Round-trip: rebuilding from the exported config reproduces an identical rule.
+        $rebuilt = Rule::fromConfig('full_rule', $config);
+        self::assertEquals($rule, $rebuilt);
     }
 }

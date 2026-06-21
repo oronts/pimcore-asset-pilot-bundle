@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle;
 
-use Doctrine\DBAL\Connection;
 use Pimcore\Extension\Bundle\AbstractPimcoreBundle;
 use Pimcore\Extension\Bundle\Traits\PackageVersionTrait;
 
@@ -24,9 +23,9 @@ class OrontsAssetPilotBundle extends AbstractPimcoreBundle
 
     public function getInstaller(): Installer
     {
-        /** @var Connection $connection */
-        $connection = $this->container->get('doctrine.dbal.default_connection');
+        /** @var Installer $installer */
+        $installer = $this->container->get(Installer::class);
 
-        return new Installer($this, $connection);
+        return $installer;
     }
 }

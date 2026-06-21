@@ -6,10 +6,17 @@ import { RulesTab } from './rules/rules-tab'
 import { OperationsTab } from './operations/operations-tab'
 import { AuditTab } from './audit/audit-tab'
 import { UnusedAssetsTab } from './unused-assets/unused-assets-tab'
+import { DuplicatesTab } from './duplicates/duplicates-tab'
+import { IntegrityTab } from './integrity/integrity-tab'
+import { QuarantineTab } from './quarantine/quarantine-tab'
+import { StorageTrendsTab } from './storage/storage-trends-tab'
+import { EmptyFoldersTab } from './folders/empty-folders-tab'
+import { DriftTab } from './drift/drift-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
-import { PermissionContext, usePermissionsFetch } from '../hooks/use-permissions'
 
-const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'management'] as const
+const DOCS_URL = 'https://github.com/oronts/pimcore-asset-pilot-bundle/tree/main/docs'
+
+const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'integrity', 'quarantine', 'storage', 'folders', 'drift', 'management'] as const
 type TabKey = typeof tabKeys[number]
 
 const tabLabelKeys: Record<TabKey, string> = {
@@ -18,30 +25,20 @@ const tabLabelKeys: Record<TabKey, string> = {
   operations: 'asset-pilot.tabs.operations',
   audit: 'asset-pilot.tabs.audit',
   unused: 'asset-pilot.tabs.unused',
+  duplicates: 'asset-pilot.tabs.duplicates',
+  integrity: 'asset-pilot.tabs.integrity',
+  quarantine: 'asset-pilot.tabs.quarantine',
+  storage: 'asset-pilot.tabs.storage',
+  folders: 'asset-pilot.tabs.folders',
+  drift: 'asset-pilot.tabs.drift',
   management: 'asset-pilot.tabs.management',
 }
 
 export const AssetPilotDashboard: React.FC = () => {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard')
-  const perms = usePermissionsFetch()
-
-  if (perms.loading) {
-    return <div style={{ padding: 24, color: '#8c8c8c', fontFamily: 'Inter, -apple-system, sans-serif' }}>{t('asset-pilot.common.loading')}</div>
-  }
-
-  if (!perms.view) {
-    return (
-      <div style={{ padding: 48, textAlign: 'center', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>&#128274;</div>
-        <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.permission.denied')}</h3>
-        <p style={{ margin: 0, fontSize: 13, color: '#8c8c8c' }}>{t('asset-pilot.permission.denied-desc')}</p>
-      </div>
-    )
-  }
 
   return (
-    <PermissionContext.Provider value={perms}>
     <ToastProvider>
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
       <div style={{ padding: '16px 24px 0', borderBottom: '1px solid #f0f0f0' }}>
@@ -57,6 +54,15 @@ export const AssetPilotDashboard: React.FC = () => {
           }}>
             {t('asset-pilot.nav.by-oronts')}
           </span>
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t('asset-pilot.nav.docs-aria')}
+            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: '#1677ff', textDecoration: 'none' }}
+          >
+            {t('asset-pilot.nav.docs')} ↗
+          </a>
         </div>
 
         <div style={{ display: 'flex', gap: 0 }}>
@@ -88,10 +94,15 @@ export const AssetPilotDashboard: React.FC = () => {
         {activeTab === 'operations' && <OperationsTab />}
         {activeTab === 'audit' && <AuditTab />}
         {activeTab === 'unused' && <UnusedAssetsTab />}
+        {activeTab === 'duplicates' && <DuplicatesTab />}
+        {activeTab === 'integrity' && <IntegrityTab />}
+        {activeTab === 'quarantine' && <QuarantineTab />}
+        {activeTab === 'storage' && <StorageTrendsTab />}
+        {activeTab === 'folders' && <EmptyFoldersTab />}
+        {activeTab === 'drift' && <DriftTab />}
         {activeTab === 'management' && <AssetManagementTab />}
       </div>
     </div>
     </ToastProvider>
-    </PermissionContext.Provider>
   )
 }

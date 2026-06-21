@@ -10,16 +10,31 @@ interface BulkAssetActionsProps {
   assetIds: number[]
   onResult: (message: string) => void
   onDeselect: () => void
+  onAddToCart?: () => void
 }
 
 type ActiveForm = 'none' | 'tags' | 'property'
 
-export const BulkAssetActions: React.FC<BulkAssetActionsProps> = ({ assetIds, onResult, onDeselect }) => {
+export const BulkAssetActions: React.FC<BulkAssetActionsProps> = ({ assetIds, onResult, onDeselect, onAddToCart }) => {
   const { t } = useTranslation()
   const toast = useToast()
   const { operate } = usePermissions()
   const [activeForm, setActiveForm] = useState<ActiveForm>('none')
   const [lockLoading, setLockLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [zipStrategy, setZipStrategy] = useState('flat')
+
+  const handleDownloadZip = async (): Promise<void> => {
+    setDownloading(true)
+    try {
+      await assetPilotApi.downloadZip(assetIds, { strategy: zipStrategy })
+      toast.success(t('asset-pilot.management.zip-started', { count: assetIds.length }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('asset-pilot.management.zip-failed'))
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const handleDone = (result: string): void => {
     setActiveForm('none')
@@ -95,6 +110,28 @@ export const BulkAssetActions: React.FC<BulkAssetActionsProps> = ({ assetIds, on
           </div>
         )}
 
+        {activeForm === 'none' && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <select
+              value={zipStrategy}
+              onChange={e => setZipStrategy(e.target.value)}
+              aria-label={t('asset-pilot.management.zip-layout')}
+              style={selectStyle}
+            >
+              <option value="flat">{t('asset-pilot.management.zip-flat')}</option>
+              <option value="folder">{t('asset-pilot.management.zip-folder')}</option>
+              <option value="type">{t('asset-pilot.management.zip-type')}</option>
+            </select>
+            <button onClick={() => { void handleDownloadZip() }} disabled={downloading} style={downloadBtnStyle}>
+              {downloading ? t('asset-pilot.management.zip-building') : t('asset-pilot.management.download-zip')}
+            </button>
+          </div>
+        )}
+
+        {activeForm === 'none' && onAddToCart != null && (
+          <button onClick={onAddToCart} style={cartBtnStyle}>{t('asset-pilot.cart.add')}</button>
+        )}
+
         <button onClick={onDeselect} style={deselectBtnStyle}>
           {t('asset-pilot.bulk.deselect-all')}
         </button>
@@ -130,4 +167,16 @@ const unlockBtnStyle: React.CSSProperties = {
 const deselectBtnStyle: React.CSSProperties = {
   padding: '4px 12px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
   color: '#595959', cursor: 'pointer', fontSize: 12, marginLeft: 'auto',
+}
+const selectStyle: React.CSSProperties = {
+  padding: '4px 8px', border: '1px solid #91caff', borderRadius: 4, background: '#fff',
+  color: '#0958d9', fontSize: 12,
+}
+const downloadBtnStyle: React.CSSProperties = {
+  padding: '4px 12px', border: '1px solid #91caff', borderRadius: 4, background: '#e6f4ff',
+  color: '#0958d9', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+}
+const cartBtnStyle: React.CSSProperties = {
+  padding: '4px 12px', border: '1px solid #ffd591', borderRadius: 4, background: '#fff7e6',
+  color: '#ad4e00', cursor: 'pointer', fontSize: 12, fontWeight: 500,
 }

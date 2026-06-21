@@ -4,30 +4,36 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
-use Pimcore\Model\Asset;
+use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
+use Oronts\AssetPilotBundle\Service\Query\AssetStorageSize;
+use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
+use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
 
-class AssetSearchService
+class AssetSearchService implements AssetSearchServiceInterface
 {
     public function __construct(
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
-        private readonly string $lockProperty = 'asset_pilot_locked',
+        private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
-     * @param array{q?: string, type?: string, folder?: string, objectId?: int, sort?: string, order?: string} $filters
+     * @param array{q?: string, type?: string, folder?: string, objectId?: int, extension?: string, referenced?: string} $filters
      * @return array{items: array, total: int, page: int, pages: int}
      */
-    public function search(array $filters = [], int $page = 1, int $limit = 50): array
+    public function search(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array
     {
         $offset = ($page - 1) * $limit;
+        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
             $qb = $this->createBaseQuery()
-                ->orderBy('a.modificationDate', 'DESC')
+                ->orderBy($sortColumn, $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
 
@@ -48,43 +54,38 @@ class AssetSearchService
     }
 
     /**
-     * @return array{items: array, total: int, page: int, pages: int}
+     * Summarize specific assets by id (filename, path, type, size, locked), keyed by id, for enriching
+     * id-only listings such as the duplicate report. Folders are excluded by the base query and unknown
+     * ids are simply absent from the result.
+     *
+     * @param list<int> $ids
+     * @return array<int, array<string, mixed>>
      */
-    public function findByObject(int $objectId, int $page = 1, int $limit = 50, ?string $type = null): array
+    public function summarize(array $ids): array
     {
-        $offset = ($page - 1) * $limit;
+        if ($ids === []) {
+            return [];
+        }
 
         try {
-            $depFilter = 'a.id IN (SELECT d.targetid FROM dependencies d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)';
+            $rows = $this->hydrateItems(
+                $this->createBaseQuery()
+                    ->andWhere('a.id IN (:ids)')
+                    ->setParameter('ids', $ids, ArrayParameterType::INTEGER)
+                    ->executeQuery()
+                    ->fetchAllAssociative(),
+            );
 
-            $qb = $this->createBaseQuery()
-                ->andWhere($depFilter)
-                ->setParameter('objId', $objectId)
-                ->setParameter('srcType', 'object')
-                ->setParameter('tgtType', 'asset')
-                ->orderBy('a.modificationDate', 'DESC')
-                ->setFirstResult($offset)
-                ->setMaxResults($limit);
-
-            $countQb = $this->createCountQuery()
-                ->andWhere($depFilter)
-                ->setParameter('objId', $objectId)
-                ->setParameter('srcType', 'object')
-                ->setParameter('tgtType', 'asset');
-
-            if (!empty($type)) {
-                $qb->andWhere('a.type = :type')->setParameter('type', $type);
-                $countQb->andWhere('a.type = :type')->setParameter('type', $type);
+            $byId = [];
+            foreach ($rows as $row) {
+                $byId[(int) $row['id']] = $row;
             }
 
-            $total = (int) $countQb->executeQuery()->fetchOne();
-            $items = $this->hydrateItems($qb->executeQuery()->fetchAllAssociative());
-
-            return $this->paginatedResponse($items, $total, $page, $limit);
+            return $byId;
         } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: assets-by-object failed: {error}', ['error' => $e->getMessage()]);
+            $this->logger->error('Asset Pilot: asset summarize failed: {error}', ['error' => $e->getMessage()]);
 
-            return $this->paginatedResponse([], 0, $page, $limit);
+            return [];
         }
     }
 
@@ -93,11 +94,11 @@ class AssetSearchService
         return $this->connection->createQueryBuilder()
             ->select('a.id, a.path, a.filename, a.type, a.mimetype, a.creationDate as created_at, a.modificationDate as modified_at')
             ->addSelect('CASE WHEN lp.data = \'1\' THEN 1 ELSE 0 END as locked')
-            ->from('assets', 'a')
-            ->leftJoin('a', 'properties', 'lp', 'lp.cid = a.id AND lp.ctype = :lock_ctype AND lp.name = :lock_prop')
+            ->from(PimcoreSchema::TABLE_ASSETS, 'a')
+            ->leftJoin('a', PimcoreSchema::TABLE_PROPERTIES, 'lp', 'lp.cid = a.id AND lp.ctype = :lock_ctype AND lp.name = :lock_prop')
             ->where('a.type != :folder_type')
-            ->setParameter('folder_type', 'folder')
-            ->setParameter('lock_ctype', 'asset')
+            ->setParameter('folder_type', PimcoreSchema::ASSET_TYPE_FOLDER)
+            ->setParameter('lock_ctype', PimcoreSchema::ELEMENT_TYPE_ASSET)
             ->setParameter('lock_prop', $this->lockProperty);
     }
 
@@ -105,9 +106,17 @@ class AssetSearchService
     {
         return $this->connection->createQueryBuilder()
             ->select('COUNT(*) as total')
-            ->from('assets', 'a')
+            ->from(PimcoreSchema::TABLE_ASSETS, 'a')
             ->where('a.type != :folder_type')
-            ->setParameter('folder_type', 'folder');
+            ->setParameter('folder_type', PimcoreSchema::ASSET_TYPE_FOLDER);
+    }
+
+    private function objectDependencyFilter(): string
+    {
+        return sprintf(
+            'a.id IN (SELECT d.targetid FROM %s d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)',
+            PimcoreSchema::TABLE_DEPENDENCIES,
+        );
     }
 
     private function applySearchFilters(QueryBuilder $qb, array $filters): void
@@ -115,7 +124,7 @@ class AssetSearchService
         $q = trim($filters['q'] ?? '');
         if ($q !== '') {
             $qb->andWhere('(a.filename LIKE :q OR a.path LIKE :q)')
-                ->setParameter('q', '%' . $q . '%');
+                ->setParameter('q', '%' . Like::escape($q) . '%');
         }
 
         if (!empty($filters['type'])) {
@@ -123,16 +132,35 @@ class AssetSearchService
         }
 
         if (!empty($filters['folder'])) {
-            $folderPath = rtrim($filters['folder'], '/') . '/%';
+            $folderPath = Like::escape(rtrim($filters['folder'], '/')) . '/%';
             $qb->andWhere('a.path LIKE :folder_path')->setParameter('folder_path', $folderPath);
         }
 
         $objectId = (int) ($filters['objectId'] ?? 0);
         if ($objectId > 0) {
-            $qb->andWhere('a.id IN (SELECT d.targetid FROM dependencies d WHERE d.sourceid = :objId AND d.sourcetype = :srcType AND d.targettype = :tgtType)')
+            $qb->andWhere($this->objectDependencyFilter())
                 ->setParameter('objId', $objectId)
-                ->setParameter('srcType', 'object')
-                ->setParameter('tgtType', 'asset');
+                ->setParameter('srcType', PimcoreSchema::ELEMENT_TYPE_OBJECT)
+                ->setParameter('tgtType', PimcoreSchema::ELEMENT_TYPE_ASSET);
+        }
+
+        if (!empty($filters['extension'])) {
+            $qb->andWhere('a.filename LIKE :ext')
+                ->setParameter('ext', '%.' . Like::escape(ltrim((string) $filters['extension'], '.')));
+        }
+
+        // Relations filter: keep only assets that are (or are not) referenced by any element. Uses the
+        // same source-agnostic NOT EXISTS predicate as UnusedAssetFinder, so "unreferenced" here means
+        // exactly what "unused" means on the Unused Assets tab (and is null-safe, unlike NOT IN).
+        $referenced = $filters['referenced'] ?? '';
+        if ($referenced === 'referenced' || $referenced === 'unreferenced') {
+            $operator = $referenced === 'referenced' ? 'EXISTS' : 'NOT EXISTS';
+            $qb->andWhere(sprintf(
+                '%s (SELECT 1 FROM %s d WHERE d.targetid = a.id AND d.targettype = :refTgt)',
+                $operator,
+                PimcoreSchema::TABLE_DEPENDENCIES,
+            ))
+                ->setParameter('refTgt', PimcoreSchema::ELEMENT_TYPE_ASSET);
         }
     }
 
@@ -143,16 +171,15 @@ class AssetSearchService
             $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
             $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
             $item['locked'] = (bool) ($item['locked'] ?? false);
-
-            try {
-                $asset = Asset::getById((int) $item['id']);
-                $item['file_size'] = $asset !== null ? (int) $asset->getFileSize() : 0;
-            } catch (\Throwable) {
-                $item['file_size'] = 0;
-            }
+            $item['file_size'] = $this->fileSize($item['full_path']);
         }
 
         return $items;
+    }
+
+    protected function fileSize(string $fullPath): int
+    {
+        return AssetStorageSize::bytes($fullPath);
     }
 
     private function paginatedResponse(array $items, int $total, int $page, int $limit): array

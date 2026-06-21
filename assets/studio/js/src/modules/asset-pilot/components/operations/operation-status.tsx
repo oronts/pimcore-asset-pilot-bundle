@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
+import type { AuditEntry } from '../../types'
 
 interface StatusData {
   stats: Record<string, number | Record<string, number>>
-  recentOperations: unknown[]
+  recentOperations: AuditEntry[]
 }
 
 export const OperationStatus: React.FC = () => {

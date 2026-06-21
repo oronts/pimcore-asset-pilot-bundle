@@ -1,0 +1,227 @@
+[← Documentation index](index.md) · [Project README](../README.md)
+
+# REST API
+
+All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimcore Studio authentication. Permissions are enforced on every endpoint (see [Permissions](permissions.md)).
+
+### Dashboard
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| `GET` | `/dashboard` | View | Dashboard statistics |
+| `GET` | `/dashboard/class-stats` | View | Per-class breakdown |
+| `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
+| `GET` | `/metrics` | View | Operation metrics (`{operations, total, moveTotal, failureRate, durationMs}`; `failureRate` = failed / `moveTotal`, which excludes `action_failed`) |
+| `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`, `?minCopies` (default 2), `?type`). Returns `{items[], total, page, limit}`. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
+| `GET` | `/duplicates/strategies` | View | Available merge-disposition strategies + the configured default (`{strategies[], default}`) |
+| `GET` | `/duplicates/export` | View | Stream the full duplicate report as CSV (`?minCopies`, `?type`) |
+| `POST` | `/duplicates/merge` | Admin | Merge a byte-identical group onto a canonical asset (`{checksum, canonicalId?, strategy?, dryRun?}`). Repoints each copy's references then disposes it per the strategy; a copy with un-repointable references is left untouched. `dryRun` previews. Returns `{checksum, canonicalId, dispositions[]}` |
+| `GET` | `/folders/empty` | View | Empty asset folders (`?folder`, `?page`, `?limit`). Returns `{items[], page, limit}` |
+| `GET` | `/storage/trends` | View | Unused-storage series from the snapshots (`?type`, `?limit` max 365). Returns `{type, items[]}` — build snapshots with `asset-pilot:capture-storage-snapshot` |
+| `POST` | `/folders/empty/delete` | Operate | Delete empty folders (`{ids[]}`, max 200; each re-verified childless + permission-checked). Returns `{deleted, skipped, failed, errors}` |
+| `GET` | `/integrity` | View | Broken assets. Bounded scan (`?folder`, `?type`, `?extension`, `?page`, `?limit`) or check specific ids (`?ids=1,2,3`, max 50). Returns `{items[], scanned, broken, page, limit}` |
+| `POST` | `/integrity/heal` | Operate | Roll broken assets back to their last renderable version (`{ids[], dryRun?}`, max 50 ids). Returns `{dryRun, results[]}` |
+| `POST` | `/integrity/undo` | Admin | Reverse the most recent heal of one asset (`{assetId}`); 404 when there is no reversible heal |
+
+### Operations
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| `POST` | `/organize` | Operate | Organize a single object |
+| `POST` | `/organize/explain` | View | Detailed rule evaluation per asset |
+| `POST` | `/organize/bulk` | Operate | Bulk organize by class or IDs |
+| `POST` | `/operations/bulk-preview` | View | Paginated bulk preview |
+| `POST` | `/operations/replay` | Operate | Re-run failed objects (`{since?, rule?, class?, async?, limit?}`) |
+| `POST` | `/operations/reorganize` | Operate | Re-organize owners of assets in a folder (`{folder, async?, limit?}`) |
+| `GET` | `/operations/status` | View | Operation statistics |
+
+#### Organize request body
+
+```json
+{
+    "objectId": 42,
+    "dryRun": false,
+    "async": true
+}
+```
+
+#### Bulk organize request body
+
+```json
+{
+    "className": "Product",
+    "async": true,
+    "batchSize": 50
+}
+```
+
+Or with explicit IDs:
+
+```json
+{
+    "objectIds": [1, 2, 3, 4, 5],
+    "async": true,
+    "batchSize": 50
+}
+```
+
+#### Explain response
+
+```json
+{
+    "objectId": 42,
+    "operations": [{
+        "assetId": 456,
+        "sourcePath": "/uploads/photo.jpg",
+        "targetPath": "/Products/ART-123/Images/photo.jpg",
+        "ruleName": "product_images",
+        "status": "completed"
+    }],
+    "evaluations": [{
+        "assetId": 456,
+        "assetPath": "/uploads/photo.jpg",
+        "fieldName": "images",
+        "locale": null,
+        "ruleName": "product_images",
+        "matched": true,
+        "rejectionReason": null,
+        "conditionExpression": "object.getItemNumber() != null",
+        "conditionResult": true,
+        "conditionError": null,
+        "filterDetails": null,
+        "resolvedPath": "/Products/ART-123/Images",
+        "priority": 100,
+        "enabled": true
+    }, {
+        "assetId": 456,
+        "assetPath": "/uploads/photo.jpg",
+        "fieldName": "images",
+        "locale": null,
+        "ruleName": "product_documents",
+        "matched": false,
+        "rejectionReason": "filter_rejected",
+        "conditionExpression": null,
+        "conditionResult": true,
+        "conditionError": null,
+        "filterDetails": "type mismatch: image not in [document]",
+        "resolvedPath": null,
+        "priority": 70,
+        "enabled": true
+    }]
+}
+```
+
+### Rules
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| `GET` | `/rules` | View | List all configured rules |
+| `GET` | `/rules/export` | View | Export the rule set as a portable artifact (`{format_version, rules}`) |
+| `POST` | `/rules/diff` | View | Diff a posted rule-set artifact against the current rules (`added`/`removed`/`changed`/`unchanged`) |
+| `GET` | `/rules/overlap` | View | Rules that compete for the same assets (`{overlaps[]}`) |
+| `GET` | `/rules/drift?class=Product` | View | Assets not at their rule-expected path (paged, bounded; `{items[], objectsScanned, page, limit}`) |
+| `GET` | `/rules/{name}` | View | Rule details with statistics |
+| `GET` | `/rules/{name}/preview?objectId=42` | View | Preview rule against an object |
+| `POST` | `/rules/{name}/apply` | Operate | Apply a single rule to an object (`{objectId}`) |
+
+### Asset Management
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| `GET` | `/assets/search` | View | Search assets (params: `q`, `type`, `folder`, `objectId`, `extension`, `referenced`, `page`, `limit`, `sort`, `order`) |
+| `POST` | `/assets/download-zip` | View | Build and download a ZIP of the given asset ids (`{assetIds[], strategy?, thumbnail?}`) |
+| `GET` | `/assets/tags` | View | List all available Pimcore tags |
+| `POST` | `/assets/{id}/lock` | Operate | Lock asset from organization |
+| `DELETE` | `/assets/{id}/lock` | Operate | Unlock asset |
+| `POST` | `/assets/bulk-tag` | Operate | Bulk assign tags to assets |
+| `POST` | `/assets/bulk-property` | Operate | Bulk set custom properties |
+
+#### Search parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | `string` | Search by filename or path (LIKE match) |
+| `type` | `string` | Filter by asset type: `image`, `document`, `video`, `audio`, `text`, `archive` |
+| `folder` | `string` | Filter by folder path (e.g., `/Products/`) |
+| `objectId` | `int` | Filter to assets referenced by a specific DataObject (via dependencies table) |
+| `extension` | `string` | Filter by file extension (comma-separated, e.g. `jpg,png`) |
+| `referenced` | `string` | Reference state: `referenced` or `unreferenced` |
+| `page` | `int` | Page number (default: 1) |
+| `limit` | `int` | Items per page (default: 50, max: 200) |
+| `sort` | `string` | Sort field: `id`, `filename`, `type`, `modified_at` |
+| `order` | `string` | Sort order: `asc` or `desc` |
+
+#### Bulk tag request body
+
+```json
+{
+    "assetIds": [1, 2, 3],
+    "tagIds": [10, 20],
+    "replace": false
+}
+```
+
+Set `replace: true` to remove all existing tags before assigning new ones.
+
+#### Bulk property request body
+
+```json
+{
+    "assetIds": [1, 2, 3],
+    "name": "department",
+    "type": "text",
+    "data": "Marketing"
+}
+```
+
+Supported types: `text`, `bool`, `select`.
+
+### Unused Assets
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| `GET` | `/unused-assets` | View | List unused assets with confidence scoring |
+| `GET` | `/unused-assets/stats` | View | Unused asset statistics by type |
+| `GET` | `/unused-assets/export` | View | Stream the unused-asset listing as CSV (same filters as `/unused-assets`) |
+| `POST` | `/unused-assets/bulk-delete` | Operate | Delete unused assets |
+| `POST` | `/unused-assets/bulk-move` | Operate | Move unused assets to folder |
+| `POST` | `/unused-assets/bulk-quarantine` | Operate | Soft-delete unused assets to the quarantine folder (reversible) |
+| `GET` | `/quarantine` | View | List quarantined assets with their original path |
+| `POST` | `/quarantine/{assetId}/restore` | Operate | Move a quarantined asset back to its original path |
+| `GET` | `/quarantine/export` | View | Stream the quarantine list as CSV |
+
+#### Unused assets parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `type` | `string` | Filter by asset type |
+| `extension` | `string` | Comma-separated extensions (e.g., `pdf,png,jpg`) |
+| `before` | `string` | Modified before date (ISO format) |
+| `after` | `string` | Modified after date (ISO format) |
+| `folder` | `string` | Filter by folder path |
+| `confidence` | `string` | Filter by confidence: `definitely_unused`, `probably_unused`, `recently_uploaded`, `historically_used`, `protected` |
+| `page` | `int` | Page number (default: 1) |
+| `limit` | `int` | Items per page (default: 50, max: 200) |
+| `sort` | `string` | Sort field: `id`, `filename`, `type`, `modified_at` |
+| `order` | `string` | Sort order: `asc` or `desc` |
+
+#### Confidence levels
+
+| Level | Criteria | Recommended Action |
+|-------|----------|--------------------|
+| `definitely_unused` | No references, last modified >90 days ago | Safe to delete |
+| `probably_unused` | No references, last modified 30-90 days ago | Review before deleting |
+| `recently_uploaded` | No references, last modified <30 days ago | Wait — may be in use soon |
+| `historically_used` | No references, but has audit history of past moves | Investigate before deleting |
+| `protected` | Has `asset_pilot_locked` property | Excluded from cleanup |
+
+The 30/90-day cutoffs are defaults; tune them via `confidence.recently_uploaded_days` and
+`confidence.probably_unused_days` (see [Configuration](configuration.md)).
+
+### Audit Log
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| `GET` | `/audit` | View | Paginated audit entries (params: `page`, `limit`, `class`, `status`, `ruleName`, `sort`, `order`) |
+| `GET` | `/audit/export` | View | Export as CSV (params: `class`, `status`, `ruleName`) |
+| `POST` | `/audit/{id}/revert` | Admin | Revert a completed operation |

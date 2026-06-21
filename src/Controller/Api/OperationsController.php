@@ -4,59 +4,117 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
-use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
-use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AssetReorganizer;
+use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class OperationsController
 {
+    use HandlesBulkIds;
+
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
-        protected readonly AuditLogger $auditLogger,
-        protected readonly RuleEngine $ruleEngine,
-        protected readonly AssetFieldExtractor $fieldExtractor,
+        protected readonly OrganizeDispatcher $organizeDispatcher,
+        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly RuleEngineInterface $ruleEngine,
+        protected readonly AssetFieldExtractorInterface $fieldExtractor,
+        protected readonly FailureReplayService $failureReplay,
+        protected readonly AssetReorganizer $reorganizer,
         protected readonly LoggerInterface $logger,
+        protected readonly int $defaultBatchSize = 50,
     ) {}
+
+    #[Route('/operations/reorganize', name: 'oronts_asset_pilot_operations_reorganize', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function reorganize(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent() ?: '{}', true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+        if (!is_array($data) || trim((string) ($data['folder'] ?? '')) === '') {
+            return new JsonResponse(['error' => 'A non-empty "folder" is required.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $async = (bool) ($data['async'] ?? false);
+        $limit = isset($data['limit']) ? max(1, (int) $data['limit']) : 0;
+
+        $result = $this->reorganizer->reorganizeFolder(trim((string) $data['folder']), $limit, $async);
+
+        return new JsonResponse([
+            'assetsScanned' => $result->assetsScanned,
+            'ownerObjects' => $result->ownerObjects,
+            'organized' => $result->organized,
+            'dispatched' => $result->dispatched,
+            'skipped' => $result->skipped,
+            'failed' => $result->failed,
+        ], $async ? Response::HTTP_ACCEPTED : Response::HTTP_OK);
+    }
+
+    #[Route('/operations/replay', name: 'oronts_asset_pilot_operations_replay', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function replay(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent() ?: '{}', true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+        if (!is_array($data)) {
+            $data = [];
+        }
+
+        $since = isset($data['since']) ? strtotime((string) $data['since']) : false;
+        $filters = array_filter([
+            'since' => $since !== false ? date('Y-m-d H:i:s', $since) : null,
+            'rule_name' => $data['rule'] ?? null,
+            'object_class' => $data['class'] ?? null,
+        ], static fn ($value): bool => $value !== null);
+
+        $async = (bool) ($data['async'] ?? false);
+        $limit = isset($data['limit']) ? max(1, (int) $data['limit']) : null;
+
+        $result = $this->failureReplay->replay($filters, $async, $limit);
+
+        return new JsonResponse([
+            'candidates' => $result->candidates,
+            'organized' => $result->organized,
+            'dispatched' => $result->dispatched,
+            'skipped' => $result->skipped,
+            'failed' => $result->failed,
+        ], $async ? Response::HTTP_ACCEPTED : Response::HTTP_OK);
+    }
 
     #[Route('/organize/explain', name: 'oronts_asset_pilot_organize_explain', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::View->value)]
     public function explain(Request $request): JsonResponse
     {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $resolved = $this->resolveObjectFromBody($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
-
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $object = AbstractObject::getById((int) $objectId);
-        if ($object === null) {
-            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
-        }
+        [$object] = $resolved;
 
         $fieldInfos = $this->fieldExtractor->extract($object);
-        $operations = $this->organizer->dryRun($object);
+        $operations = $this->organizer->dryRun($object, TriggerType::Api);
 
         $allEvaluations = [];
         foreach ($fieldInfos as $fieldInfo) {
@@ -85,7 +143,7 @@ class OperationsController
         }
 
         return new JsonResponse([
-            'objectId' => $objectId,
+            'objectId' => $object->getId(),
             'operations' => array_map(static fn ($op) => [
                 'assetId' => $op->assetId,
                 'sourcePath' => $op->sourcePath,
@@ -101,22 +159,13 @@ class OperationsController
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function organize(Request $request): JsonResponse
     {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        $resolved = $this->resolveObjectFromBody($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
+        [$object, $data] = $resolved;
 
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $object = AbstractObject::getById((int) $objectId);
-        if ($object === null) {
-            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
-        }
-
+        $objectId = $object->getId();
         $dryRun = $data['dryRun'] ?? false;
         $async = $data['async'] ?? false;
 
@@ -127,7 +176,7 @@ class OperationsController
         ]);
 
         if ($dryRun) {
-            $operations = $this->organizer->dryRun($object);
+            $operations = $this->organizer->dryRun($object, TriggerType::Api);
             return new JsonResponse([
                 'dryRun' => true,
                 'operations' => array_map(static fn ($op) => [
@@ -140,14 +189,7 @@ class OperationsController
         }
 
         if ($async) {
-            $this->messageBus->dispatch(Envelope::wrap(
-                new OrganizeAssetsMessage(
-                    objectId: (int) $objectId,
-                    triggerType: TriggerType::Api,
-                    dispatchedAt: time(),
-                ),
-                [new DeduplicateStamp('asset_pilot_organize_' . $objectId, 30.0)]
-            ));
+            $this->organizeDispatcher->dispatchObject((int) $objectId, TriggerType::Api);
             return new JsonResponse(['message' => 'Organization queued'], Response::HTTP_ACCEPTED);
         }
 
@@ -167,40 +209,6 @@ class OperationsController
         ]);
     }
 
-    #[Route('/organize/preview', name: 'oronts_asset_pilot_organize_preview', methods: ['POST'])]
-    #[IsGranted(AssetPilotPermission::View->value)]
-    public function preview(Request $request): JsonResponse
-    {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $object = AbstractObject::getById((int) $objectId);
-        if ($object === null) {
-            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
-        }
-
-        $operations = $this->organizer->dryRun($object);
-
-        return new JsonResponse([
-            'objectId' => $objectId,
-            'operations' => array_map(static fn ($op) => [
-                'assetId' => $op->assetId,
-                'sourcePath' => $op->sourcePath,
-                'targetPath' => $op->targetPath,
-                'ruleName' => $op->ruleName,
-                'objectClass' => $op->objectClass,
-            ], $operations),
-        ]);
-    }
-
     #[Route('/organize/bulk', name: 'oronts_asset_pilot_organize_bulk', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function organizeBulk(Request $request): JsonResponse
@@ -211,21 +219,46 @@ class OperationsController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
         $className = $data['className'] ?? null;
-        $objectIds = $data['objectIds'] ?? [];
+        $rawObjectIds = $data['objectIds'] ?? [];
         $async = $data['async'] ?? true;
 
-        if ($className === null && empty($objectIds)) {
+        if ($className === null && empty($rawObjectIds)) {
             return new JsonResponse(['error' => 'className or objectIds required'], Response::HTTP_BAD_REQUEST);
         }
 
-        // Resolve object IDs from class name if not provided directly
+        $objectIds = [];
+        if (!empty($rawObjectIds)) {
+            $objectIds = $this->validatedBulkIds($rawObjectIds, 'objectIds');
+            if ($objectIds instanceof JsonResponse) {
+                return $objectIds;
+            }
+        }
+
+        // Resolve object IDs from class name if not provided directly. Cap the listing at the same
+        // per-request limit the objectIds path enforces, so a whole-catalog className cannot queue or
+        // run an unbounded batch through the move pipeline. Over the cap is a 400, not a silent
+        // truncation: the caller narrows the selection or paginates via bulk-preview.
         if (empty($objectIds) && $className !== null) {
             $listing = new DataObject\Listing();
             $listing->setObjectTypes([AbstractObject::OBJECT_TYPE_OBJECT, AbstractObject::OBJECT_TYPE_VARIANT]);
             $listing->setCondition('className = ?', [$className]);
+            $listing->setOrderKey('id');
+            $listing->setOrder('asc');
+            $listing->setLimit(BulkIds::MAX + 1);
             foreach ($listing as $obj) {
-                $objectIds[] = $obj->getId();
+                $objectIds[] = (int) $obj->getId();
+            }
+
+            if (count($objectIds) > BulkIds::MAX) {
+                return new JsonResponse(
+                    ['error' => sprintf('Class "%s" resolves to more than %d objects; narrow the selection or pass objectIds.', $className, BulkIds::MAX)],
+                    Response::HTTP_BAD_REQUEST,
+                );
             }
         }
 
@@ -237,19 +270,37 @@ class OperationsController
             'count' => count($objectIds),
         ]);
 
+        if ($data['dryRun'] ?? false) {
+            $operations = [];
+            foreach ($objectIds as $oid) {
+                $object = AbstractObject::getById((int) $oid);
+                if ($object === null) {
+                    continue;
+                }
+                foreach ($this->organizer->dryRun($object, TriggerType::Api) as $op) {
+                    $operations[] = [
+                        'assetId' => $op->assetId,
+                        'sourcePath' => $op->sourcePath,
+                        'targetPath' => $op->targetPath,
+                        'ruleName' => $op->ruleName,
+                        'objectClass' => $op->objectClass,
+                        'status' => $op->status->value,
+                    ];
+                }
+            }
+
+            return new JsonResponse([
+                'dryRun' => true,
+                'objectCount' => count($objectIds),
+                'operations' => $operations,
+            ]);
+        }
+
         if ($async) {
-            $batchSize = $data['batchSize'] ?? 50;
+            $batchSize = max(1, (int) ($data['batchSize'] ?? $this->defaultBatchSize));
             $batches = array_chunk($objectIds, $batchSize);
             foreach ($batches as $batch) {
-                $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));
-                $this->messageBus->dispatch(Envelope::wrap(
-                    new BulkOrganizeMessage(
-                        objectIds: $batch,
-                        triggerType: TriggerType::Api,
-                        dispatchedAt: time(),
-                    ),
-                    [new DeduplicateStamp($key, 60.0)]
-                ));
+                $this->organizeDispatcher->dispatchBulk($batch, TriggerType::Api);
             }
             return new JsonResponse([
                 'message' => 'Bulk organization queued',
@@ -301,7 +352,7 @@ class OperationsController
             $objects[] = [
                 'id' => $obj->getId(),
                 'key' => $obj->getKey(),
-                'className' => $obj->getClassName(),
+                'className' => $obj instanceof Concrete ? $obj->getClassName() : null,
             ];
         }
 
@@ -324,5 +375,41 @@ class OperationsController
             'stats' => $stats,
             'recentOperations' => $recent,
         ]);
+    }
+
+    /**
+     * Decode the JSON body and resolve the required `objectId` to a loaded object.
+     *
+     * @return array{0: AbstractObject, 1: array<string, mixed>}|JsonResponse the loaded object plus
+     *                                                                         the decoded body, or the error response to return
+     */
+    protected function resolveObjectFromBody(Request $request): array|JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $objectId = $data['objectId'] ?? null;
+        if ($objectId === null) {
+            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $object = $this->loadObject((int) $objectId);
+        if ($object === null) {
+            return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
+        }
+
+        return [$object, $data];
+    }
+
+    protected function loadObject(int $id): ?AbstractObject
+    {
+        return AbstractObject::getById($id);
     }
 }

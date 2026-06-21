@@ -4,22 +4,30 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
+use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
 use Pimcore\Model\DataObject\ClassDefinition;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
+use Pimcore\Model\DataObject\Fieldcollection;
+use Pimcore\Model\DataObject\Objectbrick;
 use Psr\Container\ContainerInterface;
-use Psr\Log\LoggerInterface;
-use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
-use Twig\Environment;
-use Twig\Loader\ArrayLoader;
 
 class ConfigValidator
 {
     private const array VALID_FILTER_TYPES = ['image', 'video', 'document', 'audio', 'text', 'archive', 'folder', 'unknown'];
 
+    /**
+     * @param ContainerInterface $callbacks service locator of services tagged
+     *                                      `oronts_asset_pilot.callback`, matching CallbackStrategy
+     */
     public function __construct(
-        private readonly ContainerInterface $container,
-        private readonly LoggerInterface $logger,
+        private readonly ContainerInterface $callbacks,
+        private readonly ExpressionConditionEvaluator $conditionEvaluator,
+        private readonly TemplatePathResolver $pathResolver,
     ) {}
 
     /** @return ValidationResult[] */
@@ -88,21 +96,81 @@ class ConfigValidator
         // Also collect localized field names
         $localizedFieldNames = [];
         $localizedFields = $classDef->getFieldDefinition('localizedfields');
-        if ($localizedFields !== null) {
+        if ($localizedFields instanceof Localizedfields) {
             $localizedFieldNames = array_keys($localizedFields->getFieldDefinitions());
         }
+
+        // Qualified names of fields nested in object bricks / field collections, matching what the
+        // extractor reports (e.g. "myBrick.image"), so a rule can constrain on a nested field.
+        $nestedFieldNames = $this->nestedFieldNames($classDef);
 
         foreach ($rule->fields as $field) {
             if (in_array($field, $fieldNames, true)) {
                 $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class}");
             } elseif (in_array($field, $localizedFieldNames, true)) {
                 $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class} (localized)");
+            } elseif (in_array($field, $nestedFieldNames, true)) {
+                $results[] = new ValidationResult($rule->name, 'fields_exist', 'pass', "Field \"{$field}\" exists in {$rule->class} (nested)");
             } else {
                 $results[] = new ValidationResult($rule->name, 'fields_exist', 'fail', "Field \"{$field}\" not found in {$rule->class}");
             }
         }
 
         return $results;
+    }
+
+    /**
+     * Qualified "container.field" names for every field nested in this class's object bricks and
+     * field collections (descending one level into a nested localized container), mirroring the
+     * names AssetFieldExtractor reports so a rule's `fields` constraint can target them.
+     *
+     * @return string[]
+     */
+    private function nestedFieldNames(ClassDefinition $classDef): array
+    {
+        $names = [];
+
+        foreach ($classDef->getFieldDefinitions() as $fieldDef) {
+            $nestedDefs = match (true) {
+                $fieldDef instanceof Objectbricks => $this->allowedDefinitions($fieldDef->getAllowedTypes(), Objectbrick\Definition::class),
+                $fieldDef instanceof Fieldcollections => $this->allowedDefinitions($fieldDef->getAllowedTypes(), Fieldcollection\Definition::class),
+                default => [],
+            };
+
+            foreach ($nestedDefs as $nestedDef) {
+                foreach ($nestedDef->getFieldDefinitions() as $sub) {
+                    if ($sub instanceof Localizedfields) {
+                        foreach (array_keys($sub->getFieldDefinitions()) as $inner) {
+                            $names[] = $fieldDef->getName() . '.' . $inner;
+                        }
+
+                        continue;
+                    }
+
+                    $names[] = $fieldDef->getName() . '.' . $sub->getName();
+                }
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * @param string[]                                           $types
+     * @param class-string<Objectbrick\Definition|Fieldcollection\Definition> $definitionClass
+     * @return array<Objectbrick\Definition|Fieldcollection\Definition>
+     */
+    private function allowedDefinitions(array $types, string $definitionClass): array
+    {
+        $defs = [];
+        foreach ($types as $type) {
+            $def = $definitionClass::getByKey($type);
+            if ($def !== null) {
+                $defs[] = $def;
+            }
+        }
+
+        return $defs;
     }
 
     /** @return ValidationResult[] */
@@ -113,8 +181,7 @@ class ConfigValidator
         }
 
         try {
-            $el = new ExpressionLanguage();
-            $el->parse($rule->condition, ['object', 'asset', 'rule']);
+            $this->conditionEvaluator->validateSyntax($rule->condition);
 
             return [new ValidationResult($rule->name, 'condition_syntax', 'pass', "Condition syntax valid: {$rule->condition}")];
         } catch (\Throwable $e) {
@@ -126,9 +193,7 @@ class ConfigValidator
     private function validatePathTemplate(Rule $rule): array
     {
         try {
-            $loader = new ArrayLoader(['template' => $rule->targetPath]);
-            $twig = new Environment($loader);
-            $twig->parse($twig->tokenize($twig->getLoader()->getSourceContext('template')));
+            $this->pathResolver->validateTemplate($rule->targetPath);
 
             return [new ValidationResult($rule->name, 'path_template', 'pass', "Path template syntax valid: {$rule->targetPath}")];
         } catch (\Throwable $e) {
@@ -147,11 +212,11 @@ class ConfigValidator
             return [new ValidationResult($rule->name, 'callback_service', 'fail', 'Callback strategy requires a callback service ID')];
         }
 
-        if ($this->container->has($rule->callback)) {
+        if ($this->callbacks->has($rule->callback)) {
             return [new ValidationResult($rule->name, 'callback_service', 'pass', "Callback service \"{$rule->callback}\" exists")];
         }
 
-        return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found in container")];
+        return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found. Tag it with \"oronts_asset_pilot.callback\".")];
     }
 
     /** @return ValidationResult[] */
@@ -182,6 +247,18 @@ class ConfigValidator
             if (!array_filter($results, static fn (ValidationResult $r) => $r->check === 'filter_extensions')) {
                 $results[] = new ValidationResult($rule->name, 'filter_extensions', 'pass', 'Filter extensions are valid');
             }
+        }
+
+        $minSize = $filters['min_size'] ?? null;
+        $maxSize = $filters['max_size'] ?? null;
+        if ($minSize !== null && $minSize < 0) {
+            $results[] = new ValidationResult($rule->name, 'filter_size', 'fail', 'filters.min_size cannot be negative');
+        }
+        if ($maxSize !== null && $maxSize < 0) {
+            $results[] = new ValidationResult($rule->name, 'filter_size', 'fail', 'filters.max_size cannot be negative');
+        }
+        if ($minSize !== null && $maxSize !== null && $minSize > $maxSize) {
+            $results[] = new ValidationResult($rule->name, 'filter_size', 'fail', "filters.min_size ({$minSize}) is greater than filters.max_size ({$maxSize})");
         }
 
         return $results;
@@ -215,7 +292,7 @@ class ConfigValidator
                     implode(', ', $ruleNames),
                     'duplicate_priority',
                     'warning',
-                    "Rules " . implode(', ', $ruleNames) . " target class \"{$class}\" with same priority {$priority}",
+                    'Rules ' . implode(', ', $ruleNames) . " target class \"{$class}\" with same priority {$priority}",
                 );
             }
         }

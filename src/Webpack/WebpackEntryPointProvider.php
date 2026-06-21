@@ -15,11 +15,11 @@ class WebpackEntryPointProvider implements WebpackEntryPointProviderInterface
 
     public function getEntryPoints(): array
     {
-        return ['exposeRemote'];
+        return [];
     }
 
     public function getOptionalEntryPoints(): array
     {
-        return [];
+        return ['exposeRemote'];
     }
 }

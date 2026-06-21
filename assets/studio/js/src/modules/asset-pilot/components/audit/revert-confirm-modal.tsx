@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
 import type { AuditEntry } from '../../types'
+import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 
 interface RevertConfirmModalProps {
   entry: AuditEntry
@@ -13,6 +14,7 @@ export const RevertConfirmModal: React.FC<RevertConfirmModalProps> = ({ entry, o
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const modalRef = useModalDismiss<HTMLDivElement>(onClose)
 
   const handleRevert = async (): Promise<void> => {
     setLoading(true)
@@ -29,7 +31,7 @@ export const RevertConfirmModal: React.FC<RevertConfirmModalProps> = ({ entry, o
 
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
         <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.revert.title')}</h3>
 
         <p style={{ fontSize: 13, color: '#595959', marginBottom: 12 }}>

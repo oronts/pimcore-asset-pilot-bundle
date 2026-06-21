@@ -15,7 +15,8 @@ import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
 import { usePermissions } from '../../hooks/use-permissions'
 import { useContainerWidth } from '../../hooks/use-container-width'
-import { formatDate, pageNumbers } from '../../utils/format'
+import { formatDate } from '../../utils/format'
+import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
 import { getVisibleColumns, type ColumnConfig } from '../../utils/column-visibility'
 
@@ -125,15 +126,14 @@ export const AuditTab: React.FC = () => {
             </ResponsiveTableWrapper>
           )}
 
-          {data.pages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 16 }}>
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) - 1 }))} disabled={(filters.page ?? 1) <= 1} style={pageBtnStyle}>{t('asset-pilot.common.prev')}</button>
-              {pageNumbers(data.page, data.pages).map(p => (
-                <button key={p} onClick={() => setFilters(f => ({ ...f, page: p }))} style={{ ...pageBtnStyle, background: (filters.page ?? 1) === p ? '#1677ff' : '#fff', color: (filters.page ?? 1) === p ? '#fff' : '#595959' }}>{p}</button>
-              ))}
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) + 1 }))} disabled={(filters.page ?? 1) >= data.pages} style={pageBtnStyle}>{t('asset-pilot.common.next')}</button>
-            </div>
-          )}
+          <Pagination
+            page={data.page}
+            pages={data.pages}
+            onPage={p => setFilters(f => ({ ...f, page: p }))}
+            limit={filters.limit}
+            onLimit={n => setFilters(f => ({ ...f, limit: n, page: 1 }))}
+            pageSizeOptions={[20, 50, 100]}
+          />
         </>
       )}
 
@@ -149,8 +149,4 @@ const tdStyle: React.CSSProperties = { padding: '6px 4px' }
 const revertBtnStyle: React.CSSProperties = {
   padding: '2px 8px', border: '1px solid #fa8c16', borderRadius: 4, background: '#fff7e6', color: '#fa8c16',
   cursor: 'pointer', fontSize: 11, fontWeight: 500,
-}
-const pageBtnStyle: React.CSSProperties = {
-  padding: '4px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
-  cursor: 'pointer', fontSize: 12,
 }

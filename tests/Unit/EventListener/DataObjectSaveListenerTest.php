@@ -6,9 +6,9 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\EventListener\DataObjectSaveListener;
-use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -16,20 +16,18 @@ use Pimcore\Event\Model\DataObjectEvent;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
 
 #[CoversClass(DataObjectSaveListener::class)]
 class DataObjectSaveListenerTest extends TestCase
 {
     private AssetOrganizer $organizer;
-    private MessageBusInterface $messageBus;
+    private OrganizeDispatcher $dispatcher;
     private LoopGuard $loopGuard;
 
     protected function setUp(): void
     {
         $this->organizer = $this->createMock(AssetOrganizer::class);
-        $this->messageBus = $this->createMock(MessageBusInterface::class);
+        $this->dispatcher = $this->createMock(OrganizeDispatcher::class);
         $this->loopGuard = $this->createMock(LoopGuard::class);
     }
 
@@ -40,7 +38,7 @@ class DataObjectSaveListenerTest extends TestCase
     ): DataObjectSaveListener {
         return new DataObjectSaveListener(
             organizer: $this->organizer,
-            messageBus: $this->messageBus,
+            dispatcher: $this->dispatcher,
             loopGuard: $this->loopGuard,
             logger: new NullLogger(),
             enabled: $enabled,
@@ -60,7 +58,7 @@ class DataObjectSaveListenerTest extends TestCase
         $listener = $this->createListener(enabled: false);
         $object = $this->createMock(Concrete::class);
 
-        $this->messageBus->expects(self::never())->method('dispatch');
+        $this->dispatcher->expects(self::never())->method('dispatchObject');
         $this->organizer->expects(self::never())->method('organize');
 
         $listener->onPostUpdate($this->createEvent($object));
@@ -72,7 +70,7 @@ class DataObjectSaveListenerTest extends TestCase
         $listener = $this->createListener();
         $object = $this->createMock(AbstractObject::class);
 
-        $this->messageBus->expects(self::never())->method('dispatch');
+        $this->dispatcher->expects(self::never())->method('dispatchObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -85,7 +83,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object = $this->createMock(Concrete::class);
         $object->method('getClassName')->willReturn('Product');
 
-        $this->messageBus->expects(self::never())->method('dispatch');
+        $this->dispatcher->expects(self::never())->method('dispatchObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -100,9 +98,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(42);
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
-        $this->messageBus->expects(self::once())
-            ->method('dispatch')
-            ->willReturn(new Envelope(new \stdClass()));
+        $this->dispatcher->expects(self::once())->method('dispatchObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -117,9 +113,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(1);
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
-        $this->messageBus->expects(self::once())
-            ->method('dispatch')
-            ->willReturn(new Envelope(new \stdClass()));
+        $this->dispatcher->expects(self::once())->method('dispatchObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -134,7 +128,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(42);
 
         $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(true);
-        $this->messageBus->expects(self::never())->method('dispatch');
+        $this->dispatcher->expects(self::never())->method('dispatchObject');
         $this->organizer->expects(self::never())->method('organize');
 
         $listener->onPostUpdate($this->createEvent($object));
@@ -150,15 +144,9 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(42);
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
-        $this->messageBus->expects(self::once())
-            ->method('dispatch')
-            ->with(self::callback(function (Envelope $envelope) {
-                $msg = $envelope->getMessage();
-                return $msg instanceof OrganizeAssetsMessage
-                    && $msg->objectId === 42
-                    && $msg->triggerType === TriggerType::ObjectSave;
-            }))
-            ->willReturn(new Envelope(new \stdClass()));
+        $this->dispatcher->expects(self::once())
+            ->method('dispatchObject')
+            ->with(42, TriggerType::ObjectSave);
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -207,15 +195,9 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(10);
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
-        $this->messageBus->expects(self::once())
-            ->method('dispatch')
-            ->with(self::callback(function (Envelope $envelope) {
-                $msg = $envelope->getMessage();
-                return $msg instanceof OrganizeAssetsMessage
-                    && $msg->objectId === 10
-                    && $msg->triggerType === TriggerType::ObjectSave;
-            }))
-            ->willReturn(new Envelope(new \stdClass()));
+        $this->dispatcher->expects(self::once())
+            ->method('dispatchObject')
+            ->with(10, TriggerType::ObjectSave);
 
         $listener->onPostAdd($this->createEvent($object));
     }

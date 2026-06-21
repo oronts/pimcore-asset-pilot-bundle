@@ -1,26 +1,35 @@
 {
     "name": "oronts/asset-pilot-bundle",
     "description": "Intelligent rule-based asset organization engine for Pimcore 12 with expression language conditions, pluggable strategies, async processing, and Studio UI integration.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "type": "pimcore-bundle",
     "license": "AGPL-3.0-or-later",
     "keywords": ["pimcore", "assets", "organization", "automation", "pimcore-12", "studio-ui"],
     "authors": [
         {
             "name": "Oronts",
-            "email": "dev@oronts.com",
+            "email": "office@oronts.com",
+            "homepage": "https://oronts.com"
+        },
+        {
+            "name": "Refaat Al Ktifan",
+            "email": "Refaat@alktifan.com",
             "homepage": "https://oronts.com"
         }
     ],
     "require": {
         "php": ">=8.4",
         "pimcore/pimcore": "^12.0",
+        "pimcore/studio-backend-bundle": ">=0.15 <1.0 || ^1.0 || >=2025.4 <2027.0",
+        "pimcore/studio-ui-bundle": ">=0.15 <1.0 || ^1.0 || >=2025.4 <2027.0",
         "symfony/expression-language": "^7.0",
-        "symfony/messenger": "^7.0"
+        "symfony/lock": "^7.3",
+        "symfony/messenger": "^7.3"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.0",
-        "friendsofphp/php-cs-fixer": "^3.50"
+        "friendsofphp/php-cs-fixer": "^3.50",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
         "psr-4": {
@@ -41,5 +50,11 @@
     },
     "config": {
         "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit",
+        "cs": "php-cs-fixer fix --dry-run --diff",
+        "cs-fix": "php-cs-fixer fix",
+        "stan": "phpstan analyse"
     }
 }

@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
-use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
-use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
@@ -21,9 +20,6 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 #[AsCommand(
     name: 'asset-pilot:organize',
@@ -33,11 +29,12 @@ class OrganizeCommand extends Command
 {
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly MessageBusInterface $messageBus,
-        protected readonly RuleEngine $ruleEngine,
-        protected readonly AssetFieldExtractor $fieldExtractor,
+        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly RuleEngineInterface $ruleEngine,
+        protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly NamingStrategyInterface $namingStrategy,
         protected readonly LoggerInterface $logger,
+        protected readonly int $defaultBatchSize = 50,
     ) {
         parent::__construct();
     }
@@ -49,7 +46,7 @@ class OrganizeCommand extends Command
             ->addOption('object-id', 'o', InputOption::VALUE_REQUIRED, 'Specific object ID to organize')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Preview without actually moving assets')
             ->addOption('async', null, InputOption::VALUE_NONE, 'Dispatch to messenger queue for async processing')
-            ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Batch size for bulk operations', '50');
+            ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Batch size for bulk operations', (string) $this->defaultBatchSize);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -139,8 +136,7 @@ class OrganizeCommand extends Command
                 $rows = [];
                 foreach ($evaluations as $eval) {
                     $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-                    $detail = $this->formatEvaluationDetail($eval);
-                    $rows[] = [$eval->ruleName, $resultLabel, $detail];
+                    $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
                 }
 
                 $io->table(['Rule', 'Result', 'Detail'], $rows);
@@ -159,23 +155,6 @@ class OrganizeCommand extends Command
         }
 
         return Command::SUCCESS;
-    }
-
-    private function formatEvaluationDetail(RuleEvaluation $eval): string
-    {
-        if ($eval->matched) {
-            return '-> ' . ($eval->resolvedPath ?? '(unknown path)');
-        }
-
-        return match ($eval->rejectionReason) {
-            'disabled' => 'disabled',
-            'class_mismatch' => 'class_mismatch: ' . ($eval->filterDetails ?? ''),
-            'field_mismatch' => 'field_mismatch: ' . ($eval->filterDetails ?? ''),
-            'condition_failed' => 'condition_failed: ' . ($eval->conditionExpression ?? '') .
-                ($eval->conditionError !== null ? ' (error: ' . $eval->conditionError . ')' : ''),
-            'filter_rejected' => 'filter_rejected: ' . ($eval->filterDetails ?? ''),
-            default => $eval->rejectionReason ?? 'unknown',
-        };
     }
 
     protected function organizeBulk(SymfonyStyle $io, string $className, bool $dryRun, bool $async, int $batchSize): int
@@ -203,7 +182,9 @@ class OrganizeCommand extends Command
             $previewIds = array_slice($objectIds, 0, 5);
             foreach ($previewIds as $id) {
                 $obj = AbstractObject::getById($id);
-                if ($obj === null) continue;
+                if ($obj === null) {
+                    continue;
+                }
                 $ops = $this->organizer->dryRun($obj);
                 foreach ($ops as $op) {
                     $io->writeln("  Asset #{$op->assetId}: {$op->sourcePath} -> {$op->targetPath} ({$op->ruleName})");
@@ -214,16 +195,9 @@ class OrganizeCommand extends Command
 
         if ($async) {
             // Dispatch in batches
-            $batches = array_chunk($objectIds, $batchSize);
+            $batches = array_chunk($objectIds, max(1, $batchSize));
             foreach ($batches as $batch) {
-                $key = 'asset_pilot_bulk_' . md5(implode(',', $batch));
-                $this->messageBus->dispatch(Envelope::wrap(
-                    new BulkOrganizeMessage(
-                        objectIds: $batch,
-                        triggerType: TriggerType::BulkOperation,
-                    ),
-                    [new DeduplicateStamp($key, 60.0)]
-                ));
+                $this->dispatcher->dispatchBulk($batch, TriggerType::BulkOperation);
             }
             $io->success(sprintf('Dispatched %d batch(es) to messenger queue.', count($batches)));
             return Command::SUCCESS;

@@ -78,26 +78,6 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
         </select>
       </FilterField>
 
-      <FilterField label={t('asset-pilot.unused.min-size')}>
-        <input
-          type="number"
-          placeholder="0"
-          value={filters.minSize ?? ''}
-          onChange={e => onChange({ ...filters, minSize: e.target.value ? parseInt(e.target.value, 10) : undefined, page: 1 })}
-          style={{ ...inputStyle, width: 100 }}
-        />
-      </FilterField>
-
-      <FilterField label={t('asset-pilot.unused.max-size')}>
-        <input
-          type="number"
-          placeholder="0"
-          value={filters.maxSize ?? ''}
-          onChange={e => onChange({ ...filters, maxSize: e.target.value ? parseInt(e.target.value, 10) : undefined, page: 1 })}
-          style={{ ...inputStyle, width: 100 }}
-        />
-      </FilterField>
-
       <button onClick={() => onChange({ page: 1, limit: filters.limit })} style={clearBtnStyle}>
         {t('asset-pilot.common.clear')}
       </button>

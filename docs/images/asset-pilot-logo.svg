@@ -1,0 +1,27 @@
+<svg width="880" height="200" viewBox="0 0 880 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Asset Pilot by Oronts">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="880" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1d233a"/>
+      <stop offset="1" stop-color="#252c4a"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="48" y1="58" x2="132" y2="142" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#7432ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="880" height="200" rx="24" fill="url(#bg)"/>
+
+  <rect x="48" y="58" width="84" height="84" rx="20" fill="url(#tile)"/>
+  <g transform="translate(66,76) scale(2)" fill="#ffffff">
+    <path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
+  </g>
+
+  <text x="164" y="98" font-family="'Inter','Segoe UI',system-ui,sans-serif" font-size="52" font-weight="700" fill="#ffffff">Asset Pilot</text>
+  <text x="166" y="132" font-family="'Inter','Segoe UI',system-ui,sans-serif" font-size="20" font-weight="400" fill="#9aa3c0">Rule-based asset organization for Pimcore 12</text>
+
+  <g transform="translate(166,154)">
+    <circle cx="6" cy="6" r="6" fill="#7432ff"/>
+    <text x="20" y="11" font-family="'Inter','Segoe UI',system-ui,sans-serif" font-size="15" font-weight="600" fill="#c7cce0" letter-spacing="1">BY ORONTS</text>
+  </g>
+</svg>

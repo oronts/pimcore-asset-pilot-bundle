@@ -18,4 +18,21 @@ readonly class RuleEvaluation
         public int $priority,
         public bool $enabled,
     ) {}
+
+    public function describe(): string
+    {
+        if ($this->matched) {
+            return '-> ' . ($this->resolvedPath ?? '(unknown path)');
+        }
+
+        return match ($this->rejectionReason) {
+            'disabled' => 'disabled',
+            'class_mismatch' => 'class_mismatch: ' . ($this->filterDetails ?? ''),
+            'field_mismatch' => 'field_mismatch: ' . ($this->filterDetails ?? ''),
+            'condition_failed' => 'condition_failed: ' . ($this->conditionExpression ?? '') .
+                ($this->conditionError !== null ? ' (error: ' . $this->conditionError . ')' : ''),
+            'filter_rejected' => 'filter_rejected: ' . ($this->filterDetails ?? ''),
+            default => $this->rejectionReason ?? 'unknown',
+        };
+    }
 }

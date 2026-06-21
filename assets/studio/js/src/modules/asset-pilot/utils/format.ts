@@ -12,13 +12,13 @@ export function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-export function formatDate(dateStr: string | null, withYear = false): string {
+export function formatDate(dateStr: string | null, withYear = false, locale?: string): string {
   if (!dateStr) return '-'
   const d = new Date(dateStr)
   const opts: Intl.DateTimeFormatOptions = withYear
     ? { day: '2-digit', month: 'short', year: 'numeric' }
     : { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }
-  return d.toLocaleDateString('en-GB', opts)
+  return d.toLocaleDateString(locale, opts)
 }
 
 export function pageNumbers(current: number, total: number): number[] {

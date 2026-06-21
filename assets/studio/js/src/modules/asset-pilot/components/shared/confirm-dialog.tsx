@@ -1,4 +1,6 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
+import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 
 interface ConfirmDialogProps {
   title: string
@@ -17,13 +19,15 @@ const variantColors = {
 }
 
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
-  title, description, confirmLabel, cancelLabel = 'Cancel', variant, loading = false, onConfirm, onCancel,
+  title, description, confirmLabel, cancelLabel, variant, loading = false, onConfirm, onCancel,
 }) => {
+  const { t } = useTranslation()
   const colors = variantColors[variant]
+  const modalRef = useModalDismiss<HTMLDivElement>(onCancel)
 
   return (
     <div style={overlayStyle} onClick={onCancel}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0, marginTop: 2 }}>
             <path d="M12 2L1 21h22L12 2z" fill={colors.bg} stroke={colors.icon} strokeWidth="1.5" />
@@ -35,9 +39,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button onClick={onCancel} disabled={loading} style={cancelBtnStyle}>{cancelLabel}</button>
+          <button onClick={onCancel} disabled={loading} style={cancelBtnStyle}>{cancelLabel ?? t('asset-pilot.common.cancel')}</button>
           <button onClick={onConfirm} disabled={loading} style={{ ...confirmBtnStyle, background: colors.btn }}>
-            {loading ? 'Processing...' : confirmLabel}
+            {loading ? t('asset-pilot.operations.processing') : confirmLabel}
           </button>
         </div>
       </div>

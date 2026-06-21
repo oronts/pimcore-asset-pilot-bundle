@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { ExplainResponse, RuleEvaluation, ExplainOperation } from '../../types'
 import { OpenButton } from '../shared/open-button'
 import { ExpandablePath } from '../shared/expandable-path'
+import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 
 interface ExplainModalProps {
   data: ExplainResponse
@@ -22,6 +23,7 @@ const reasonLabels: Record<string, string> = {
 export const ExplainModal: React.FC<ExplainModalProps> = ({ data, onClose }) => {
   const { t } = useTranslation()
   const [groupMode, setGroupMode] = useState<GroupMode>('asset')
+  const modalRef = useModalDismiss<HTMLDivElement>(onClose)
 
   const matched = data.evaluations.filter(e => e.matched).length
   const skipped = data.evaluations.filter(e => !e.matched).length
@@ -57,7 +59,7 @@ export const ExplainModal: React.FC<ExplainModalProps> = ({ data, onClose }) => 
 
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#262626' }}>
             {t('asset-pilot.explain.title', { id: data.objectId })}

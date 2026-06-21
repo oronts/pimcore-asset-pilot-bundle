@@ -1,0 +1,320 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Service;
+
+use Oronts\AssetPilotBundle\Enum\HealOutcome;
+use Oronts\AssetPilotBundle\Event\AssetHealEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
+use Oronts\AssetPilotBundle\Model\HealResult;
+use Oronts\AssetPilotBundle\Notification\NotificationDispatcher;
+use Pimcore\Model\Asset;
+use Pimcore\Model\Version;
+use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+
+/**
+ * Self-heal for a broken asset binary: walk versions newest-to-oldest, find the first that renders
+ * (probed from the version's stored bytes, never by mutating the live asset), then restore the live
+ * binary from it. The restore save is LoopGuard-wrapped so the resulting Asset events do not
+ * re-enter the organize pipeline. Each heal is logged so it can be undone (a renderable version can
+ * still be the wrong content). When nothing renders the asset is reported (and optionally
+ * quarantined) for human review, never silently left or destroyed.
+ */
+class VersionRollbackHealer
+{
+    public function __construct(
+        protected readonly CompositeIntegrityChecker $checker,
+        protected readonly LoopGuard $loopGuard,
+        protected readonly EventDispatcherInterface $eventDispatcher,
+        protected readonly IntegrityHealLog $healLog,
+        protected readonly LoggerInterface $logger,
+        protected readonly ?QuarantineService $quarantine = null,
+        protected readonly string $onUnrecoverable = 'report',
+        protected readonly ?NotificationDispatcher $notifier = null,
+    ) {}
+
+    public function healById(int $assetId, bool $dryRun = false): HealResult
+    {
+        $asset = $this->loadAsset($assetId);
+        if ($asset === null || $asset instanceof Asset\Folder) {
+            return new HealResult(HealOutcome::Skipped, 'none', null, 'Asset not found.', $dryRun);
+        }
+
+        return $this->heal($asset, $dryRun);
+    }
+
+    public function heal(Asset $asset, bool $dryRun = false): HealResult
+    {
+        $checker = $this->checker->resolve($asset);
+        if ($checker === null) {
+            return new HealResult(HealOutcome::Unverifiable, 'none', null, 'No integrity checker supports this asset.', $dryRun);
+        }
+
+        $live = $checker->check($asset);
+        if ($live->isRenderable()) {
+            return new HealResult(HealOutcome::AlreadyRenderable, $live->checker, null, null, $dryRun);
+        }
+        if (!$live->isBroken()) {
+            // Unverifiable: never heal what we cannot confirm is broken.
+            return new HealResult(HealOutcome::Unverifiable, $live->checker, null, $live->reason, $dryRun);
+        }
+
+        $extension = strtolower(pathinfo((string) $asset->getFilename(), PATHINFO_EXTENSION));
+        $versions = $this->newestFirstVersions($asset);
+        $preHealVersion = $versions === [] ? null : (int) $versions[0]->getId();
+
+        foreach ($versions as $version) {
+            $binary = $this->versionBinary($version);
+            if ($binary === null || $binary === '') {
+                continue;
+            }
+            if (!$checker->checkBinary($binary, $extension)->isRenderable()) {
+                continue;
+            }
+
+            $toVersion = (int) $version->getId();
+            if ($dryRun) {
+                return new HealResult(HealOutcome::Healed, $live->checker, $toVersion, null, true);
+            }
+
+            $preHeal = new AssetHealEvent($asset, $toVersion);
+            $this->eventDispatcher->dispatch($preHeal, AssetPilotEvents::INTEGRITY_PRE_HEAL);
+            if ($preHeal->isCancelled()) {
+                return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Heal cancelled by a listener.'), $asset, $toVersion);
+            }
+
+            // Two-phase audit: open a pending row BEFORE the destructive restore so a healed asset can
+            // never exist without an undo source, then commit it once the restore succeeds. If the row
+            // cannot be opened, do not heal (the asset is still untouched); if the restore throws, mark
+            // the row failed so it is never offered as undoable.
+            $logId = $this->healLog->beginHeal((int) $asset->getId(), $preHealVersion, $toVersion, $live->checker);
+            if ($logId === null) {
+                return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Could not open the integrity heal audit row; restore not attempted.'), $asset, $toVersion);
+            }
+
+            try {
+                $this->restore($asset, $version);
+            } catch (\Throwable $e) {
+                $this->healLog->failHeal($logId);
+                $this->logger->error('Asset Pilot: integrity heal restore failed for asset {id}: {error}', [
+                    'id' => $asset->getId(),
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+
+                return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Restore failed: ' . $e->getMessage()), $asset, $toVersion);
+            }
+
+            // The binary is restored regardless of the audit write, so the outcome stays Healed (never
+            // misreport a still-broken asset). But if the row could not be promoted out of pending,
+            // findUndoable will never match it, so surface that this heal may not be undoable.
+            $committed = $this->healLog->commitHeal($logId);
+
+            return $this->finish(
+                new HealResult(
+                    HealOutcome::Healed,
+                    $live->checker,
+                    $toVersion,
+                    $committed ? null : 'Asset healed, but its audit row could not be finalised; this heal may not be undoable.',
+                ),
+                $asset,
+                $toVersion,
+            );
+        }
+
+        if (!$dryRun) {
+            $firstUnrecoverable = $this->healLog->latestStatus((int) $asset->getId()) !== IntegrityHealLog::STATUS_UNRECOVERABLE;
+            $this->healLog->record((int) $asset->getId(), null, null, $live->checker, IntegrityHealLog::STATUS_UNRECOVERABLE);
+            $this->routeUnrecoverable($asset, $firstUnrecoverable);
+
+            return $this->finish(new HealResult(HealOutcome::Unrecoverable, $live->checker, null, 'No renderable version to roll back to.'), $asset, null);
+        }
+
+        return new HealResult(HealOutcome::Unrecoverable, $live->checker, null, 'No renderable version to roll back to.', $dryRun);
+    }
+
+    /**
+     * Dispatch INTEGRITY_POST_HEAL with the terminal outcome (every result that got past PRE_HEAL is
+     * reported, not only successes, so monitoring listeners can observe failures and vetoes) and
+     * return the result unchanged. $targetVersion is null when no version was rolled back to.
+     */
+    private function finish(HealResult $result, Asset $asset, ?int $targetVersion): HealResult
+    {
+        $this->eventDispatcher->dispatch(new AssetHealEvent($asset, $targetVersion, $result->outcome), AssetPilotEvents::INTEGRITY_POST_HEAL);
+
+        return $result;
+    }
+
+    /**
+     * Reverse the most recent heal of an asset: restore the pre-heal version. Returns false when
+     * there is nothing undoable (no heal, or its pre-heal version is gone).
+     */
+    public function undo(int $assetId): bool
+    {
+        $entry = $this->healLog->findUndoable($assetId);
+        if ($entry === null || $entry['from_version'] === null) {
+            return false;
+        }
+
+        $asset = $this->loadAsset($assetId);
+        $version = $this->loadVersion($entry['from_version']);
+        if ($asset === null || $asset instanceof Asset\Folder || $version === null) {
+            return false;
+        }
+
+        // Undo overwrites the live binary with the pre-heal version. If the asset was re-uploaded or
+        // re-healed since the heal (its live binary no longer matches the version the heal restored
+        // it to), rolling back would silently destroy that newer content. Refuse instead of clobber.
+        if (!$this->stillInHealedState($asset, $entry['to_version'])) {
+            $this->logger->warning('Asset Pilot: refused to undo heal of asset {id}: its binary changed since the heal, so rolling back to the pre-heal version would overwrite newer content.', [
+                'id' => $assetId,
+            ]);
+
+            return false;
+        }
+
+        $this->restore($asset, $version);
+        $this->healLog->markUndone($entry['id']);
+
+        return true;
+    }
+
+    /**
+     * True when the asset's live binary still equals the version the heal restored it to. A null or
+     * unloadable to_version (or an unreadable binary) cannot be confirmed and is treated as a
+     * mismatch, so undo errs on the side of not overwriting.
+     */
+    protected function stillInHealedState(Asset $asset, ?int $toVersion): bool
+    {
+        if ($toVersion === null) {
+            return false;
+        }
+
+        $version = $this->loadVersion($toVersion);
+        if ($version === null) {
+            return false;
+        }
+
+        $healed = $this->versionBinary($version);
+        $live = $this->liveBinary($asset);
+
+        return $healed !== null && $live !== null && hash_equals($healed, $live);
+    }
+
+    /** The asset's current on-disk bytes, or null if unreadable. A seam so undo is unit-testable. */
+    protected function liveBinary(Asset $asset): ?string
+    {
+        $stream = $asset->getStream();
+        if (!is_resource($stream)) {
+            return null;
+        }
+
+        try {
+            $binary = stream_get_contents($stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return is_string($binary) ? $binary : null;
+    }
+
+    protected function restore(Asset $asset, Version $version): void
+    {
+        $assetId = (int) $asset->getId();
+        if ((int) $version->getCid() !== $assetId) {
+            throw new \RuntimeException(sprintf('Version %d does not belong to asset %d.', (int) $version->getId(), $assetId));
+        }
+
+        $stream = $this->versionStream($version);
+        if (!is_resource($stream)) {
+            throw new \RuntimeException(sprintf('Version %d has no readable binary.', (int) $version->getId()));
+        }
+
+        // LoopGuard window: mark processing before the save (so the AssetUploadListener short-circuits
+        // its own postUpdate) and recently-moved after, mirroring the move pipeline's guarded save.
+        $this->loopGuard->markAssetProcessing($assetId);
+        try {
+            $asset->setStream($stream);
+            $asset->save(['versionNote' => 'asset-pilot integrity heal: rollback to version ' . $version->getId()]);
+            $this->loopGuard->markAssetRecentlyMoved($assetId);
+        } finally {
+            $this->loopGuard->unmarkAssetProcessing($assetId);
+        }
+    }
+
+    private function routeUnrecoverable(Asset $asset, bool $notify): void
+    {
+        $this->logger->warning('Asset Pilot: asset {id} is broken and has no renderable version to roll back to.', [
+            'id' => $asset->getId(),
+        ]);
+
+        // Best-effort quarantine: QuarantineService re-verifies the asset is unused, so a still-referenced
+        // broken asset stays put and is only reported (the report row is already written above).
+        $quarantined = false;
+        if ($this->onUnrecoverable === 'quarantine' && $this->quarantine !== null) {
+            $result = $this->quarantine->quarantine([(int) $asset->getId()]);
+            $quarantined = ($result['quarantined'] ?? 0) > 0;
+        }
+
+        if (!$notify) {
+            return;
+        }
+
+        $this->notifier?->dispatch(
+            'Asset Pilot: unrecoverable broken asset',
+            sprintf(
+                'Asset %d (%s) is broken and no stored version renders. %s',
+                $asset->getId(),
+                $asset->getRealFullPath(),
+                $quarantined ? 'It was moved to quarantine for review.' : 'It was left in place and reported for review.',
+            ),
+        );
+    }
+
+    /**
+     * @return list<Version> newest-first (Asset::getVersions() is oldest-first)
+     */
+    protected function newestFirstVersions(Asset $asset): array
+    {
+        return array_reverse($asset->getVersions());
+    }
+
+    protected function versionBinary(Version $version): ?string
+    {
+        $stream = $this->versionStream($version);
+        if (!is_resource($stream)) {
+            return null;
+        }
+
+        try {
+            $binary = stream_get_contents($stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return is_string($binary) ? $binary : null;
+    }
+
+    /**
+     * @return resource|null the version's stored binary, side-effect free (no asset reconstruction)
+     */
+    protected function versionStream(Version $version)
+    {
+        $stream = $version->getBinaryFileStream();
+
+        return is_resource($stream) ? $stream : null;
+    }
+
+    protected function loadAsset(int $assetId): ?Asset
+    {
+        return Asset::getById($assetId);
+    }
+
+    protected function loadVersion(int $versionId): ?Version
+    {
+        return Version::getById($versionId);
+    }
+}

@@ -4,11 +4,18 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
-use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Model\DriftItem;
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Model\RuleOverlap;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\LocationDriftService;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
+use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
+use Oronts\AssetPilotBundle\Service\RulePortability;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -19,11 +26,124 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class RulesController
 {
     public function __construct(
-        protected readonly RuleEngine $ruleEngine,
+        protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetOrganizer $assetOrganizer,
-        protected readonly AuditLogger $auditLogger,
+        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly RulePortability $portability,
+        protected readonly RuleOverlapAnalyzer $overlapAnalyzer,
+        protected readonly LocationDriftService $driftService,
         protected readonly LoggerInterface $logger,
     ) {}
+
+    #[Route('/rules/drift', name: 'oronts_asset_pilot_rules_drift', methods: ['GET'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function drift(Request $request): JsonResponse
+    {
+        $className = trim((string) $request->query->get('class', ''));
+        if ($className === '') {
+            return new JsonResponse(['error' => 'Query parameter "class" is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        [$page, $limit] = Pagination::fromRequest($request, 200);
+
+        try {
+            $result = $this->driftService->driftForClass($className, $page, $limit);
+
+            return new JsonResponse([
+                'items' => array_map(static fn (DriftItem $item): array => [
+                    'assetId' => $item->assetId,
+                    'currentPath' => $item->currentPath,
+                    'expectedPath' => $item->expectedPath,
+                    'ruleName' => $item->ruleName,
+                ], $result['items']),
+                'objectsScanned' => $result['objectsScanned'],
+                'page' => $result['page'],
+                'limit' => $result['limit'],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to compute location drift.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to compute location drift.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+
+    #[Route('/rules/overlap', name: 'oronts_asset_pilot_rules_overlap', methods: ['GET'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function overlap(): JsonResponse
+    {
+        try {
+            $overlaps = array_map(static fn (RuleOverlap $overlap): array => [
+                'ruleA' => $overlap->ruleA,
+                'ruleB' => $overlap->ruleB,
+                'class' => $overlap->class,
+                'sharedFields' => $overlap->sharedFields,
+                'higherPriority' => $overlap->higherPriority,
+                'samePriority' => $overlap->samePriority,
+            ], $this->overlapAnalyzer->analyze());
+
+            return new JsonResponse(['overlaps' => $overlaps]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to analyze rule overlap.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to analyze rule overlap.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+
+    #[Route('/rules/export', name: 'oronts_asset_pilot_rules_export', methods: ['GET'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function export(): JsonResponse
+    {
+        try {
+            return new JsonResponse($this->portability->export());
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to export rules.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to export rules.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+
+    #[Route('/rules/diff', name: 'oronts_asset_pilot_rules_diff', methods: ['POST'], priority: 1)]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function diff(Request $request): JsonResponse
+    {
+        try {
+            $artifact = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($artifact)) {
+            return new JsonResponse(['error' => 'Expected a rule-set artifact object.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $diff = $this->portability->diff($artifact);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to diff rules.', ['exception' => $e]);
+
+            return new JsonResponse(
+                ['error' => 'Failed to diff rules.'],
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+
+        return new JsonResponse([
+            'added' => $diff->added,
+            'removed' => $diff->removed,
+            'changed' => $diff->changed,
+            'unchanged' => $diff->unchanged,
+            'hasChanges' => $diff->hasChanges(),
+        ]);
+    }
 
     #[Route('/rules', name: 'oronts_asset_pilot_rules', methods: ['GET'])]
     #[IsGranted(AssetPilotPermission::View->value)]
@@ -126,19 +246,14 @@ class RulesController
                 );
             }
 
-            $operations = $this->assetOrganizer->dryRun($object);
-
-            $filtered = array_values(array_filter(
-                $operations,
-                static fn ($op): bool => $op->ruleName === $name,
-            ));
+            $operations = $this->assetOrganizer->dryRun($object, TriggerType::Api, $name);
 
             $filtered = array_map(static fn ($op) => [
                 'assetId' => $op->assetId,
                 'sourcePath' => $op->sourcePath,
                 'targetPath' => $op->targetPath,
                 'ruleName' => $op->ruleName,
-            ], $filtered);
+            ], $operations);
 
             $this->logger->info('Preview for rule "{rule}" on object {objectId}: {count} operations.', [
                 'rule' => $name,
@@ -158,5 +273,46 @@ class RulesController
                 JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
+    }
+
+    #[Route('/rules/{name}/apply', name: 'oronts_asset_pilot_rules_apply', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::Operate->value)]
+    public function apply(string $name, Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'Invalid JSON'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        if (!is_array($data) || (int) ($data['objectId'] ?? 0) <= 0) {
+            return new JsonResponse(['error' => 'objectId is required and must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        $object = AbstractObject::getById((int) $data['objectId']);
+        if ($object === null) {
+            return new JsonResponse(['error' => sprintf('Object with ID %d not found.', (int) $data['objectId'])], JsonResponse::HTTP_NOT_FOUND);
+        }
+
+        $known = array_filter($this->ruleEngine->getRules(), static fn (Rule $r): bool => $r->name === $name);
+        if ($known === []) {
+            return new JsonResponse(['error' => sprintf('Rule "%s" not found.', $name)], JsonResponse::HTTP_NOT_FOUND);
+        }
+
+        $results = $this->assetOrganizer->organize($object, TriggerType::Api, $name);
+
+        return new JsonResponse([
+            'rule' => $name,
+            'results' => array_map(static fn ($r): array => [
+                'status' => $r->status->value,
+                'message' => $r->message,
+                'operation' => $r->operation !== null ? [
+                    'assetId' => $r->operation->assetId,
+                    'sourcePath' => $r->operation->sourcePath,
+                    'targetPath' => $r->operation->targetPath,
+                    'ruleName' => $r->operation->ruleName,
+                ] : null,
+            ], $results),
+        ]);
     }
 }

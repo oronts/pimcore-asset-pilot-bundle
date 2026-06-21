@@ -12,116 +12,89 @@ use Oronts\AssetPilotBundle\Model\RuleMatch;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 
-class RuleEngine
+class RuleEngine implements RuleEngineInterface
 {
     /** @var Rule[] */
     protected readonly array $sortedRules;
 
+    /**
+     * @param iterable<Rule|array<string, mixed>>      $rules         configured rules
+     * @param iterable<RuleProviderInterface>          $ruleProviders consumer-tagged rule providers
+     */
     public function __construct(
-        array $rules,
+        iterable $rules,
         protected readonly ConditionEvaluatorInterface $conditionEvaluator,
         protected readonly PathResolverInterface $pathResolver,
         protected readonly AssetFilterInterface $filter,
         protected readonly LoggerInterface $logger,
+        iterable $ruleProviders = [],
     ) {
         $parsed = [];
         foreach ($rules as $rule) {
-            if ($rule instanceof Rule) {
-                $parsed[] = $rule;
-            } elseif (is_array($rule)) {
-                $name = $rule['name'] ?? 'unnamed';
-                $parsed[] = Rule::fromConfig($name, $rule);
+            $parsed[] = $this->normalizeRule($rule);
+        }
+        foreach ($ruleProviders as $provider) {
+            foreach ($provider->getRules() as $rule) {
+                $parsed[] = $this->normalizeRule($rule);
             }
         }
+        $parsed = array_filter($parsed);
         usort($parsed, static fn (Rule $a, Rule $b): int => $b->priority <=> $a->priority);
         $this->sortedRules = $parsed;
+    }
+
+    private function normalizeRule(mixed $rule): ?Rule
+    {
+        if ($rule instanceof Rule) {
+            return $rule;
+        }
+        if (is_array($rule)) {
+            return Rule::fromConfig($rule['name'] ?? 'unnamed', $rule);
+        }
+
+        return null;
     }
 
     /** @return RuleMatch[] */
     public function match(AbstractObject $object, Asset $asset): array
     {
-        $matches = [];
+        return $this->evaluateRules($object, $asset, null, null);
+    }
 
-        foreach ($this->sortedRules as $rule) {
-            if (!$rule->enabled) {
-                $this->logger->debug('Rule "{rule}" is disabled, skipping.', ['rule' => $rule->name]);
-                continue;
-            }
-
-            if (!$this->matchesClass($rule, $object)) {
-                $this->logger->debug('Rule "{rule}" class mismatch for object {id} (expected "{expected}", got "{actual}").', [
-                    'rule' => $rule->name,
-                    'id' => $object->getId(),
-                    'expected' => $rule->class,
-                    'actual' => $object->getClassName(),
-                ]);
-                continue;
-            }
-
-            if (!$this->conditionEvaluator->evaluate($object, $asset, $rule)) {
-                $this->logger->debug('Rule "{rule}" condition not met for object {objectId} and asset {assetId}.', [
-                    'rule' => $rule->name,
-                    'objectId' => $object->getId(),
-                    'assetId' => $asset->getId(),
-                ]);
-                continue;
-            }
-
-            if (!$this->filter->accept($asset, $object, $rule)) {
-                $this->logger->debug('Rule "{rule}" filter rejected asset {assetId}.', [
-                    'rule' => $rule->name,
-                    'assetId' => $asset->getId(),
-                ]);
-                continue;
-            }
-
-            $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule);
-
-            $this->logger->debug('Rule "{rule}" matched object {objectId} and asset {assetId}, resolved path: {path}.', [
-                'rule' => $rule->name,
-                'objectId' => $object->getId(),
-                'assetId' => $asset->getId(),
-                'path' => $resolvedPath,
-            ]);
-
-            $matches[] = new RuleMatch(
-                rule: $rule,
-                object: $object,
-                asset: $asset,
-                resolvedPath: $resolvedPath,
-            );
-        }
-
-        return $matches;
+    /** @return RuleMatch[] */
+    public function matchField(AbstractObject $object, Asset $asset, string $fieldName, ?string $locale = null): array
+    {
+        return $this->evaluateRules($object, $asset, $fieldName, $locale);
     }
 
     /**
+     * Shared matching pass for match() (field-agnostic) and matchField() (field-scoped). A null
+     * $fieldName skips the field constraint; everything else (enabled, class, condition, filter,
+     * path) is identical, which is why both must run the same gate sequence.
+     *
      * @return RuleMatch[]
      */
-    public function matchField(AbstractObject $object, Asset $asset, string $fieldName, ?string $locale = null): array
+    private function evaluateRules(AbstractObject $object, Asset $asset, ?string $fieldName, ?string $locale): array
     {
         $matches = [];
 
         foreach ($this->sortedRules as $rule) {
-            if (!$rule->enabled) {
+            if (!$rule->enabled || !$this->matchesClass($rule, $object)) {
                 continue;
             }
 
-            if (!$this->matchesClass($rule, $object)) {
+            if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
                 continue;
             }
 
-            if (!$this->matchesFields($rule, $fieldName)) {
-                $this->logger->debug('Rule "{rule}" does not target field "{field}".', [
-                    'rule' => $rule->name,
-                    'field' => $fieldName,
-                ]);
+            if (!$this->matchesLocale($rule, $locale)) {
                 continue;
             }
 
-            if (!$this->conditionEvaluator->evaluate($object, $asset, $rule)) {
+            if (!$this->conditionEvaluator->evaluate($object, $asset, $rule, $locale)) {
                 continue;
             }
 
@@ -131,12 +104,12 @@ class RuleEngine
 
             $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
 
-            $this->logger->debug('Rule "{rule}" matched field "{field}" for object {objectId} and asset {assetId} (locale: {locale}).', [
+            $this->logger->debug('Rule "{rule}" matched object {objectId} asset {assetId} (field: {field}) -> {path}', [
                 'rule' => $rule->name,
-                'field' => $fieldName,
                 'objectId' => $object->getId(),
                 'assetId' => $asset->getId(),
-                'locale' => $locale ?? 'none',
+                'field' => $fieldName ?? 'any',
+                'path' => $resolvedPath,
             ]);
 
             $matches[] = new RuleMatch(
@@ -161,50 +134,22 @@ class RuleEngine
 
         foreach ($this->sortedRules as $rule) {
             if (!$rule->enabled) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'disabled',
-                    conditionExpression: $rule->condition,
-                    conditionResult: null,
-                    conditionError: null,
-                    filterDetails: null,
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: false,
-                );
+                $evaluations[] = $this->rejected($rule, 'disabled', enabled: false);
                 continue;
             }
 
             if (!$this->matchesClass($rule, $object)) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'class_mismatch',
-                    conditionExpression: $rule->condition,
-                    conditionResult: null,
-                    conditionError: null,
-                    filterDetails: 'expected ' . $rule->class . ', got ' . $object->getClassName(),
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'class_mismatch', filterDetails: 'expected ' . $rule->class . ', got ' . ($this->objectClassName($object) ?? 'Folder'));
                 continue;
             }
 
             if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'field_mismatch',
-                    conditionExpression: $rule->condition,
-                    conditionResult: null,
-                    conditionError: null,
-                    filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']',
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'field_mismatch', filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']');
+                continue;
+            }
+
+            if (!$this->matchesLocale($rule, $locale)) {
+                $evaluations[] = $this->rejected($rule, 'locale_mismatch', filterDetails: 'locale "' . ($locale ?? 'none') . '" not in [' . implode(', ', $rule->locales) . ']');
                 continue;
             }
 
@@ -212,7 +157,7 @@ class RuleEngine
             $conditionError = null;
             if ($rule->condition !== null && $rule->condition !== '') {
                 try {
-                    $conditionResult = $this->conditionEvaluator->evaluate($object, $asset, $rule);
+                    $conditionResult = $this->conditionEvaluator->evaluateStrict($object, $asset, $rule, $locale);
                 } catch (\Throwable $e) {
                     $conditionResult = false;
                     $conditionError = $e->getMessage();
@@ -222,34 +167,12 @@ class RuleEngine
             }
 
             if (!$conditionResult) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'condition_failed',
-                    conditionExpression: $rule->condition,
-                    conditionResult: false,
-                    conditionError: $conditionError,
-                    filterDetails: null,
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'condition_failed', conditionResult: false, conditionError: $conditionError);
                 continue;
             }
 
             if (!$this->filter->accept($asset, $object, $rule)) {
-                $evaluations[] = new RuleEvaluation(
-                    ruleName: $rule->name,
-                    matched: false,
-                    rejectionReason: 'filter_rejected',
-                    conditionExpression: $rule->condition,
-                    conditionResult: true,
-                    conditionError: null,
-                    filterDetails: 'asset rejected by filter',
-                    resolvedPath: null,
-                    priority: $rule->priority,
-                    enabled: true,
-                );
+                $evaluations[] = $this->rejected($rule, 'filter_rejected', filterDetails: 'asset rejected by filter', conditionResult: true);
                 continue;
             }
 
@@ -280,19 +203,32 @@ class RuleEngine
         return ['matches' => $matches, 'evaluations' => $evaluations];
     }
 
+    protected function rejected(
+        Rule $rule,
+        string $reason,
+        ?string $filterDetails = null,
+        ?bool $conditionResult = null,
+        ?string $conditionError = null,
+        bool $enabled = true,
+    ): RuleEvaluation {
+        return new RuleEvaluation(
+            ruleName: $rule->name,
+            matched: false,
+            rejectionReason: $reason,
+            conditionExpression: $rule->condition,
+            conditionResult: $conditionResult,
+            conditionError: $conditionError,
+            filterDetails: $filterDetails,
+            resolvedPath: null,
+            priority: $rule->priority,
+            enabled: $enabled,
+        );
+    }
+
     /** @return Rule[] */
     public function getRules(): array
     {
         return $this->sortedRules;
-    }
-
-    /** @return Rule[] */
-    public function findRulesForClass(string $className): array
-    {
-        return array_values(array_filter(
-            $this->sortedRules,
-            static fn (Rule $rule): bool => $rule->enabled && ($rule->class === '*' || $rule->class === $className),
-        ));
     }
 
     protected function matchesClass(Rule $rule, AbstractObject $object): bool
@@ -301,7 +237,12 @@ class RuleEngine
             return true;
         }
 
-        return $object->getClassName() === $rule->class;
+        return $this->objectClassName($object) === $rule->class;
+    }
+
+    private function objectClassName(AbstractObject $object): ?string
+    {
+        return $object instanceof Concrete ? $object->getClassName() : null;
     }
 
     protected function matchesFields(Rule $rule, string $fieldName): bool
@@ -311,5 +252,18 @@ class RuleEngine
         }
 
         return in_array($fieldName, $rule->fields, true);
+    }
+
+    /**
+     * A rule with no `locales` matches any locale (and non-localized fields). A locale-scoped rule
+     * matches only its listed locales, so it never touches a non-localized field (locale null).
+     */
+    protected function matchesLocale(Rule $rule, ?string $locale): bool
+    {
+        if ($rule->locales === []) {
+            return true;
+        }
+
+        return $locale !== null && in_array($locale, $rule->locales, true);
     }
 }

@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
 import type { MoveOperation } from '../../types'
 import { useToast } from '../../hooks/use-toast'
+import { useModalDismiss } from '../../hooks/use-modal-dismiss'
+import { usePermissions } from '../../hooks/use-permissions'
 
 interface RulePreviewModalProps {
   ruleName: string
@@ -12,11 +14,13 @@ interface RulePreviewModalProps {
 export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, onClose }) => {
   const { t } = useTranslation()
   const toast = useToast()
+  const { operate } = usePermissions()
   const [objectId, setObjectId] = useState('')
   const [results, setResults] = useState<MoveOperation[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const modalRef = useModalDismiss<HTMLDivElement>(onClose)
 
   const runPreview = async (): Promise<void> => {
     const id = parseInt(objectId, 10)
@@ -41,7 +45,7 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
     if (isNaN(id)) return
     setApplying(true)
     try {
-      await assetPilotApi.organize({ objectId: id })
+      await assetPilotApi.applyRule(ruleName, id)
       toast.success(t('asset-pilot.rule-preview.apply-success'))
       onClose()
     } catch (e) {
@@ -53,7 +57,7 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
 
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.rule-preview.title', { name: ruleName })}</h3>
           <button onClick={onClose} style={closeBtnStyle}>&times;</button>
@@ -92,9 +96,11 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
                     ))}
                   </tbody>
                 </table>
-                <button onClick={() => { void applyNow() }} disabled={applying} style={applyBtnStyle}>
-                  {applying ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.apply-now')}
-                </button>
+                {operate && (
+                  <button onClick={() => { void applyNow() }} disabled={applying} style={applyBtnStyle}>
+                    {applying ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.apply-now')}
+                  </button>
+                )}
               </>
             )}
           </div>

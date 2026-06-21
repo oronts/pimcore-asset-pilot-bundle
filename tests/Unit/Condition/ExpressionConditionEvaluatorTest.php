@@ -14,6 +14,8 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
+use Symfony\Component\ExpressionLanguage\ExpressionFunction;
+use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
 
 #[CoversClass(ExpressionConditionEvaluator::class)]
 class ExpressionConditionEvaluatorTest extends TestCase
@@ -32,6 +34,50 @@ class ExpressionConditionEvaluatorTest extends TestCase
             targetPath: '/test', strategy: MoveStrategy::Always, callback: null,
             priority: 10, enabled: true, filters: [],
         );
+    }
+
+    #[Test]
+    public function conditionCanBranchOnTheLocale(): void
+    {
+        $rule = $this->createRule('locale == "de"');
+        $object = $this->createMock(AbstractObject::class);
+        $asset = $this->createMock(Asset::class);
+
+        self::assertTrue($this->evaluator->evaluate($object, $asset, $rule, 'de'));
+        self::assertFalse($this->evaluator->evaluate($object, $asset, $rule, 'en'));
+        self::assertFalse($this->evaluator->evaluate($object, $asset, $rule, null));
+    }
+
+    #[Test]
+    public function aTaggedFunctionProviderExtendsTheConditionLanguage(): void
+    {
+        $provider = new class () implements ExpressionFunctionProviderInterface {
+            public function getFunctions(): array
+            {
+                return [ExpressionFunction::fromPhp('strtoupper', 'is_weekend')];
+            }
+        };
+
+        $evaluator = new ExpressionConditionEvaluator(new NullLogger(), [$provider]);
+
+        // Without the provider this would throw "function is_weekend does not exist".
+        $evaluator->validateSyntax('is_weekend("x") == "X"');
+        $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function evaluateSwallowsErrorsWhileEvaluateStrictPropagatesThem(): void
+    {
+        $rule = $this->createRule('1 / 0');
+        $object = $this->createMock(AbstractObject::class);
+        $asset = $this->createMock(Asset::class);
+
+        // evaluate() must never throw (the live pipeline path) ...
+        self::assertFalse($this->evaluator->evaluate($object, $asset, $rule));
+
+        // ... but evaluateStrict() lets the error surface so explain() can report it.
+        $this->expectException(\Throwable::class);
+        $this->evaluator->evaluateStrict($object, $asset, $rule);
     }
 
     #[Test]

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Event;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -21,6 +22,9 @@ class AssetMoveEvent extends Event
         public readonly AbstractObject $object,
         public readonly Rule $rule,
         public readonly TriggerType $triggerType,
+        public readonly bool $dryRun = false,
+        public readonly ?MoveOperation $operation = null,
+        public readonly ?\Throwable $throwable = null,
     ) {}
 
     public function cancel(): void
@@ -32,5 +36,11 @@ class AssetMoveEvent extends Event
     public function isCancelled(): bool
     {
         return $this->cancelled;
+    }
+
+    /** True when fired from a preview/dry-run: listeners may decide cancellation but must not mutate state. */
+    public function isDryRun(): bool
+    {
+        return $this->dryRun;
     }
 }

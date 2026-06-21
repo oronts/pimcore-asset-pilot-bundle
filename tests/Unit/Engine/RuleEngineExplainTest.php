@@ -9,7 +9,6 @@ use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
 use Oronts\AssetPilotBundle\Model\Rule;
-use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -137,7 +136,7 @@ class RuleEngineExplainTest extends TestCase
     {
         $rule = $this->createRule('cond_rule', 'Product', 10, condition: 'object.isActive()');
 
-        $this->conditionEvaluator->method('evaluate')->willReturn(false);
+        $this->conditionEvaluator->method('evaluateStrict')->willReturn(false);
 
         $engine = $this->createEngine([$rule]);
         $result = $engine->explain($this->createObject(), $this->createAsset());
@@ -222,7 +221,7 @@ class RuleEngineExplainTest extends TestCase
     {
         $rule = $this->createRule('error_rule', 'Product', 10, condition: 'broken.expression()');
 
-        $this->conditionEvaluator->method('evaluate')->willThrowException(new \RuntimeException('Syntax error'));
+        $this->conditionEvaluator->method('evaluateStrict')->willThrowException(new \RuntimeException('Syntax error'));
 
         $engine = $this->createEngine([$rule]);
         $result = $engine->explain($this->createObject(), $this->createAsset());

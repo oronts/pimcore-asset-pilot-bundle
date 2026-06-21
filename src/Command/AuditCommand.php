@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,7 +20,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class AuditCommand extends Command
 {
     public function __construct(
-        protected readonly AuditLogger $auditLogger,
+        protected readonly AuditLoggerInterface $auditLogger,
         protected readonly LoggerInterface $logger,
     ) {
         parent::__construct();
@@ -30,6 +30,8 @@ class AuditCommand extends Command
     {
         $this
             ->addOption('since', null, InputOption::VALUE_REQUIRED, 'Show entries since (e.g., "1 week ago")')
+            ->addOption('asset-id', null, InputOption::VALUE_REQUIRED, 'Filter to a single asset id')
+            ->addOption('object-id', null, InputOption::VALUE_REQUIRED, 'Filter to a single object id')
             ->addOption('class', null, InputOption::VALUE_REQUIRED, 'Filter by DataObject class')
             ->addOption('status', null, InputOption::VALUE_REQUIRED, 'Filter by status (completed, failed, skipped)')
             ->addOption('rule', null, InputOption::VALUE_REQUIRED, 'Filter by rule name')
@@ -42,7 +44,7 @@ class AuditCommand extends Command
         $io = new SymfonyStyle($input, $output);
 
         if ($input->getOption('cleanup')) {
-            $days = 90; // Could come from config
+            $days = $this->auditLogger->getRetentionDays();
             $deleted = $this->auditLogger->cleanup($days);
             $io->success("Cleaned up {$deleted} audit entries older than {$days} days.");
             return Command::SUCCESS;
@@ -50,13 +52,25 @@ class AuditCommand extends Command
 
         $filters = [];
         if ($class = $input->getOption('class')) {
-            $filters['class'] = $class;
+            $filters['object_class'] = $class;
         }
         if ($status = $input->getOption('status')) {
             $filters['status'] = $status;
         }
         if ($rule = $input->getOption('rule')) {
             $filters['rule_name'] = $rule;
+        }
+        foreach (['asset-id' => 'asset_id', 'object-id' => 'object_id'] as $option => $filterKey) {
+            $raw = $input->getOption($option);
+            if ($raw === null) {
+                continue;
+            }
+            if (!ctype_digit((string) $raw) || (int) $raw <= 0) {
+                $io->error(sprintf('--%s must be a positive integer.', $option));
+
+                return Command::INVALID;
+            }
+            $filters[$filterKey] = (int) $raw;
         }
         if ($since = $input->getOption('since')) {
             $filters['since'] = (new \DateTimeImmutable($since))->format('Y-m-d H:i:s');

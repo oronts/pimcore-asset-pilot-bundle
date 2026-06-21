@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
+use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
+use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
+use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\ProgressBar;
@@ -20,8 +22,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class CleanupUnusedCommand extends Command
 {
+    use ValidatesCliBulkIds;
+
     public function __construct(
-        private readonly UnusedAssetFinder $unusedAssetFinder,
+        private readonly UnusedAssetFinderInterface $unusedAssetFinder,
     ) {
         parent::__construct();
     }
@@ -29,13 +33,12 @@ class CleanupUnusedCommand extends Command
     protected function configure(): void
     {
         $this
+            ->addOption('by-ids', null, InputOption::VALUE_REQUIRED, 'Act on these specific asset ids (comma-separated) instead of scanning. Each is still re-verified as unused and permission-checked.')
             ->addOption('before', null, InputOption::VALUE_REQUIRED, 'Assets modified before this date (e.g. "2024-01-01", "-90 days", "-6 months")')
             ->addOption('after', null, InputOption::VALUE_REQUIRED, 'Assets modified after this date')
             ->addOption('type', null, InputOption::VALUE_REQUIRED, 'Filter by asset type, comma-separated (e.g. "image,document")')
             ->addOption('extension', null, InputOption::VALUE_REQUIRED, 'Filter by file extension, comma-separated (e.g. "pdf,png,jpg")')
             ->addOption('folder', null, InputOption::VALUE_REQUIRED, 'Limit to assets in this folder path (e.g. "/uploads/temp")')
-            ->addOption('min-size', null, InputOption::VALUE_REQUIRED, 'Minimum file size in bytes')
-            ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Maximum file size in bytes')
             ->addOption('action', null, InputOption::VALUE_REQUIRED, 'Action to perform: "delete" or "move" (default: delete)', 'delete')
             ->addOption('move-to', null, InputOption::VALUE_REQUIRED, 'Target folder when action=move (e.g. "/archive/unused")')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Preview only — do not delete or move anything')
@@ -54,9 +57,6 @@ Find and clean up assets that are not referenced by any Pimcore data object or d
   Move unused assets from /uploads/temp to /archive:
     <comment>bin/console asset-pilot:cleanup-unused --folder=/uploads/temp --action=move --move-to=/archive/unused</comment>
 
-  Delete unused assets larger than 10MB:
-    <comment>bin/console asset-pilot:cleanup-unused --min-size=10485760</comment>
-
   Cronjob: clean up unused images older than 90 days (nightly):
     <comment>0 2 * * * bin/console asset-pilot:cleanup-unused --before="-90 days" --type=image --batch-size=200</comment>
 HELP
@@ -67,11 +67,9 @@ HELP
     {
         $io = new SymfonyStyle($input, $output);
 
-        $filters = $this->buildFilters($input);
         $action = $input->getOption('action');
-        $dryRun = $input->getOption('dry-run');
-        $batchSize = (int) $input->getOption('batch-size');
-        $moveTo = $input->getOption('move-to');
+        $batchSize = max(1, (int) $input->getOption('batch-size'));
+        $moveTo = (string) $input->getOption('move-to');
 
         if ($action === 'move' && empty($moveTo)) {
             $io->error('The --move-to option is required when action=move.');
@@ -83,7 +81,19 @@ HELP
             return Command::FAILURE;
         }
 
-        // Count matching assets
+        if (($byIds = $input->getOption('by-ids')) !== null) {
+            foreach (['before', 'after', 'type', 'extension', 'folder'] as $scanFilter) {
+                if ($input->getOption($scanFilter) !== null) {
+                    $io->error(sprintf('--%s cannot be combined with --by-ids (which names the assets explicitly).', $scanFilter));
+
+                    return Command::FAILURE;
+                }
+            }
+
+            return $this->runForIds($io, $output, (string) $byIds, $action, $moveTo, $batchSize, (bool) $input->getOption('dry-run'));
+        }
+
+        $filters = $this->buildFilters($input);
         $totalCount = $this->unusedAssetFinder->countUnused($filters);
 
         if ($totalCount === 0) {
@@ -98,106 +108,194 @@ HELP
             $io->text('Filters: ' . json_encode($filters, JSON_UNESCAPED_SLASHES));
         }
 
+        if ($input->getOption('dry-run')) {
+            $this->renderDryRunPreview($io, $output, $filters, $action, $moveTo, $totalCount);
+            return Command::SUCCESS;
+        }
+
+        $io->text(sprintf('Action: <comment>%s</comment> | Batch size: %d', $action, $batchSize));
+        $io->newLine();
+
+        $result = $this->processBatches($output, $filters, $action, $moveTo, $batchSize, $totalCount);
+        $io->newLine(2);
+        $this->renderSummary($io, $action, $result);
+
+        return $result['failed'] > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    protected function renderDryRunPreview(SymfonyStyle $io, OutputInterface $output, array $filters, string $action, string $moveTo, int $totalCount): void
+    {
+        $io->note('DRY RUN — no changes will be made.');
+
+        $result = $this->unusedAssetFinder->findUnused($filters, 1, min($totalCount, 50));
+        $table = new Table($output);
+        $table->setHeaders(['ID', 'Path', 'Type', 'Size', 'Modified']);
+
+        foreach ($result['items'] as $item) {
+            $table->addRow([
+                $item['id'],
+                $item['full_path'],
+                $item['type'],
+                ByteFormat::human((int) $item['file_size']),
+                $item['modified_at'] ?? '-',
+            ]);
+        }
+
+        $table->render();
+
+        if ($totalCount > 50) {
+            $io->text(sprintf('... and %d more.', $totalCount - 50));
+        }
+
+        $io->newLine();
+        $io->text(sprintf('Would %s %d asset(s)%s.', $action, $totalCount, $action === 'move' ? ' to ' . $moveTo : ''));
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @return array{succeeded: int, failed: int, processed: int, errors: array<int, string>}
+     */
+    protected function processBatches(OutputInterface $output, array $filters, string $action, string $moveTo, int $batchSize, int $totalCount): array
+    {
+        // Snapshot the candidate ids first: deleting shrinks the listing and moving leaves the asset
+        // unused (just relocated), so re-querying mid-run would reprocess the same first page and skip
+        // later assets. A fixed id list chunked into batches is correct for both actions.
+        return $this->processIds($output, $this->collectUnusedIds($filters, $batchSize, $totalCount), $action, $moveTo, $batchSize);
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array{succeeded: int, failed: int, processed: int, errors: array<int, string>}
+     */
+    protected function processIds(OutputInterface $output, array $ids, string $action, string $moveTo, int $batchSize): array
+    {
+        $progressBar = new ProgressBar($output, count($ids));
+        $progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%');
+        $progressBar->start();
+
+        $succeeded = 0;
+        $failed = 0;
+        $errors = [];
+
+        foreach (array_chunk($ids, $batchSize) as $batch) {
+            if ($action === 'delete') {
+                $batchResult = $this->unusedAssetFinder->deleteAssets($batch);
+                $succeeded += $batchResult['deleted'];
+            } else {
+                $batchResult = $this->unusedAssetFinder->moveAssets($batch, $moveTo);
+                $succeeded += $batchResult['moved'];
+            }
+
+            $failed += $batchResult['failed'];
+            $errors += $batchResult['errors'];
+            $progressBar->advance(count($batch));
+        }
+
+        $progressBar->finish();
+
+        return ['succeeded' => $succeeded, 'failed' => $failed, 'processed' => count($ids), 'errors' => $errors];
+    }
+
+    /**
+     * The --by-ids path: act on a caller-named id set instead of a filter scan. deleteAssets() /
+     * moveAssets() re-verify each asset is still unused and permission-check it, so naming a
+     * referenced or locked asset is safely skipped, not force-deleted.
+     */
+    private function runForIds(SymfonyStyle $io, OutputInterface $output, string $byIds, string $action, string $moveTo, int $batchSize, bool $dryRun): int
+    {
+        $ids = $this->validatedCsvIds($io, $byIds, '--by-ids');
+        if ($ids === null) {
+            return Command::INVALID;
+        }
+
+        $io->title('Asset Pilot — Unused Asset Cleanup (by ids)');
+        $io->text(sprintf('Targeting <info>%d</info> asset id(s); each is re-verified as unused and permission-checked before %s.', count($ids), $action));
+
         if ($dryRun) {
             $io->note('DRY RUN — no changes will be made.');
-
-            // Show preview table (first 50)
-            $result = $this->unusedAssetFinder->findUnused($filters, 1, min($totalCount, 50));
-            $table = new Table($output);
-            $table->setHeaders(['ID', 'Path', 'Type', 'Size', 'Modified']);
-
-            foreach ($result['items'] as $item) {
-                $table->addRow([
-                    $item['id'],
-                    $item['full_path'],
-                    $item['type'],
-                    $this->formatBytes((int) $item['file_size']),
-                    $item['modified_at'] ?? '-',
-                ]);
+            // Preview the real guard outcome per id, not just an echo of the requested ids.
+            $would = [];
+            $skip = [];
+            foreach ($ids as $id) {
+                $reason = $this->unusedAssetFinder->previewMutation($id, $action);
+                if ($reason === null) {
+                    $would[] = $id;
+                } else {
+                    $skip[$id] = $reason;
+                }
             }
-
-            $table->render();
-
-            if ($totalCount > 50) {
-                $io->text(sprintf('... and %d more.', $totalCount - 50));
+            if ($would !== []) {
+                $io->text(sprintf('Would %s: %s', $action, implode(', ', $would)));
+            } else {
+                $io->text(sprintf('No assets would be %s.', $action === 'move' ? 'moved' : 'deleted'));
             }
-
-            $io->newLine();
-            $io->text(sprintf(
-                'Would %s %d asset(s)%s.',
-                $action,
-                $totalCount,
-                $action === 'move' ? ' to ' . $moveTo : '',
-            ));
+            foreach ($skip as $id => $reason) {
+                $io->text(sprintf('Would skip %d: %s', $id, $reason));
+            }
+            if ($action === 'move' && $would !== []) {
+                $io->note("The target folder's create permission is verified when the move actually runs.");
+            }
 
             return Command::SUCCESS;
         }
 
-        // Process in batches
-        $io->text(sprintf('Action: <comment>%s</comment> | Batch size: %d', $action, $batchSize));
-        $io->newLine();
-
-        $progressBar = new ProgressBar($output, $totalCount);
-        $progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%');
-        $progressBar->start();
-
-        $totalProcessed = 0;
-        $totalSucceeded = 0;
-        $totalFailed = 0;
-        $allErrors = [];
-
-        $page = 1;
-        while ($totalProcessed < $totalCount) {
-            // Always fetch page 1 because items get deleted/moved from previous pages
-            $result = $this->unusedAssetFinder->findUnused($filters, 1, $batchSize);
-            $items = $result['items'];
-
-            if (empty($items)) {
-                break;
-            }
-
-            $ids = array_map(static fn (array $item): int => (int) $item['id'], $items);
-
-            if ($action === 'delete') {
-                $batchResult = $this->unusedAssetFinder->deleteAssets($ids);
-                $totalSucceeded += $batchResult['deleted'];
-                $totalFailed += $batchResult['failed'];
-                $allErrors += $batchResult['errors'];
-            } else {
-                $batchResult = $this->unusedAssetFinder->moveAssets($ids, $moveTo);
-                $totalSucceeded += $batchResult['moved'];
-                $totalFailed += $batchResult['failed'];
-                $allErrors += $batchResult['errors'];
-            }
-
-            $totalProcessed += count($ids);
-            $progressBar->advance(count($ids));
-        }
-
-        $progressBar->finish();
+        $result = $this->processIds($output, $ids, $action, $moveTo, $batchSize);
         $io->newLine(2);
+        $this->renderSummary($io, $action, $result);
 
-        // Summary
+        return $result['failed'] > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * @param array{succeeded: int, failed: int, processed: int, errors: array<int, string>} $result
+     */
+    protected function renderSummary(SymfonyStyle $io, string $action, array $result): void
+    {
         $actionPast = $action === 'delete' ? 'deleted' : 'moved';
         $io->success(sprintf(
             'Cleanup complete: %d %s, %d failed out of %d total.',
-            $totalSucceeded,
+            $result['succeeded'],
             $actionPast,
-            $totalFailed,
-            $totalProcessed,
+            $result['failed'],
+            $result['processed'],
         ));
 
-        if (!empty($allErrors)) {
-            $io->warning(sprintf('%d error(s):', count($allErrors)));
-            foreach (array_slice($allErrors, 0, 20, true) as $id => $error) {
-                $io->text(sprintf('  Asset %d: %s', $id, $error));
-            }
-            if (count($allErrors) > 20) {
-                $io->text(sprintf('  ... and %d more errors.', count($allErrors) - 20));
-            }
+        if (empty($result['errors'])) {
+            return;
         }
 
-        return $totalFailed > 0 ? Command::FAILURE : Command::SUCCESS;
+        $io->warning(sprintf('%d error(s):', count($result['errors'])));
+        foreach (array_slice($result['errors'], 0, 20, true) as $id => $error) {
+            $io->text(sprintf('  Asset %d: %s', $id, $error));
+        }
+        if (count($result['errors']) > 20) {
+            $io->text(sprintf('  ... and %d more errors.', count($result['errors']) - 20));
+        }
+    }
+
+    /**
+     * Page through the unused listing once and collect the ids, before any mutation shifts the pages.
+     *
+     * @param array<string, mixed> $filters
+     * @return list<int>
+     */
+    protected function collectUnusedIds(array $filters, int $batchSize, int $totalCount): array
+    {
+        $ids = [];
+        $page = 1;
+
+        do {
+            $items = $this->unusedAssetFinder->findUnused($filters, $page, $batchSize)['items'];
+            foreach ($items as $item) {
+                $ids[] = (int) $item['id'];
+            }
+            ++$page;
+        } while (count($items) === $batchSize && count($ids) < $totalCount);
+
+        return $ids;
     }
 
     private function buildFilters(InputInterface $input): array
@@ -229,24 +327,6 @@ HELP
             $filters['folder'] = $folder;
         }
 
-        $minSize = $input->getOption('min-size');
-        if ($minSize !== null) {
-            $filters['minSize'] = (int) $minSize;
-        }
-
-        $maxSize = $input->getOption('max-size');
-        if ($maxSize !== null) {
-            $filters['maxSize'] = (int) $maxSize;
-        }
-
         return $filters;
-    }
-
-    private function formatBytes(int $bytes): string
-    {
-        if ($bytes === 0) return '0 B';
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $i = (int) floor(log($bytes, 1024));
-        return round($bytes / (1024 ** $i), 2) . ' ' . $units[$i];
     }
 }

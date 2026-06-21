@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { truncate } from '../../utils/format'
 
 interface ExpandablePathProps {
@@ -8,6 +9,7 @@ interface ExpandablePathProps {
 }
 
 export const ExpandablePath: React.FC<ExpandablePathProps> = ({ path, maxLength = 40, highlight }) => {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
   if (!path) return <span>-</span>
@@ -23,7 +25,7 @@ export const ExpandablePath: React.FC<ExpandablePathProps> = ({ path, maxLength 
       <span
         style={{ ...pathStyle, cursor: 'pointer', wordBreak: 'break-all' }}
         onClick={() => setExpanded(false)}
-        title="Click to collapse"
+        title={t('asset-pilot.common.collapse')}
       >
         {path}
         <span style={collapseIcon}>&#x25B4;</span>

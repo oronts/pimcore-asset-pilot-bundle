@@ -4,17 +4,33 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Psr\Log\LoggerInterface;
 
-class ConfidenceScorer
+class ConfidenceScorer implements ConfidenceScorerInterface
 {
-    private const int RECENTLY_UPLOADED_DAYS = 30;
-    private const int PROBABLY_UNUSED_DAYS = 90;
+    public const int RECENTLY_UPLOADED_DAYS = 30;
+    public const int PROBABLY_UNUSED_DAYS = 90;
 
     public function __construct(
-        private readonly Connection $connection,
+        protected readonly Connection $connection,
+        protected readonly LoggerInterface $logger,
+        protected readonly int $recentlyUploadedDays = self::RECENTLY_UPLOADED_DAYS,
+        protected readonly int $probablyUnusedDays = self::PROBABLY_UNUSED_DAYS,
     ) {}
+
+    public function getRecentlyUploadedDays(): int
+    {
+        return $this->recentlyUploadedDays;
+    }
+
+    public function getProbablyUnusedDays(): int
+    {
+        return $this->probablyUnusedDays;
+    }
 
     /**
      * Enrich unused asset items with a confidence classification.
@@ -29,7 +45,23 @@ class ConfidenceScorer
         }
 
         $assetIds = array_column($items, 'id');
-        $historicalIds = $this->getAssetsWithAuditHistory($assetIds);
+
+        try {
+            $historicalIds = $this->getAssetsWithAuditHistory($assetIds);
+        } catch (\Throwable $e) {
+            // Fail closed: if audit history is unreadable, never classify anything definitely_unused
+            // (a delete-risk false negative). Mark everything historically_used until it can be scored.
+            $this->logger->error('Asset Pilot: confidence scoring could not read audit history, failing closed: {error}', [
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            foreach ($items as &$item) {
+                $item['confidence'] = ConfidenceLevel::HistoricallyUsed->value;
+            }
+
+            return $items;
+        }
 
         $now = new \DateTimeImmutable();
 
@@ -40,57 +72,58 @@ class ConfidenceScorer
         return $items;
     }
 
-    private function classify(array $item, array $historicalIds, \DateTimeImmutable $now): string
+    protected function classify(array $item, array $historicalIds, \DateTimeImmutable $now): string
     {
         if (!empty($item['locked'])) {
-            return 'protected';
+            return ConfidenceLevel::Protected->value;
         }
 
         if (in_array((int) $item['id'], $historicalIds, true)) {
-            return 'historically_used';
+            return ConfidenceLevel::HistoricallyUsed->value;
         }
 
         $modified = !empty($item['modified_at']) ? new \DateTimeImmutable($item['modified_at']) : null;
 
         if ($modified === null) {
-            return 'probably_unused';
+            return ConfidenceLevel::ProbablyUnused->value;
+        }
+
+        // A future modification date (clock skew or import) is not aged; treat it as recent.
+        if ($modified > $now) {
+            return ConfidenceLevel::RecentlyUploaded->value;
         }
 
         $daysAgo = (int) $now->diff($modified)->days;
 
-        if ($daysAgo < self::RECENTLY_UPLOADED_DAYS) {
-            return 'recently_uploaded';
+        if ($daysAgo < $this->recentlyUploadedDays) {
+            return ConfidenceLevel::RecentlyUploaded->value;
         }
 
-        if ($daysAgo < self::PROBABLY_UNUSED_DAYS) {
-            return 'probably_unused';
+        if ($daysAgo < $this->probablyUnusedDays) {
+            return ConfidenceLevel::ProbablyUnused->value;
         }
 
-        return 'definitely_unused';
+        return ConfidenceLevel::DefinitelyUnused->value;
     }
 
     /**
      * @param int[] $assetIds
      * @return int[] Asset IDs that have at least one audit log entry
      */
-    private function getAssetsWithAuditHistory(array $assetIds): array
+    protected function getAssetsWithAuditHistory(array $assetIds): array
     {
         if (empty($assetIds)) {
             return [];
         }
 
-        try {
-            $rows = $this->connection->createQueryBuilder()
-                ->select('DISTINCT asset_id')
-                ->from(AuditLogger::TABLE_NAME)
-                ->where('asset_id IN (:ids)')
-                ->setParameter('ids', $assetIds, Connection::PARAM_INT_ARRAY)
-                ->executeQuery()
-                ->fetchFirstColumn();
+        $rows = $this->connection->createQueryBuilder()
+            ->select('DISTINCT asset_id')
+            ->from(AuditLogger::TABLE_NAME)
+            ->where('asset_id IN (:ids)')
+            ->setParameter('ids', $assetIds, ArrayParameterType::INTEGER)
+            ->executeQuery()
+            ->fetchFirstColumn();
 
-            return array_map('intval', $rows);
-        } catch (\Throwable) {
-            return [];
-        }
+        return array_map('intval', $rows);
     }
 }

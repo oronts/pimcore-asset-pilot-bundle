@@ -9,14 +9,21 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\ClassDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
 use Pimcore\Model\DataObject\Concrete;
+use Pimcore\Model\DataObject\Data\BlockElement;
+use Pimcore\Model\DataObject\Data\ElementMetadata;
 use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Pimcore\Model\DataObject\Data\ImageGallery;
+use Pimcore\Model\DataObject\Fieldcollection;
+use Pimcore\Model\DataObject\Localizedfield;
+use Pimcore\Model\DataObject\Objectbrick;
 use Pimcore\Tool;
 use Psr\Log\LoggerInterface;
 
-class AssetFieldExtractor
+class AssetFieldExtractor implements AssetFieldExtractorInterface
 {
     protected const array ASSET_FIELD_TYPES = [
         'image',
@@ -30,10 +37,13 @@ class AssetFieldExtractor
         'advancedManyToManyRelation',
         'advancedManyToOneRelation',
         'manyToManyObjectRelation',
+        'block',
     ];
 
+    /** @param string[] $locales locales to scan for localized fields; empty means all valid languages */
     public function __construct(
         protected readonly LoggerInterface $logger,
+        protected readonly array $locales = [],
     ) {}
 
     /** @return AssetFieldInfo[] */
@@ -48,61 +58,14 @@ class AssetFieldExtractor
         }
 
         $classDef = $object->getClass();
+        $locales = $this->resolveLocales();
         $fields = [];
 
-        foreach ($this->getAssetFields($classDef) as $fieldDef) {
-            $fieldName = $fieldDef->getName();
-
-            try {
-                $value = $object->getValueForFieldName($fieldName);
-                $assets = $this->extractAssetsFromValue($value);
-
-                if ($assets !== []) {
-                    $fields[] = new AssetFieldInfo(
-                        fieldName: $fieldName,
-                        locale: null,
-                        fieldType: $fieldDef->getFieldType(),
-                        assets: $assets,
-                    );
-                }
-            } catch (\Throwable $e) {
-                $this->logger->warning('AssetFieldExtractor: failed to read field {field} on object {id}: {error}', [
-                    'field' => $fieldName,
-                    'id' => $object->getId(),
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        $localizedFields = $object->getLocalizedFields();
-        foreach ($this->getLocalizedAssetFields($classDef) as $fieldDef) {
-            $fieldName = $fieldDef->getName();
-
-            foreach (Tool::getValidLanguages() as $locale) {
-                try {
-                    // Use ignoreFallbackLanguage=true to only get explicitly set values,
-                    // not inherited from parent locales (prevents duplicate moves)
-                    $value = $localizedFields?->getLocalizedValue($fieldName, $locale, true);
-                    $assets = $this->extractAssetsFromValue($value);
-
-                    if ($assets !== []) {
-                        $fields[] = new AssetFieldInfo(
-                            fieldName: $fieldName,
-                            locale: $locale,
-                            fieldType: $fieldDef->getFieldType(),
-                            assets: $assets,
-                        );
-                    }
-                } catch (\Throwable $e) {
-                    $this->logger->warning('AssetFieldExtractor: failed to read localized field {field}/{locale} on object {id}: {error}', [
-                        'field' => $fieldName,
-                        'locale' => $locale,
-                        'id' => $object->getId(),
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
-        }
+        // The object's own plain + localized asset fields. Object bricks and field collections are
+        // structured containers, so their items are traversed separately below.
+        $this->collectAssetFields($object, $classDef->getFieldDefinitions(), '', $locales, $fields);
+        $this->collectFromBricks($object, $classDef, $locales, $fields);
+        $this->collectFromFieldCollections($object, $classDef, $locales, $fields);
 
         $assetCount = array_sum(array_map(static fn (AssetFieldInfo $f): int => count($f->assets), $fields));
 
@@ -149,6 +112,16 @@ class AssetFieldExtractor
             return $assets;
         }
 
+        // advancedMany*Relation fields wrap each target in ElementMetadata; unwrap to the element.
+        if ($value instanceof ElementMetadata) {
+            return $this->extractAssetsFromValue($value->getElement());
+        }
+
+        // Block fields hold rows of BlockElement (one per sub-field); unwrap to the held value.
+        if ($value instanceof BlockElement) {
+            return $this->extractAssetsFromValue($value->getData());
+        }
+
         if (is_array($value)) {
             $assets = [];
 
@@ -180,63 +153,206 @@ class AssetFieldExtractor
         return [];
     }
 
-    /** @return Data[] */
-    protected function getAssetFields(ClassDefinition $classDef): array
+    /**
+     * Collect asset fields (plain and localized) from one value holder — the object itself, an
+     * object-brick item, or a field-collection item — given that holder's field definitions.
+     * $prefix qualifies the reported field name for nested holders (e.g. "myBrick.image"); a rule
+     * with an explicit `fields` constraint targets nested fields by that qualified path.
+     *
+     * @param Data[]           $fieldDefs
+     * @param string[]         $locales
+     * @param AssetFieldInfo[] $fields
+     */
+    protected function collectAssetFields(object $holder, array $fieldDefs, string $prefix, array $locales, array &$fields): void
     {
-        $result = [];
-
-        foreach ($classDef->getFieldDefinitions() as $fieldDef) {
+        foreach ($fieldDefs as $fieldDef) {
             if ($fieldDef instanceof Localizedfields) {
+                $localized = $this->localizedFieldsOf($holder);
+                foreach ($fieldDef->getFieldDefinitions() as $localizedFieldDef) {
+                    if (!$this->isAssetField($localizedFieldDef)) {
+                        continue;
+                    }
+
+                    foreach ($locales as $locale) {
+                        $this->addAssetField($holder, $localizedFieldDef, $prefix, $locale, $localized, $fields);
+                    }
+                }
+
                 continue;
             }
 
             if ($this->isAssetField($fieldDef)) {
-                $result[] = $fieldDef;
+                $this->addAssetField($holder, $fieldDef, $prefix, null, null, $fields);
             }
         }
-
-        return $result;
     }
 
-    /** @return Data[] */
-    protected function getLocalizedAssetFields(ClassDefinition $classDef): array
+    /**
+     * @param AssetFieldInfo[] $fields
+     */
+    private function addAssetField(object $holder, Data $fieldDef, string $prefix, ?string $locale, ?Localizedfield $localized, array &$fields): void
     {
-        $result = [];
+        $fieldName = $fieldDef->getName();
 
+        try {
+            // ignoreFallbackLanguage=true: only explicitly-set localized values, never one inherited
+            // from a parent locale, so a fallback value cannot trigger a duplicate move.
+            $value = $locale !== null
+                ? $localized?->getLocalizedValue($fieldName, $locale, true)
+                : $this->readField($holder, $fieldName);
+
+            $assets = $this->extractAssetsFromValue($value);
+            if ($assets !== []) {
+                $fields[] = new AssetFieldInfo(
+                    fieldName: $prefix . $fieldName,
+                    locale: $locale,
+                    fieldType: $fieldDef->getFieldType(),
+                    assets: $assets,
+                );
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('AssetFieldExtractor: failed to read field {field} on {holder}: {error}', [
+                'field' => $prefix . $fieldName . ($locale !== null ? '/' . $locale : ''),
+                'holder' => $holder::class,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @param string[]         $locales
+     * @param AssetFieldInfo[] $fields
+     */
+    protected function collectFromBricks(Concrete $object, ClassDefinition $classDef, array $locales, array &$fields): void
+    {
         foreach ($classDef->getFieldDefinitions() as $fieldDef) {
-            if (!$fieldDef instanceof Localizedfields) {
+            if (!$fieldDef instanceof Objectbricks) {
                 continue;
             }
 
-            foreach ($fieldDef->getFieldDefinitions() as $localizedFieldDef) {
-                if ($this->isAssetField($localizedFieldDef)) {
-                    $result[] = $localizedFieldDef;
+            try {
+                $container = $this->readField($object, $fieldDef->getName());
+                if (!$container instanceof Objectbrick) {
+                    continue;
+                }
+
+                foreach ($container->getItems() as $brick) {
+                    if (!$brick instanceof Objectbrick\Data\AbstractData) {
+                        continue;
+                    }
+
+                    $brickDef = $this->objectbrickDefinition($brick->getType());
+                    if ($brickDef === null) {
+                        continue;
+                    }
+
+                    $this->collectAssetFields($brick, $brickDef->getFieldDefinitions(), $fieldDef->getName() . '.', $locales, $fields);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('AssetFieldExtractor: failed to read object-brick {field} on object {id}: {error}', [
+                    'field' => $fieldDef->getName(),
+                    'id' => $object->getId(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * @param string[]         $locales
+     * @param AssetFieldInfo[] $fields
+     */
+    protected function collectFromFieldCollections(Concrete $object, ClassDefinition $classDef, array $locales, array &$fields): void
+    {
+        foreach ($classDef->getFieldDefinitions() as $fieldDef) {
+            if (!$fieldDef instanceof Fieldcollections) {
+                continue;
+            }
+
+            try {
+                $container = $this->readField($object, $fieldDef->getName());
+                if (!$container instanceof Fieldcollection) {
+                    continue;
+                }
+
+                foreach ($container->getItems() as $item) {
+                    if (!$item instanceof Fieldcollection\Data\AbstractData) {
+                        continue;
+                    }
+
+                    $itemDef = $this->fieldcollectionDefinition($item->getType());
+                    if ($itemDef === null) {
+                        continue;
+                    }
+
+                    $this->collectAssetFields($item, $itemDef->getFieldDefinitions(), $fieldDef->getName() . '.', $locales, $fields);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('AssetFieldExtractor: failed to read field-collection {field} on object {id}: {error}', [
+                    'field' => $fieldDef->getName(),
+                    'id' => $object->getId(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    protected function readField(object $holder, string $fieldName): mixed
+    {
+        if (method_exists($holder, 'getValueForFieldName')) {
+            return $holder->getValueForFieldName($fieldName);
+        }
+
+        $getter = 'get' . ucfirst($fieldName);
+
+        return method_exists($holder, $getter) ? $holder->$getter() : null;
+    }
+
+    protected function localizedFieldsOf(object $holder): ?Localizedfield
+    {
+        foreach (['getLocalizedFields', 'getLocalizedfields'] as $method) {
+            if (method_exists($holder, $method)) {
+                $localized = $holder->$method();
+                if ($localized instanceof Localizedfield) {
+                    return $localized;
                 }
             }
         }
 
-        return $result;
+        return null;
+    }
+
+    protected function objectbrickDefinition(string $key): ?Objectbrick\Definition
+    {
+        return Objectbrick\Definition::getByKey($key);
+    }
+
+    protected function fieldcollectionDefinition(string $key): ?Fieldcollection\Definition
+    {
+        return Fieldcollection\Definition::getByKey($key);
+    }
+
+    /** @return string[] */
+    protected function resolveLocales(): array
+    {
+        $valid = $this->validLanguages();
+        if ($this->locales === []) {
+            return $valid;
+        }
+
+        return array_values(array_intersect($this->locales, $valid));
+    }
+
+    /** @return string[] */
+    protected function validLanguages(): array
+    {
+        return Tool::getValidLanguages();
     }
 
     protected function isAssetField(Data $fieldDef): bool
     {
-        $fieldType = $fieldDef->getFieldType();
-
-        if (in_array($fieldType, self::ASSET_FIELD_TYPES, true)) {
-            // For relation fields, check if they allow Asset types
-            if (str_contains($fieldType, 'Relation') || str_contains($fieldType, 'relation')) {
-                if (method_exists($fieldDef, 'getAssetTypes')) {
-                    return true;
-                }
-
-                if (method_exists($fieldDef, 'getDocumentTypes')) {
-                    return true;
-                }
-            }
-
-            return true;
-        }
-
-        return false;
+        // Relation field types are included because they may carry assets; extract() filters the
+        // actual referenced assets at runtime, so object-only relations simply yield none.
+        return in_array($fieldDef->getFieldType(), self::ASSET_FIELD_TYPES, true);
     }
 }

@@ -1,32 +1,22 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAssetSearch } from '../../hooks/use-asset-pilot-api'
-import type { AssetSearchFilters } from '../../types'
+import type { AssetItem, AssetSearchFilters } from '../../types'
 import { BulkAssetActions } from './bulk-asset-actions'
+import { GalleryGrid, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { OpenButton } from '../shared/open-button'
 import { TypeBadge } from '../shared/type-badge'
 import { Highlight } from '../shared/highlight'
-import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
-import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
-import { SortableHeader } from '../shared/sortable-header'
+import { LockBadge } from '../shared/lock-badge'
+import { DataTable, type DataColumn } from '../shared/data-table'
 import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
-import { useContainerWidth } from '../../hooks/use-container-width'
-import { formatBytes, formatDate, pageNumbers } from '../../utils/format'
+import { useRowSelection } from '../../hooks/use-row-selection'
+import { useCart, CART_MAX } from '../../hooks/use-cart'
+import { formatBytes, formatDate } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
-import { getVisibleColumns, type ColumnConfig } from '../../utils/column-visibility'
-
-const columns: ColumnConfig[] = [
-  { key: 'checkbox', priority: 1 },
-  { key: 'id', priority: 1 },
-  { key: 'lock', priority: 1 },
-  { key: 'filename', priority: 1 },
-  { key: 'path', priority: 2 },
-  { key: 'type', priority: 1 },
-  { key: 'size', priority: 2 },
-  { key: 'modified', priority: 3 },
-]
+import { AssetCartBar } from './asset-cart-bar'
 
 const typeOptions = ['', 'image', 'document', 'video', 'audio', 'text', 'archive']
 
@@ -39,40 +29,60 @@ export const AssetManagementTab: React.FC = () => {
   const [objectIdInput, setObjectIdInput] = useState('')
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useAssetSearch(mergedFilters)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [containerRef, containerWidth] = useContainerWidth()
-  const visible = getVisibleColumns(columns, containerWidth)
+  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
+  const cart = useCart()
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
 
-  const allSelected = data != null && data.items.length > 0 && data.items.every(a => selected.has(a.id))
-
-  const toggleSelect = (id: number): void => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const toggleAll = (): void => {
-    if (data == null) return
-    setSelected(allSelected ? new Set() : new Set(data.items.map(a => a.id)))
+  const addSelectionToCart = (): void => {
+    const capped = cart.add([...selected])
+    toast.success(t('asset-pilot.cart.added', { count: selected.size }))
+    if (capped) toast.warning(t('asset-pilot.cart.full', { max: CART_MAX }))
+    clear()
   }
 
   const handleSearch = (): void => {
     const objId = objectIdInput ? parseInt(objectIdInput, 10) : undefined
     setFilters(f => ({ ...f, q: searchInput || undefined, objectId: objId && objId > 0 ? objId : undefined, page: 1 }))
-    setSelected(new Set())
+    clear()
   }
 
   const handleResult = (msg: string): void => {
     toast.success(msg)
-    setSelected(new Set())
+    clear()
     refetch()
   }
 
+  const goToPage = (page: number): void => {
+    setFilters(f => ({ ...f, page }))
+    clear()
+  }
+
+  const columns: DataColumn<AssetItem>[] = [
+    { key: 'id', label: t('asset-pilot.columns.id'), priority: 1, sortField: 'id', cell: a => <OpenButton id={a.id} type="asset" /> },
+    { key: 'lock', label: t('asset-pilot.columns.lock-status'), priority: 1, cell: a => (a.locked ? <LockBadge /> : null) },
+    { key: 'filename', label: t('asset-pilot.columns.filename'), priority: 1, sortField: 'filename', cellStyle: { fontWeight: 500 }, cell: a => <ExpandablePath path={a.filename} maxLength={35} highlight={<Highlight text={a.filename ?? ''} query={filters.q} />} /> },
+    { key: 'path', label: t('asset-pilot.columns.path'), priority: 2, cell: a => <ExpandablePath path={a.full_path} maxLength={50} highlight={<Highlight text={a.full_path ?? ''} query={filters.q} />} /> },
+    { key: 'type', label: t('asset-pilot.columns.type'), priority: 1, sortField: 'type', cell: a => <TypeBadge type={a.type} /> },
+    { key: 'size', label: t('asset-pilot.columns.size'), priority: 2, cellStyle: { whiteSpace: 'nowrap' }, cell: a => formatBytes(a.file_size) },
+    { key: 'modified', label: t('asset-pilot.columns.modified'), priority: 3, sortField: 'modified_at', cellStyle: { fontSize: 11, color: '#8c8c8c', whiteSpace: 'nowrap' }, cell: a => formatDate(a.modified_at, true) },
+  ]
+
+  const summary = (
+    <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+      {t('asset-pilot.common.showing', { count: data?.items.length ?? 0, total: data?.total ?? 0 })} — {t('asset-pilot.common.page-info', { page: data?.page ?? 1, pages: data?.pages ?? 1 })}
+    </div>
+  )
+
+  const emptyState = (
+    <EmptyState
+      variant={filters.q ? 'empty-search' : 'no-results'}
+      title={filters.q ? t('asset-pilot.empty.empty-search-title') : t('asset-pilot.management.no-results')}
+      description={filters.q ? t('asset-pilot.empty.empty-search-desc') : undefined}
+    />
+  )
+
   return (
-    <div ref={containerRef}>
+    <div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <FilterField label={t('asset-pilot.management.search-placeholder')}>
           <input
@@ -99,7 +109,7 @@ export const AssetManagementTab: React.FC = () => {
         <FilterField label={t('asset-pilot.management.type-filter')}>
           <select
             value={filters.type ?? ''}
-            onChange={e => { setFilters(f => ({ ...f, type: e.target.value || undefined, page: 1 })); setSelected(new Set()) }}
+            onChange={e => { setFilters(f => ({ ...f, type: e.target.value || undefined, page: 1 })); clear() }}
             style={selectStyle}
           >
             {typeOptions.map(opt => <option key={opt} value={opt}>{opt || t('asset-pilot.management.all-types')}</option>)}
@@ -110,78 +120,87 @@ export const AssetManagementTab: React.FC = () => {
           <input
             type="text"
             value={filters.folder ?? ''}
-            onChange={e => { setFilters(f => ({ ...f, folder: e.target.value || undefined, page: 1 })); setSelected(new Set()) }}
+            onChange={e => { setFilters(f => ({ ...f, folder: e.target.value || undefined, page: 1 })); clear() }}
             placeholder={t('asset-pilot.management.folder-placeholder')}
             style={{ ...inputStyle, width: 150 }}
           />
         </FilterField>
 
+        <FilterField label={t('asset-pilot.management.extension-filter')}>
+          <input
+            type="text"
+            value={filters.extension ?? ''}
+            onChange={e => { setFilters(f => ({ ...f, extension: e.target.value || undefined, page: 1 })); clear() }}
+            placeholder={t('asset-pilot.management.extension-placeholder')}
+            style={{ ...inputStyle, width: 90 }}
+          />
+        </FilterField>
+
+        <FilterField label={t('asset-pilot.management.relation-filter')}>
+          <select
+            value={filters.referenced ?? ''}
+            onChange={e => { setFilters(f => ({ ...f, referenced: (e.target.value || undefined) as AssetSearchFilters['referenced'], page: 1 })); clear() }}
+            style={selectStyle}
+          >
+            <option value="">{t('asset-pilot.management.relation-all')}</option>
+            <option value="referenced">{t('asset-pilot.management.relation-referenced')}</option>
+            <option value="unreferenced">{t('asset-pilot.management.relation-unreferenced')}</option>
+          </select>
+        </FilterField>
+
         <button onClick={handleSearch} style={searchBtnStyle}>{t('asset-pilot.management.search-btn')}</button>
       </div>
 
+      {cart.count > 0 && <AssetCartBar cart={cart} />}
+
       {selected.size > 0 && (
-        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => setSelected(new Set())} />
+        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} onAddToCart={addSelectionToCart} />
       )}
 
-      {loading && <TableSkeleton rows={5} columns={7} hasCheckbox />}
-      {error != null && <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>}
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
 
-      {!loading && data != null && (
-        <>
-          <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
-            {t('asset-pilot.common.showing', { count: data.items.length, total: data.total })} — {t('asset-pilot.common.page-info', { page: data.page, pages: data.pages })}
-          </div>
-
-          {data.items.length === 0 ? (
-            <EmptyState
-              variant={filters.q ? 'empty-search' : 'no-results'}
-              title={filters.q ? t('asset-pilot.empty.empty-search-title') : t('asset-pilot.management.no-results')}
-              description={filters.q ? t('asset-pilot.empty.empty-search-desc') : undefined}
-            />
-          ) : (
-            <ResponsiveTableWrapper stickyFirstColumn tableId="management">
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
-                    {visible.has('checkbox') && <th style={thStyle}><input type="checkbox" checked={allSelected} onChange={toggleAll} /></th>}
-                    {visible.has('id') && <SortableHeader label={t('asset-pilot.columns.id')} field="id" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
-                    {visible.has('lock') && <th style={thStyle}>{t('asset-pilot.columns.lock-status')}</th>}
-                    {visible.has('filename') && <SortableHeader label={t('asset-pilot.columns.filename')} field="filename" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
-                    {visible.has('path') && <th style={thStyle}>{t('asset-pilot.columns.path')}</th>}
-                    {visible.has('type') && <SortableHeader label={t('asset-pilot.columns.type')} field="type" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
-                    {visible.has('size') && <SortableHeader label={t('asset-pilot.columns.size')} field="file_size" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
-                    {visible.has('modified') && <SortableHeader label={t('asset-pilot.columns.modified')} field="modified_at" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map(asset => (
-                    <tr key={asset.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(asset.id) ? '#e6f4ff' : 'transparent' }}>
-                      {visible.has('checkbox') && <td style={tdStyle}><input type="checkbox" checked={selected.has(asset.id)} onChange={() => toggleSelect(asset.id)} /></td>}
-                      {visible.has('id') && <td style={tdStyle}><OpenButton id={asset.id} type="asset" /></td>}
-                      {visible.has('lock') && <td style={tdStyle}>{asset.locked ? <LockBadge /> : null}</td>}
-                      {visible.has('filename') && <td style={{ ...tdStyle, fontWeight: 500 }}><ExpandablePath path={asset.filename} maxLength={35} highlight={<Highlight text={asset.filename ?? ''} query={filters.q} />} /></td>}
-                      {visible.has('path') && <td style={tdStyle}><ExpandablePath path={asset.full_path} maxLength={50} highlight={<Highlight text={asset.full_path ?? ''} query={filters.q} />} /></td>}
-                      {visible.has('type') && <td style={tdStyle}><TypeBadge type={asset.type} /></td>}
-                      {visible.has('size') && <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{formatBytes(asset.file_size)}</td>}
-                      {visible.has('modified') && <td style={{ ...tdStyle, fontSize: 11, color: '#8c8c8c', whiteSpace: 'nowrap' }}>{formatDate(asset.modified_at, true)}</td>}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </ResponsiveTableWrapper>
-          )}
-
-          {data.pages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 16 }}>
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) - 1 }))} disabled={(filters.page ?? 1) <= 1} style={pageBtnStyle}>{t('asset-pilot.common.prev')}</button>
-              {pageNumbers(data.page, data.pages).map(p => (
-                <button key={p} onClick={() => setFilters(f => ({ ...f, page: p }))} style={{ ...pageBtnStyle, background: (filters.page ?? 1) === p ? '#1677ff' : '#fff', color: (filters.page ?? 1) === p ? '#fff' : '#595959' }}>{p}</button>
-              ))}
-              <button onClick={() => setFilters(f => ({ ...f, page: (f.page ?? 1) + 1 }))} disabled={(filters.page ?? 1) >= data.pages} style={pageBtnStyle}>{t('asset-pilot.common.next')}</button>
-            </div>
-          )}
-        </>
-      )}
+      {viewMode === 'list'
+        ? (
+          <DataTable
+            columns={columns}
+            data={data}
+            loading={loading}
+            error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onPage={goToPage}
+            limit={filters.limit}
+            onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
+            tableId="management"
+            selection={{ selected, allSelected, toggleSelect, toggleAll }}
+            sort={{ field: sortField, direction: sortDirection, onToggle: toggleSort }}
+            summary={summary}
+            empty={emptyState}
+          />
+        )
+        : (
+          <GalleryGrid
+            data={data}
+            loading={loading}
+            error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            empty={emptyState}
+            summary={summary}
+            page={data?.page ?? 1}
+            pages={data?.pages ?? 1}
+            onPage={goToPage}
+            limit={filters.limit}
+            onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
+            selection={{ selected, allSelected, toggleSelect, toggleAll }}
+            toCard={a => ({
+              key: a.id,
+              selectId: a.id,
+              thumbnailId: a.id,
+              type: a.type,
+              fallbackLabel: a.filename.split('.').pop() ?? a.type,
+              title: <OpenButton id={a.id} type="asset" label={a.filename} />,
+              meta: <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><TypeBadge type={a.type} /><span style={{ fontSize: 11, color: '#8c8c8c' }}>{formatBytes(a.file_size)}</span></div>,
+              badges: a.locked ? <LockBadge /> : undefined,
+            })}
+          />
+        )}
     </div>
   )
 }
@@ -193,15 +212,6 @@ const FilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ l
   </div>
 )
 
-const LockBadge: React.FC = () => (
-  <span title="Locked" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 4, fontSize: 10, color: '#d46b08', fontWeight: 600 }}>
-    🔒
-  </span>
-)
-
 const inputStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
 const selectStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
 const searchBtnStyle: React.CSSProperties = { padding: '5px 16px', border: '1px solid #1677ff', borderRadius: 6, background: '#1677ff', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500, alignSelf: 'flex-end' }
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '6px 4px', fontSize: 11, color: '#8c8c8c', fontWeight: 500, whiteSpace: 'nowrap' }
-const tdStyle: React.CSSProperties = { padding: '6px 4px' }
-const pageBtnStyle: React.CSSProperties = { padding: '4px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer', fontSize: 12 }

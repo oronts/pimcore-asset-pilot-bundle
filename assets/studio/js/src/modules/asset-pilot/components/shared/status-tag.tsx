@@ -6,6 +6,7 @@ const statusStyles: Record<string, { bg: string; color: string; key: string }> =
   failed: { bg: '#fff2f0', color: '#ff4d4f', key: 'asset-pilot.status.failed' },
   skipped: { bg: '#fafafa', color: '#8c8c8c', key: 'asset-pilot.status.skipped' },
   pending: { bg: '#fffbe6', color: '#faad14', key: 'asset-pilot.status.pending' },
+  action_failed: { bg: '#fff1f0', color: '#cf1322', key: 'asset-pilot.status.action_failed' },
 }
 
 interface StatusTagProps {

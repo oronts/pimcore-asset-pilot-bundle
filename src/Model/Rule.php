@@ -19,6 +19,9 @@ readonly class Rule
         public int $priority,
         public bool $enabled,
         public array $filters,
+        public array $options = [],
+        public array $actions = [],
+        public array $locales = [],
     ) {}
 
     public static function fromConfig(string $name, array $config): self
@@ -31,9 +34,36 @@ readonly class Rule
             targetPath: $config['target_path'],
             strategy: MoveStrategy::from($config['strategy'] ?? 'always'),
             callback: $config['callback'] ?? null,
-            priority: $config['priority'] ?? 0,
+            priority: $config['priority'] ?? 10,
             enabled: $config['enabled'] ?? true,
             filters: $config['filters'] ?? [],
+            options: $config['options'] ?? [],
+            actions: $config['actions'] ?? [],
+            locales: $config['locales'] ?? [],
         );
+    }
+
+    /**
+     * The inverse of fromConfig(): the per-rule config shape (without the name, which is the
+     * rule-set key). Used to export/diff rule sets between environments.
+     *
+     * @return array<string, mixed>
+     */
+    public function toConfigArray(): array
+    {
+        return [
+            'class' => $this->class,
+            'fields' => $this->fields,
+            'condition' => $this->condition,
+            'target_path' => $this->targetPath,
+            'strategy' => $this->strategy->value,
+            'callback' => $this->callback,
+            'priority' => $this->priority,
+            'enabled' => $this->enabled,
+            'filters' => $this->filters,
+            'options' => $this->options,
+            'actions' => $this->actions,
+            'locales' => $this->locales,
+        ];
     }
 }
