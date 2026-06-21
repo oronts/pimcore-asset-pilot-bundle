@@ -14,6 +14,7 @@ use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Support\BulkIds;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
@@ -218,6 +219,10 @@ class OperationsController
             return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
         }
 
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'Invalid JSON'], Response::HTTP_BAD_REQUEST);
+        }
+
         $className = $data['className'] ?? null;
         $rawObjectIds = $data['objectIds'] ?? [];
         $async = $data['async'] ?? true;
@@ -234,13 +239,26 @@ class OperationsController
             }
         }
 
-        // Resolve object IDs from class name if not provided directly
+        // Resolve object IDs from class name if not provided directly. Cap the listing at the same
+        // per-request limit the objectIds path enforces, so a whole-catalog className cannot queue or
+        // run an unbounded batch through the move pipeline. Over the cap is a 400, not a silent
+        // truncation: the caller narrows the selection or paginates via bulk-preview.
         if (empty($objectIds) && $className !== null) {
             $listing = new DataObject\Listing();
             $listing->setObjectTypes([AbstractObject::OBJECT_TYPE_OBJECT, AbstractObject::OBJECT_TYPE_VARIANT]);
             $listing->setCondition('className = ?', [$className]);
+            $listing->setOrderKey('id');
+            $listing->setOrder('asc');
+            $listing->setLimit(BulkIds::MAX + 1);
             foreach ($listing as $obj) {
-                $objectIds[] = $obj->getId();
+                $objectIds[] = (int) $obj->getId();
+            }
+
+            if (count($objectIds) > BulkIds::MAX) {
+                return new JsonResponse(
+                    ['error' => sprintf('Class "%s" resolves to more than %d objects; narrow the selection or pass objectIds.', $className, BulkIds::MAX)],
+                    Response::HTTP_BAD_REQUEST,
+                );
             }
         }
 
