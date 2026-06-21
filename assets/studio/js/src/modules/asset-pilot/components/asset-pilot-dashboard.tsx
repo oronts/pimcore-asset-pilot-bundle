@@ -14,7 +14,7 @@ import { EmptyFoldersTab } from './folders/empty-folders-tab'
 import { DriftTab } from './drift/drift-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
 
-const DOCS_URL = 'https://github.com/oronts/asset-pilot-bundle/tree/main/docs'
+const DOCS_URL = 'https://github.com/oronts/pimcore-asset-pilot-bundle/tree/main/docs'
 
 const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'integrity', 'quarantine', 'storage', 'folders', 'drift', 'management'] as const
 type TabKey = typeof tabKeys[number]

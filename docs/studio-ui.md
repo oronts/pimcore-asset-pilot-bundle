@@ -22,6 +22,10 @@ The core tabs:
 
 ### Screenshots
 
+The Dashboard summarizes operations by status, the class breakdown, recent operations, and a health panel:
+
+![Asset Pilot dashboard](images/dashboard.png)
+
 The Unused Assets list view, with type/confidence filters, sortable columns, a page-size control, and CSV export:
 
 ![Unused Assets list view](images/unused-assets-list.png)
@@ -33,6 +37,10 @@ The Storage tab plots the unused-storage trend from captured snapshots:
 The Asset Management tab searches the asset catalog by filename or path, type, folder, Object ID, file extension, or relation (referenced / unreferenced), in a list or gallery view:
 
 ![Asset Management search](images/asset-management.png)
+
+The Audit Log records every move with its rule, status, and timestamps; filter by class, status, or rule, revert an operation, or export to CSV:
+
+![Audit Log](images/audit-log.png)
 
 ### Confidence Badges
 
