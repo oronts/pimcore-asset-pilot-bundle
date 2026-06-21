@@ -216,7 +216,28 @@ HELP
 
         if ($dryRun) {
             $io->note('DRY RUN — no changes will be made.');
-            $io->text(sprintf('Would %s: %s', $action, implode(', ', $ids)));
+            // Preview the real guard outcome per id, not just an echo of the requested ids.
+            $would = [];
+            $skip = [];
+            foreach ($ids as $id) {
+                $reason = $this->unusedAssetFinder->previewMutation($id, $action);
+                if ($reason === null) {
+                    $would[] = $id;
+                } else {
+                    $skip[$id] = $reason;
+                }
+            }
+            if ($would !== []) {
+                $io->text(sprintf('Would %s: %s', $action, implode(', ', $would)));
+            } else {
+                $io->text(sprintf('No assets would be %s.', $action === 'move' ? 'moved' : 'deleted'));
+            }
+            foreach ($skip as $id => $reason) {
+                $io->text(sprintf('Would skip %d: %s', $id, $reason));
+            }
+            if ($action === 'move' && $would !== []) {
+                $io->note("The target folder's create permission is verified when the move actually runs.");
+            }
 
             return Command::SUCCESS;
         }

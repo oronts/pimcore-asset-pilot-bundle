@@ -18,6 +18,12 @@ interface UnusedAssetFinderInterface
     /** Whether any tracked dependency still targets this asset (re-verify before a destructive op). */
     public function isReferenced(int $assetId): bool;
 
+    /**
+     * Read-only preview of the delete/move guard for one asset id: the skip reason, or null when the
+     * asset would actually be acted on. Lets a dry run report the real per-asset outcome.
+     */
+    public function previewMutation(int $id, string $action = 'delete'): ?string;
+
     /** @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: array<int, array{type: string, count: int, total_size: int}>} */
     public function getUnusedStats(): array;
 

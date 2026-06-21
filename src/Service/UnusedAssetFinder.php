@@ -392,6 +392,18 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         return [$asset, null];
     }
 
+    /**
+     * Read-only preview of the delete/move guard for one asset id: returns the skip reason, or null
+     * when the asset would actually be acted on. Lets the --by-ids dry run report the real per-asset
+     * outcome (not found / locked / referenced / denied) instead of optimistically echoing every id.
+     */
+    public function previewMutation(int $id, string $action = 'delete'): ?string
+    {
+        [$aclPermission, $verb] = $action === 'move' ? ['publish', 'move'] : ['delete', 'delete'];
+
+        return $this->guardMutation($id, $aclPermission, $verb)[1];
+    }
+
     public function isReferenced(int $assetId): bool
     {
         $count = (int) $this->connection->createQueryBuilder()

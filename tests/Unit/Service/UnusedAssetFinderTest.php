@@ -200,6 +200,15 @@ class UnusedAssetFinderTest extends TestCase
         self::assertStringContainsString('content', $result['errors'][1]);
     }
 
+    #[Test]
+    public function previewMutationReportsTheGuardOutcomeWithoutActing(): void
+    {
+        self::assertNull($this->moveFinder([1 => $this->asset(true)], referenced: false)->previewMutation(1, 'delete'));
+        self::assertSame('Asset is now referenced by an object', $this->moveFinder([1 => $this->asset(true)], referenced: true)->previewMutation(1, 'delete'));
+        self::assertSame('Not permitted to move this asset', $this->moveFinder([1 => $this->asset(false)], referenced: false)->previewMutation(1, 'move'));
+        self::assertSame('Asset not found', $this->moveFinder([], referenced: false)->previewMutation(999, 'delete'));
+    }
+
     /**
      * @param array<int, Asset> $assetsById
      */
