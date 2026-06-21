@@ -129,6 +129,11 @@ Everything lives in **[docs/](docs/index.md)**.
 | Symfony Messenger | ^7.3 |
 | Symfony Lock | ^7.3 |
 
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, the
+quality gates, and what a mergeable change looks like.
+
 ## License
 
 Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0), the same license as
