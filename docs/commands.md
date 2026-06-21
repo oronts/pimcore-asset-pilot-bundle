@@ -374,6 +374,25 @@ bin/console asset-pilot:cleanup-unused --by-ids=1024,1025 --action=delete
 > `filters.max_size` (see the rule reference) still work, because the asset is in memory during
 > organization.
 
+### Download Zip
+
+Build a ZIP of assets to a file (non-blocking, for cron or workers). Provide exactly one source.
+
+```bash
+# By asset ids, flat layout
+bin/console asset-pilot:download-zip --asset-ids=1024,1025 --output=/tmp/assets.zip
+
+# Every asset under a folder, mirrored folder tree, packed as a named thumbnail
+bin/console asset-pilot:download-zip --folder-id=42 --strategy=folder --thumbnail=web --output=/tmp/folder.zip
+
+# Assets referenced by data objects, grouped by type, direct children only
+bin/console asset-pilot:download-zip --object-ids=900,901 --strategy=type --non-recursive --output=/tmp/objects.zip
+```
+
+`--strategy` is `flat`, `folder`, `type`, or a custom `oronts_asset_pilot.zip_strategy` name. `--output`
+is required, and the archive is capped by `zip.max_assets`. Unreadable or empty assets are skipped, not
+packed.
+
 ### Scheduled Jobs (Cron)
 
 All commands can be automated via cron. Example crontab entries:

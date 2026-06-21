@@ -23,7 +23,7 @@ tests/
 │   ├── Enum/               MoveStrategy, OperationStatus, TriggerType, CollisionPattern, PropertyType
 │   ├── Event/              AssetMoveEvent, AssetMutationEvent, AssetPilotEvents
 │   ├── EventListener/      DataObjectSaveListener
-│   ├── Filter/             Type, Size, Extension, Composite, ConfidenceFilter, Like
+│   ├── Filter/             Type, Size, Extension, Composite
 │   ├── Message/            OrganizeAssetsMessage, BulkOrganizeMessage
 │   ├── MessageHandler/     BulkOrganizeHandler
 │   ├── Model/              Rule, RuleMatch, MoveOperation, OperationResult, AssetFieldInfo

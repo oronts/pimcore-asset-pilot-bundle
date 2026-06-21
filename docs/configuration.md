@@ -112,6 +112,8 @@ oronts_asset_pilot:
 | `duplicates.merge_strategy` | `string` | `quarantine` | Default disposition for a duplicate merge: a registered strategy name (`quarantine`, `delete`, `isolate`, or a custom tagged one). See [Extending](extending.md#duplicate-merge-strategies) |
 | `cache.stats_ttl` | `int` | `60` | TTL (seconds) for the audit-stats cache (dashboard/metrics). `0` disables (always live) |
 | `cache.unused_stats_ttl` | `int` | `300` | TTL (seconds) for the unused-asset storage-stats cache on the web endpoint. `0` disables |
+| `zip.default_strategy` | `string` | `flat` | Default archive layout for downloads: `flat`, `folder`, `type`, or a custom `oronts_asset_pilot.zip_strategy` name |
+| `zip.max_assets` | `int` | `1000` | Maximum number of assets packed into one download archive (min 1) |
 
 ## Rule Options
 

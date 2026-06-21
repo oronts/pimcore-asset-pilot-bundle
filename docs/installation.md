@@ -40,9 +40,16 @@ Studio caches the set of known permission keys (`USER_PERMISSIONS`); until this 
 `asset_pilot_*` permissions are unknown and every endpoint returns 403. Symfony's `cache:clear` does
 not clear the Pimcore data cache, so use the `pimcore:` command above.
 
-The bundle has no Doctrine migrations; the installer owns its schema and is **idempotent** (it creates
-a table when absent and otherwise adds only missing columns/indexes, never dropping data). When you
-upgrade to a bundle version that adds a table or column, re-run the same command to pick it up:
+The installer owns the schema and is **idempotent** (it creates a table when absent and otherwise adds
+only missing columns/indexes, never dropping data). A fresh install creates the full current schema and
+marks the bundle's Doctrine migrations as already applied. Existing installs pick up later schema
+deltas through the bundle's Doctrine migrations (it ships migrations under `src/Migrations`):
+
+```bash
+bin/console doctrine:migrations:migrate
+```
+
+Re-running the installer is also safe and brings an existing schema up to date:
 
 ```bash
 bin/console pimcore:bundle:install OrontsAssetPilotBundle
@@ -101,9 +108,8 @@ bin/console cache:clear
 build step before deploying. Until the build runs, the backend (rules engine, CLI, events, audit,
 REST API) works, but the Studio dashboard tabs do not load.
 
-> The build depends on Pimcore's `@pimcore/studio-ui-bundle` npm package, which Pimcore ships as a
-> tarball at `vendor/pimcore/studio-ui-bundle/public/build/studio-npm-package.tgz`. The `file:`
-> reference in `assets/studio/package.json` is relative to the bundle's location, so it resolves only
-> after `composer install` has placed `pimcore/studio-ui-bundle` in `vendor/`. If your install layout
-> differs from the standard `vendor/oronts/asset-pilot-bundle`, adjust that relative path to point at
-> the tarball.
+> The Studio build depends on Pimcore's `@pimcore/studio-ui-bundle` package, pinned to a version in
+> `assets/studio/package.json`. Pimcore ships its Studio assets as a tarball (`studio-npm-package.tgz`),
+> which `assets/studio/rsbuild.config.ts` preserves under the bundle's own `public/studio/build/` across
+> rebuilds. Run `npm ci && npm run build` from `assets/studio`, and keep the pinned package version
+> aligned with the `pimcore/studio-ui-bundle` version installed in your project.

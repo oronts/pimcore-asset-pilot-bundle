@@ -133,26 +133,36 @@ flowchart TD
 
 ```
 src/
+├── Action/                 RuleActionInterface + set-property/tag actions beyond moving
 ├── Audit/                  AuditLogger — database-backed operation logging
-├── Command/                CLI: organize, debug-rule, validate-config, status, audit, cleanup-unused
+├── Cache/                  Stampede-safe stats caching
+├── Command/                CLI: organize, debug-rule, validate-config, status, audit, cleanup-unused, ...
 ├── Condition/              ConditionEvaluatorInterface + ExpressionLanguage impl
-├── Controller/Api/         REST API controllers (6 controllers, 25+ endpoints)
+├── Controller/Api/         REST API controllers (13 controllers, ~48 endpoints)
 ├── DependencyInjection/    Bundle configuration tree + service loading
 ├── Dto/                    API request/response DTOs
 ├── Engine/                 RuleEngine — core matching + explain logic
 ├── Enum/                   MoveStrategy, OperationStatus, TriggerType, AssetPilotPermission
 ├── Event/                  AssetMoveEvent + event constants
 ├── EventListener/          DataObject save + Asset upload listeners (with DeduplicateStamp)
+├── Exception/              Typed exceptions (e.g. NotPermittedException)
 ├── Filter/                 AssetFilterInterface + type/size/extension/composite
+├── Health/                 HealthCheckInterface + bundle health checks
+├── Integrity/              IntegrityCheckerInterface + image/document/stream checkers
+├── Maintenance/            Scheduled maintenance (storage-snapshot capture)
+├── Merge/                  DuplicateMergeStrategyInterface + copy-disposition strategies
 ├── Message/                Messenger messages: OrganizeAssets, BulkOrganize
 ├── MessageHandler/         Async handlers with stale job detection
+├── Migrations/             Doctrine migrations (schema deltas for existing installs)
 ├── Model/                  Rule, RuleMatch, RuleEvaluation, MoveOperation, OperationResult
 ├── Naming/                 NamingStrategyInterface + SafeNamingStrategy
+├── Notification/           NotifierInterface dispatch
 ├── PathResolver/           PathResolverInterface + Twig TemplatePathResolver
 ├── Service/                AssetOrganizer, AssetFieldExtractor, AssetSearchService,
-│                           AssetPropertyService, UnusedAssetFinder, ConfidenceScorer,
-│                           ConfigValidator, LoopGuard
+│                           UnusedAssetFinder, QuarantineService, DuplicateMergeService,
+│                           ConfidenceScorer, ConfigValidator, LoopGuard
 ├── Strategy/               ConflictStrategyInterface + Always/FirstAssignment/Callback
+├── Support/                Relocate-safe shared helpers (e.g. BulkIds)
 ├── Webpack/                Module Federation entry point provider
 ├── Installer.php           Database schema + permission registration
 └── OrontsAssetPilotBundle.php
@@ -182,7 +192,9 @@ The `DeduplicateStamp` TTLs:
 
 ## Database Schema
 
-The installer creates a single table:
+The installer creates five tables (`asset_pilot_audit_log`, `asset_pilot_quarantine`,
+`asset_pilot_integrity_log`, `asset_pilot_checksum`, `asset_pilot_storage_snapshot`). The primary one
+is the audit log:
 
 ```sql
 CREATE TABLE asset_pilot_audit_log (
@@ -200,10 +212,13 @@ CREATE TABLE asset_pilot_audit_log (
     user_id     INT          NULL,
     created_at  DATETIME     NOT NULL,
 
-    INDEX idx_audit_asset_id   (asset_id),
-    INDEX idx_audit_object_id  (object_id),
-    INDEX idx_audit_rule_name  (rule_name),
-    INDEX idx_audit_status     (status),
-    INDEX idx_audit_created_at (created_at)
+    INDEX idx_audit_asset_id            (asset_id),
+    INDEX idx_audit_object_id           (object_id),
+    INDEX idx_audit_rule_name           (rule_name),
+    INDEX idx_audit_created_at          (created_at),
+    INDEX idx_audit_asset_status        (asset_id, status),
+    INDEX idx_audit_rule_status_created (rule_name, status, created_at),
+    INDEX idx_audit_status_created      (status, created_at),
+    INDEX idx_audit_class_created       (object_class, created_at)
 );
 ```

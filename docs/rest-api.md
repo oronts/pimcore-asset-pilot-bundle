@@ -12,8 +12,9 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | `GET` | `/dashboard/class-stats` | View | Per-class breakdown |
 | `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
 | `GET` | `/metrics` | View | Operation metrics (`{operations, total, failureRate, durationMs}`) |
-| `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`). Returns `{items[], total, page, limit}`. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
+| `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`, `?minCopies` (default 2), `?type`). Returns `{items[], total, page, limit}`. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
 | `GET` | `/duplicates/strategies` | View | Available merge-disposition strategies + the configured default (`{strategies[], default}`) |
+| `GET` | `/duplicates/export` | View | Stream the full duplicate report as CSV (`?minCopies`, `?type`) |
 | `POST` | `/duplicates/merge` | Admin | Merge a byte-identical group onto a canonical asset (`{checksum, canonicalId?, strategy?, dryRun?}`). Repoints each copy's references then disposes it per the strategy; a copy with un-repointable references is left untouched. `dryRun` previews. Returns `{checksum, canonicalId, dispositions[]}` |
 | `GET` | `/folders/empty` | View | Empty asset folders (`?folder`, `?page`, `?limit`). Returns `{items[], page, limit}` |
 | `GET` | `/storage/trends` | View | Unused-storage series from the snapshots (`?type`, `?limit` max 365). Returns `{type, items[]}` — build snapshots with `asset-pilot:capture-storage-snapshot` |
@@ -128,6 +129,7 @@ Or with explicit IDs:
 | Method | Endpoint | Permission | Description |
 |--------|----------|------------|-------------|
 | `GET` | `/assets/search` | View | Search assets (params: `q`, `type`, `folder`, `objectId`, `extension`, `referenced`, `page`, `limit`, `sort`, `order`) |
+| `POST` | `/assets/download-zip` | View | Build and download a ZIP of the given asset ids (`{assetIds[], strategy?, thumbnail?}`) |
 | `GET` | `/assets/tags` | View | List all available Pimcore tags |
 | `POST` | `/assets/{id}/lock` | Operate | Lock asset from organization |
 | `DELETE` | `/assets/{id}/lock` | Operate | Unlock asset |
@@ -178,11 +180,13 @@ Supported types: `text`, `bool`, `select`.
 |--------|----------|------------|-------------|
 | `GET` | `/unused-assets` | View | List unused assets with confidence scoring |
 | `GET` | `/unused-assets/stats` | View | Unused asset statistics by type |
+| `GET` | `/unused-assets/export` | View | Stream the unused-asset listing as CSV (same filters as `/unused-assets`) |
 | `POST` | `/unused-assets/bulk-delete` | Operate | Delete unused assets |
 | `POST` | `/unused-assets/bulk-move` | Operate | Move unused assets to folder |
 | `POST` | `/unused-assets/bulk-quarantine` | Operate | Soft-delete unused assets to the quarantine folder (reversible) |
 | `GET` | `/quarantine` | View | List quarantined assets with their original path |
 | `POST` | `/quarantine/{assetId}/restore` | Operate | Move a quarantined asset back to its original path |
+| `GET` | `/quarantine/export` | View | Stream the quarantine list as CSV |
 
 #### Unused assets parameters
 

@@ -45,8 +45,9 @@ a full audit trail, and a Studio UI dashboard.
   a loop-guarded revert are built in.
 - **Unused-asset cleanup** — confidence-scored detection with bulk delete or archive, and per-asset or
   per-folder protection.
-- **Studio UI** — a six-tab React dashboard (Dashboard, Rules, Operations, Audit, Unused, Asset
-  Management) mounted in Pimcore Studio via Module Federation.
+- **Studio UI** — a tabbed React dashboard (Dashboard, Rules, Operations, Audit, Unused, Duplicates,
+  Integrity, Quarantine, Storage, Empty Folders, Drift, Asset Management) mounted in Pimcore Studio
+  via Module Federation.
 - **Built to extend** — an interface behind every seam (a service tag or a replaceable alias), plus a
   typed event on every mutation. See [Extending](docs/extending.md) and [Overriding](docs/overriding.md).
 
@@ -136,7 +137,7 @@ modified version or run it as a service, your modifications must be available un
 
 ---
 
-## Consulting & Custom Development
+## Built and maintained by Oronts
 
 <p align="center">
   <a href="https://oronts.com">
@@ -144,8 +145,27 @@ modified version or run it as a service, your modifications must be available un
   </a>
 </p>
 
-**Oronts** builds Pimcore bundles, PIM/DAM platforms, asset-workflow automation, and e-commerce
-implementations.
+Asset Pilot is built and maintained by **Oronts**, an AI-first software company in Munich. We design
+and operate commerce platforms, PIM and DAM systems, and data automation for mid-market and enterprise
+teams, with deep Pimcore experience across versions 10, 11, and 12.
+
+This bundle is how we file assets on our own client platforms. If you are running Pimcore at scale, we
+can help you put it to work and build the system around it.
+
+**Where we help:**
+
+- **Production adoption.** Installation, rule design for your data model, async and multi-pod setup,
+  and migrating an existing asset library into a clean, predictable structure.
+- **Domain extensions.** Custom merge strategies, integrity checkers, condition functions,
+  path-template context, notifiers, and rule providers, all behind the bundle's documented seams.
+- **The platform underneath.** Pimcore bundles and DataHub integrations, PIM and DAM rollouts,
+  headless e-commerce, search with OpenSearch or MeiliSearch, and AI-assisted data enrichment and
+  classification.
+- **Support and SLAs.** Code review, version upgrades, performance tuning, and on-call cover for
+  business-critical Pimcore systems.
+
+If your team files assets by hand, fights duplicates, or runs an unstructured DAM, we can fix both the
+workflow and the platform around it.
 
 **Contact:** office@oronts.com &middot; [oronts.com](https://oronts.com)
 

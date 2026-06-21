@@ -18,7 +18,7 @@ You can call any method on the `object` and `asset` variables directly in the te
 
 | Filter | Usage | Description |
 |--------|-------|-------------|
-| `safe_key` | `{{ value\|safe_key }}` | Replace non-alphanumeric chars with `-` |
+| `safe_key` | `{{ value\|safe_key }}` | Replace any char that is not a letter, digit, `_`, `-`, or `.` with `-`; empty input becomes `unknown` |
 | `pluck` | `{{ items\|pluck('key') }}` | Extract a property from each array item |
 | `first_of` | `{{ items\|first_of('key') }}` | Get property from first item, fallback to `'unknown'` |
 | `slug` | `{{ value\|slug }}` | URL-safe lowercase slug |

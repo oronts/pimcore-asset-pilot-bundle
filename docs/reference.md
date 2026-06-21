@@ -67,7 +67,7 @@ Full flags in [Commands](commands.md).
 | Command | Purpose |
 |---------|---------|
 | `asset-pilot:organize` | Organize objects (`--class`, `--object-id`, `--dry-run`, `--async`, `--batch-size`) |
-| `asset-pilot:status` | Configured rules and statistics (`--json`) |
+| `asset-pilot:status` | Configured rules and statistics (`--format=json`) |
 | `asset-pilot:audit` | Browse / filter / `--cleanup` the audit log (`--asset-id`, `--object-id`, `--class`, `--rule`, `--status`) |
 | `asset-pilot:cleanup-unused` | Delete or move unused assets (`--by-ids`, `--dry-run`, `--action`, `--move-to`) |
 | `asset-pilot:validate-config` | Validate rules, conditions, templates, callbacks, filters |
@@ -84,10 +84,11 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:sweep-empty-folders` | Find / `--delete` empty asset folders (`--folder`, `--limit`) |
 | `asset-pilot:normalize-filenames` | Preview / `--apply` filename sanitization (`--by-ids`, `--folder`, `--type`, `--limit`) |
-| `asset-pilot:find-duplicates` | Report byte-identical assets (`--scan` to build the hash index, `--folder`, `--type`, `--limit`, or `--asset-id` for one asset's group) |
+| `asset-pilot:find-duplicates` | Report byte-identical assets (`--scan` to build the hash index, `--folder`, `--type`, `--extension`, `--limit` to cap indexed assets, `--report-limit` to cap reported groups, or `--asset-id` for one asset's group) |
 | `asset-pilot:merge-duplicates` | Merge a byte-identical group onto a canonical asset (`--checksum`, `--canonical`, `--strategy`, `--apply`; preview by default) |
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
 | `asset-pilot:heal-assets` | Roll broken assets back to the last renderable version (`--by-ids`, `--dry-run`, `--undo`, scan filters) |
+| `asset-pilot:download-zip` | Build a zip of assets to a file for cron/workers (`--asset-ids`/`--folder-id`/`--object-ids`, `--non-recursive`, `--strategy`, `--thumbnail`, `--output`) |
 
 ## REST endpoints
 

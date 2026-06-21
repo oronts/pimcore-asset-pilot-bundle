@@ -417,7 +417,7 @@ Return `IntegrityStatus::Unverifiable` (not `Broken`) when your tool is unavaila
 binary never causes a checker outage to be read as a broken asset. `check()` inspects the live
 asset; `checkBinary()` inspects a candidate binary in memory (used by a future version-rollback heal,
 and the natural place to share the verdict logic). Extending `AbstractBinaryIntegrityChecker` gives
-you the stream-to-string bridge so you only implement `checkBinary()` plus `supports()`/`priority()`.
+you the stream-to-string bridge so you implement `checkBinary()` plus `supports()`/`priority()`/`name()`.
 
 ```php
 namespace App\AssetPilot;
