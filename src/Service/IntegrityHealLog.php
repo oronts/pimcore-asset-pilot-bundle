@@ -72,16 +72,24 @@ class IntegrityHealLog
         }
     }
 
-    /** Promote a pending row to `healed` once the restore has succeeded (it is now undoable). */
-    public function commitHeal(int $id): void
+    /**
+     * Promote a pending row to `healed` once the restore has succeeded (it is now undoable). Returns
+     * false if the promotion could not be persisted, so the caller can surface that the heal, though
+     * applied to the binary, may not be undoable (the row stays `pending`, which findUndoable ignores).
+     */
+    public function commitHeal(int $id): bool
     {
         try {
             $this->connection->update(self::TABLE, ['status' => self::STATUS_HEALED], ['id' => $id]);
+
+            return true;
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to commit integrity heal log {id}: {error}', [
                 'id' => $id,
                 'error' => $e->getMessage(),
             ]);
+
+            return false;
         }
     }
 

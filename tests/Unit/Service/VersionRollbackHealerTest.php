@@ -183,7 +183,7 @@ class VersionRollbackHealerTest extends TestCase
         $healLog = $this->createMock(IntegrityHealLog::class);
         // Two-phase audit: a pending row is opened before the restore and committed after.
         $healLog->expects(self::once())->method('beginHeal')->with(7, 3, 2, 'stub')->willReturn(55);
-        $healLog->expects(self::once())->method('commitHeal')->with(55);
+        $healLog->expects(self::once())->method('commitHeal')->with(55)->willReturn(true);
 
         $restored = new \ArrayObject();
         $result = $this->healer(
@@ -197,6 +197,29 @@ class VersionRollbackHealerTest extends TestCase
         self::assertSame(HealOutcome::Healed, $result->outcome);
         self::assertSame(2, $result->toVersion);
         self::assertSame([2], $restored->getArrayCopy());
+        self::assertNull($result->reason, 'a cleanly committed heal carries no warning');
+    }
+
+    #[Test]
+    public function reportsHealedButFlagsUndoUnavailableWhenTheCommitDoesNotPersist(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('beginHeal')->willReturn(55);
+        // The pending row could not be promoted to healed: the binary is fixed but undo is at risk.
+        $healLog->method('commitHeal')->with(55)->willReturn(false);
+
+        $restored = new \ArrayObject();
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $healLog,
+            $restored,
+            [$this->version(2)],
+            [2 => 'good'],
+        )->heal($this->asset());
+
+        self::assertSame(HealOutcome::Healed, $result->outcome, 'the binary was restored, so the outcome stays Healed');
+        self::assertSame([2], $restored->getArrayCopy());
+        self::assertNotNull($result->reason, 'a non-finalised audit row must be surfaced, not hidden');
     }
 
     #[Test]

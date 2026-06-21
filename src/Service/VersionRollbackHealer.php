@@ -108,9 +108,21 @@ class VersionRollbackHealer
                 return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Restore failed: ' . $e->getMessage()), $asset, $toVersion);
             }
 
-            $this->healLog->commitHeal($logId);
+            // The binary is restored regardless of the audit write, so the outcome stays Healed (never
+            // misreport a still-broken asset). But if the row could not be promoted out of pending,
+            // findUndoable will never match it, so surface that this heal may not be undoable.
+            $committed = $this->healLog->commitHeal($logId);
 
-            return $this->finish(new HealResult(HealOutcome::Healed, $live->checker, $toVersion), $asset, $toVersion);
+            return $this->finish(
+                new HealResult(
+                    HealOutcome::Healed,
+                    $live->checker,
+                    $toVersion,
+                    $committed ? null : 'Asset healed, but its audit row could not be finalised; this heal may not be undoable.',
+                ),
+                $asset,
+                $toVersion,
+            );
         }
 
         if (!$dryRun) {
