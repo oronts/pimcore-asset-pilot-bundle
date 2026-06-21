@@ -300,3 +300,26 @@ oronts_asset_pilot:
                 extensions: [jpg, png, webp]
                 max_size: 1048576      # under 1 MB
 ```
+
+### Catch-All Fallback Rule
+
+Use a `class: '*'` wildcard at a low priority to file anything the specific rules did not claim,
+grouped by class name. Each asset is still moved by the highest-priority matching rule, so the
+specific rules win for their own classes and the wildcard only catches the rest.
+
+```yaml
+oronts_asset_pilot:
+    rules:
+        product_images:
+            class: Product
+            target_path: '/Products/{{ object.getItemNumber() }}/Images'
+            strategy: always
+            priority: 100
+
+        catch_all:
+            class: '*'
+            target_path: '/Assets/{{ className }}/{{ object.getKey()|safe_key }}'
+            strategy: always
+            priority: 1
+```
+
