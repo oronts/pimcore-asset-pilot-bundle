@@ -11,7 +11,7 @@ All endpoints are prefixed with `/pimcore-studio/api/asset-pilot`. Requires Pimc
 | `GET` | `/dashboard` | View | Dashboard statistics |
 | `GET` | `/dashboard/class-stats` | View | Per-class breakdown |
 | `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
-| `GET` | `/metrics` | View | Operation metrics (`{operations, total, failureRate, durationMs}`) |
+| `GET` | `/metrics` | View | Operation metrics (`{operations, total, moveTotal, failureRate, durationMs}`; `failureRate` = failed / `moveTotal`, which excludes `action_failed`) |
 | `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`, `?minCopies` (default 2), `?type`). Returns `{items[], total, page, limit}`. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
 | `GET` | `/duplicates/strategies` | View | Available merge-disposition strategies + the configured default (`{strategies[], default}`) |
 | `GET` | `/duplicates/export` | View | Stream the full duplicate report as CSV (`?minCopies`, `?type`) |
