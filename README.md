@@ -25,7 +25,7 @@
 ---
 
 <p align="center">
-  <img src="docs/images/studio-ui-preview.png" alt="Asset Pilot — Studio UI" width="800">
+  <img src="docs/images/dashboard.png" alt="Asset Pilot — Studio UI dashboard" width="800">
 </p>
 
 Asset Pilot automates how Pimcore assets are filed. When a DataObject is saved, it evaluates the
