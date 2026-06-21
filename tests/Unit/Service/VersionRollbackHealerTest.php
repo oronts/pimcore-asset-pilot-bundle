@@ -99,13 +99,14 @@ class VersionRollbackHealerTest extends TestCase
         array $assetsById = [],
         array $versionsById = [],
         ?NotificationDispatcher $notifier = null,
+        string $liveBinary = '',
     ): VersionRollbackHealer {
         $dispatcher = new EventDispatcher();
         if ($cancelPreHeal) {
             $dispatcher->addListener('oronts_asset_pilot.integrity_pre_heal', static fn (AssetHealEvent $e) => $e->cancel());
         }
 
-        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier) extends VersionRollbackHealer {
+        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier, $liveBinary) extends VersionRollbackHealer {
             /**
              * @param \ArrayObject<int, int> $restored
              * @param list<Version>          $versions
@@ -125,6 +126,7 @@ class VersionRollbackHealerTest extends TestCase
                 private readonly array $assetsById,
                 private readonly array $versionsById,
                 ?NotificationDispatcher $notifier,
+                private readonly string $liveBytes,
             ) {
                 parent::__construct(
                     $checker,
@@ -161,6 +163,11 @@ class VersionRollbackHealerTest extends TestCase
             protected function loadVersion(int $versionId): ?Version
             {
                 return $this->versionsById[$versionId] ?? null;
+            }
+
+            protected function liveBinary(Asset $asset): ?string
+            {
+                return $this->liveBytes;
             }
         };
     }
@@ -333,12 +340,38 @@ class VersionRollbackHealerTest extends TestCase
             $this->checker(IntegrityStatus::Broken),
             $healLog,
             $restored,
+            binaryByVersionId: [2 => 'healed-bytes'],
             assetsById: [7 => $this->asset()],
-            versionsById: [3 => $this->version(3)],
+            versionsById: [3 => $this->version(3), 2 => $this->version(2)],
+            liveBinary: 'healed-bytes',
         )->undo(7);
 
         self::assertTrue($undone);
         self::assertSame([3], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function undoIsRefusedWhenTheLiveBinaryDivergedSinceTheHeal(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('findUndoable')->with(7)->willReturn(['id' => 5, 'from_version' => 3, 'to_version' => 2]);
+        // The asset was changed (re-uploaded/re-healed) since the heal, so rolling back to the
+        // pre-heal version would clobber that newer content: undo must abort, not restore.
+        $healLog->expects(self::never())->method('markUndone');
+
+        $restored = new \ArrayObject();
+        $undone = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $healLog,
+            $restored,
+            binaryByVersionId: [2 => 'healed-bytes'],
+            assetsById: [7 => $this->asset()],
+            versionsById: [3 => $this->version(3), 2 => $this->version(2)],
+            liveBinary: 'user-reuploaded-different-bytes',
+        )->undo(7);
+
+        self::assertFalse($undone);
+        self::assertSame([], $restored->getArrayCopy(), 'a diverged asset must not be rolled back');
     }
 
     #[Test]

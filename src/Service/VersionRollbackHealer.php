@@ -119,10 +119,60 @@ class VersionRollbackHealer
             return false;
         }
 
+        // Undo overwrites the live binary with the pre-heal version. If the asset was re-uploaded or
+        // re-healed since the heal (its live binary no longer matches the version the heal restored
+        // it to), rolling back would silently destroy that newer content. Refuse instead of clobber.
+        if (!$this->stillInHealedState($asset, $entry['to_version'])) {
+            $this->logger->warning('Asset Pilot: refused to undo heal of asset {id}: its binary changed since the heal, so rolling back to the pre-heal version would overwrite newer content.', [
+                'id' => $assetId,
+            ]);
+
+            return false;
+        }
+
         $this->restore($asset, $version);
         $this->healLog->markUndone($entry['id']);
 
         return true;
+    }
+
+    /**
+     * True when the asset's live binary still equals the version the heal restored it to. A null or
+     * unloadable to_version (or an unreadable binary) cannot be confirmed and is treated as a
+     * mismatch, so undo errs on the side of not overwriting.
+     */
+    protected function stillInHealedState(Asset $asset, ?int $toVersion): bool
+    {
+        if ($toVersion === null) {
+            return false;
+        }
+
+        $version = $this->loadVersion($toVersion);
+        if ($version === null) {
+            return false;
+        }
+
+        $healed = $this->versionBinary($version);
+        $live = $this->liveBinary($asset);
+
+        return $healed !== null && $live !== null && hash_equals($healed, $live);
+    }
+
+    /** The asset's current on-disk bytes, or null if unreadable. A seam so undo is unit-testable. */
+    protected function liveBinary(Asset $asset): ?string
+    {
+        $stream = $asset->getStream();
+        if (!is_resource($stream)) {
+            return null;
+        }
+
+        try {
+            $binary = stream_get_contents($stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return is_string($binary) ? $binary : null;
     }
 
     protected function restore(Asset $asset, Version $version): void
