@@ -134,6 +134,35 @@ class AuditLoggerTest extends TestCase
         self::assertSame(1000, $qb->getMaxResults());
     }
 
+    #[Test]
+    public function classBreakdownKeepsActionFailedOutOfTheMoveTotal(): void
+    {
+        $connection = \Doctrine\DBAL\DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE asset_pilot_audit_log (object_class VARCHAR(255), status VARCHAR(50), rule_name VARCHAR(255))');
+        $seed = static function (string $class, string $status, int $n) use ($connection): void {
+            for ($i = 0; $i < $n; ++$i) {
+                $connection->executeStatement('INSERT INTO asset_pilot_audit_log (object_class, status, rule_name) VALUES (?, ?, ?)', [$class, $status, 'r1']);
+            }
+        };
+        $seed('Product', 'completed', 10);
+        $seed('Product', 'failed', 2);
+        $seed('Product', 'skipped', 8);
+        $seed('Product', 'action_failed', 5);
+
+        $logger = new AuditLogger($connection, new NullLogger(), true, 90, new StatsCache(new ArrayAdapter()), 60);
+        $breakdown = $logger->getClassBreakdown();
+
+        self::assertCount(1, $breakdown);
+        $product = $breakdown[0];
+        self::assertSame(10, $product['completed']);
+        self::assertSame(2, $product['failed']);
+        self::assertSame(8, $product['skipped']);
+        // total is a move-total: completed+failed+skipped (20), NOT inflated to 25 by the 5 action_failed rows.
+        self::assertSame(20, $product['total']);
+        self::assertSame($product['completed'] + $product['failed'] + $product['skipped'], $product['total']);
+        self::assertArrayNotHasKey('action_failed', $product);
+    }
+
     private function operation(?int $userId): MoveOperation
     {
         return new MoveOperation(

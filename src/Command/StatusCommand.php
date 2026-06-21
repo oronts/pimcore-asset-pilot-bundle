@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -80,6 +81,7 @@ class StatusCommand extends Command
             ['Completed', $stats['completed'] ?? 0],
             ['Failed', $stats['failed'] ?? 0],
             ['Skipped', $stats['skipped'] ?? 0],
+            ['Action Failed', $stats[OperationStatus::ActionFailed->value] ?? 0],
         ]);
 
         // Recent operations

@@ -368,6 +368,11 @@ class AuditLogger implements AuditLoggerInterface
                     'ruleCount' => $ruleCounts[$class] ?? 0,
                 ];
             }
+            if ($row['status'] === OperationStatus::ActionFailed->value) {
+                // A post-move side effect, not a move: keep total a move-total consistent with the
+                // completed/failed/skipped columns (mirrors MetricsService::moveTotal).
+                continue;
+            }
             $count = (int) $row['count'];
             $breakdown[$class]['total'] += $count;
             $breakdown[$class][$row['status']] = $count;
