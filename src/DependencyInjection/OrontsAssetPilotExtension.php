@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Notification\NotifierInterface;
+use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
 use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -20,11 +21,15 @@ use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
 class OrontsAssetPilotExtension extends Extension implements PrependExtensionInterface
 {
     /**
-     * Extension seams a consumer plugs into by implementing the interface. Registered for
+     * Extension seams a consumer plugs into by implementing a bundle-owned interface. Registered for
      * container-wide autoconfiguration (not services.yaml `_instanceof`, which is file-scoped and so
      * would only tag the bundle's own services) so a project service implementing one is auto-tagged,
-     * exactly as the docs promise. Strategy/filter stay explicit: they are keyed by an `alias` tag
-     * attribute that autoconfiguration cannot supply per service.
+     * exactly as the docs promise.
+     *
+     * Tagged explicitly elsewhere, by design: `strategy` (keyed by an `alias` tag attribute that
+     * autoconfiguration cannot supply), `filter` (the built-in implementations are tagged in
+     * services.yaml), and the Twig / ExpressionLanguage provider seams (framework interfaces, so
+     * autoconfiguring them would tag every such service in the project).
      */
     private const array AUTOCONFIGURED_SEAMS = [
         RuleProviderInterface::class => 'oronts_asset_pilot.rule_provider',
@@ -34,6 +39,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         NotifierInterface::class => 'oronts_asset_pilot.notifier',
         DuplicateMergeStrategyInterface::class => 'oronts_asset_pilot.duplicate_merge_strategy',
         ZipEntryStrategyInterface::class => 'oronts_asset_pilot.zip_strategy',
+        ContextProviderInterface::class => 'oronts_asset_pilot.context_provider',
     ];
     public function prepend(ContainerBuilder $container): void
     {

@@ -6,11 +6,11 @@ services:
         bind:
             int $defaultBatchSize: '%oronts_asset_pilot.async.batch_size%'
 
-    # Strategy/filter are keyed by an `alias` tag attribute, so each implementation is tagged
-    # explicitly (below / by the consumer). The interface-only seams (rule_action, health_check,
-    # integrity_checker, notifier, duplicate_merge_strategy, rule_provider) are auto-tagged
+    # Bundle-owned interface seams (rule_action, health_check, integrity_checker, notifier,
+    # duplicate_merge_strategy, rule_provider, zip_strategy, context_provider) are auto-tagged
     # container-wide via registerForAutoconfiguration() in OrontsAssetPilotExtension, so a consumer
-    # service implementing one is picked up without touching this file.
+    # service implementing one is picked up without touching this file. The `_instanceof` block below
+    # tags `filter` and `strategy` instead (built-in strategies add their `alias` on the per-service tag).
     _instanceof:
         Oronts\AssetPilotBundle\Filter\AssetFilterInterface:
             tags: ['oronts_asset_pilot.filter']

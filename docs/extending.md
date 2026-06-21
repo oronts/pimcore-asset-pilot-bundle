@@ -5,10 +5,11 @@
 Asset Pilot is built around interfaces. Swap out any component by implementing the interface and registering it as a service.
 
 > The interface-based seams below (rule action, health check, integrity checker, notifier, duplicate
-> merge strategy, rule provider) are auto-tagged container-wide, so implementing the interface is
-> enough as long as your service has `autoconfigure: true` (the Symfony default). If you register the
-> service with `autoconfigure: false`, add the seam's tag yourself (the tag name is listed with each
-> seam). Strategies and filters are always tagged explicitly because they are keyed by a tag `alias`.
+> merge strategy, rule provider, zip strategy, context provider) are auto-tagged container-wide, so
+> implementing the interface is enough as long as your service has `autoconfigure: true` (the Symfony
+> default). If you register the service with `autoconfigure: false`, add the seam's tag yourself (the
+> tag name is listed with each seam). Strategies (keyed by a tag `alias`), filters, and the Twig /
+> ExpressionLanguage providers are always tagged explicitly.
 
 ### Custom Filter
 
@@ -155,8 +156,8 @@ Now `condition: 'in_business_hours() and is_image(asset)'` works.
 ### Add Path-Template Variables
 
 The core template context is `object`, `asset`, `locale`, `date`, `className`. To expose your own
-domain variables (e.g. `productCode`, `region`) to `target_path` templates, tag a
-`ContextProviderInterface` with `oronts_asset_pilot.context_provider`:
+domain variables (e.g. `productCode`, `region`) to `target_path` templates, implement
+`ContextProviderInterface` (auto-tagged via `oronts_asset_pilot.context_provider`):
 
 ```php
 use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
@@ -172,12 +173,6 @@ class DomainContextProvider implements ContextProviderInterface
         ];
     }
 }
-```
-
-```yaml
-services:
-    App\AssetPilot\Context\DomainContextProvider:
-        tags: ['oronts_asset_pilot.context_provider']
 ```
 
 Now `target_path: '/Products/{{ productCode|safe_key }}'` works. (Consumer-specific fields live in a
