@@ -1,7 +1,8 @@
 # Asset Pilot Documentation
 
 Documentation for the Pimcore 12 Asset Pilot bundle. For a project overview and quick start, see the
-[project README](../README.md).
+[project README](../README.md). See also [Contributing](../CONTRIBUTING.md) and the
+[Security policy](../SECURITY.md).
 
 ## Getting started
 
