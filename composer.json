@@ -8,7 +8,12 @@
     "authors": [
         {
             "name": "Oronts",
-            "email": "dev@oronts.com",
+            "email": "office@oronts.com",
+            "homepage": "https://oronts.com"
+        },
+        {
+            "name": "Refaat Al Ktifan",
+            "email": "Refaat@alktifan.com",
             "homepage": "https://oronts.com"
         }
     ],
