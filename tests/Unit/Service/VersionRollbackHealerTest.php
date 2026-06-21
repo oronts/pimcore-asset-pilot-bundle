@@ -100,13 +100,14 @@ class VersionRollbackHealerTest extends TestCase
         array $versionsById = [],
         ?NotificationDispatcher $notifier = null,
         string $liveBinary = '',
+        bool $throwOnRestore = false,
     ): VersionRollbackHealer {
         $dispatcher = new EventDispatcher();
         if ($cancelPreHeal) {
             $dispatcher->addListener('oronts_asset_pilot.integrity_pre_heal', static fn (AssetHealEvent $e) => $e->cancel());
         }
 
-        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier, $liveBinary) extends VersionRollbackHealer {
+        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier, $liveBinary, $throwOnRestore) extends VersionRollbackHealer {
             /**
              * @param \ArrayObject<int, int> $restored
              * @param list<Version>          $versions
@@ -127,6 +128,7 @@ class VersionRollbackHealerTest extends TestCase
                 private readonly array $versionsById,
                 ?NotificationDispatcher $notifier,
                 private readonly string $liveBytes,
+                private readonly bool $throwOnRestore,
             ) {
                 parent::__construct(
                     $checker,
@@ -152,6 +154,9 @@ class VersionRollbackHealerTest extends TestCase
 
             protected function restore(Asset $asset, Version $version): void
             {
+                if ($this->throwOnRestore) {
+                    throw new \RuntimeException('storage write failed');
+                }
                 $this->restored->append((int) $version->getId());
             }
 
@@ -176,8 +181,9 @@ class VersionRollbackHealerTest extends TestCase
     public function healsToTheNewestRenderableVersion(): void
     {
         $healLog = $this->createMock(IntegrityHealLog::class);
-        $healLog->expects(self::once())->method('record')
-            ->with(7, 3, 2, 'stub', IntegrityHealLog::STATUS_HEALED);
+        // Two-phase audit: a pending row is opened before the restore and committed after.
+        $healLog->expects(self::once())->method('beginHeal')->with(7, 3, 2, 'stub')->willReturn(55);
+        $healLog->expects(self::once())->method('commitHeal')->with(55);
 
         $restored = new \ArrayObject();
         $result = $this->healer(
@@ -191,6 +197,46 @@ class VersionRollbackHealerTest extends TestCase
         self::assertSame(HealOutcome::Healed, $result->outcome);
         self::assertSame(2, $result->toVersion);
         self::assertSame([2], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function abortsTheHealWhenTheAuditRowCannotBeOpened(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('beginHeal')->willReturn(null);
+        $healLog->expects(self::never())->method('commitHeal');
+
+        $restored = new \ArrayObject();
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $healLog,
+            $restored,
+            [$this->version(2)],
+            [2 => 'good'],
+        )->heal($this->asset());
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame([], $restored->getArrayCopy(), 'the destructive restore must not run without an audit row');
+    }
+
+    #[Test]
+    public function marksTheRowFailedAndDoesNotReportHealedWhenRestoreThrows(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('beginHeal')->willReturn(77);
+        $healLog->expects(self::once())->method('failHeal')->with(77);
+        $healLog->expects(self::never())->method('commitHeal');
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $healLog,
+            new \ArrayObject(),
+            [$this->version(2)],
+            [2 => 'good'],
+            throwOnRestore: true,
+        )->heal($this->asset());
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
     }
 
     #[Test]

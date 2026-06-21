@@ -16,7 +16,9 @@ class IntegrityHealLog
 {
     public const string TABLE = 'asset_pilot_integrity_log';
 
+    public const string STATUS_PENDING = 'pending';
     public const string STATUS_HEALED = 'healed';
+    public const string STATUS_FAILED = 'failed';
     public const string STATUS_UNRECOVERABLE = 'unrecoverable';
     public const string STATUS_UNDONE = 'undone';
 
@@ -38,6 +40,59 @@ class IntegrityHealLog
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to write integrity heal log: {error}', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Open a `pending` heal row BEFORE the destructive restore and return its id, so a healed asset can
+     * never exist without an undo source. Returns null if the row cannot be written, signalling the
+     * caller to abort the heal while the asset is still untouched.
+     */
+    public function beginHeal(int $assetId, ?int $fromVersion, ?int $toVersion, string $checker): ?int
+    {
+        try {
+            $this->connection->insert(self::TABLE, [
+                'asset_id' => $assetId,
+                'from_version' => $fromVersion,
+                'to_version' => $toVersion,
+                'checker' => $checker,
+                'status' => self::STATUS_PENDING,
+                'created_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+            ]);
+
+            return (int) $this->connection->lastInsertId();
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to open integrity heal log row: {error}', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /** Promote a pending row to `healed` once the restore has succeeded (it is now undoable). */
+    public function commitHeal(int $id): void
+    {
+        try {
+            $this->connection->update(self::TABLE, ['status' => self::STATUS_HEALED], ['id' => $id]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to commit integrity heal log {id}: {error}', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /** Mark a pending row `failed` when the restore threw, so it is never offered as undoable. */
+    public function failHeal(int $id): void
+    {
+        try {
+            $this->connection->update(self::TABLE, ['status' => self::STATUS_FAILED], ['id' => $id]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to mark integrity heal {id} failed: {error}', [
+                'id' => $id,
                 'error' => $e->getMessage(),
             ]);
         }

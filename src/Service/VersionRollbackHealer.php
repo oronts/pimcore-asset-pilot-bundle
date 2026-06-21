@@ -83,23 +83,57 @@ class VersionRollbackHealer
             $preHeal = new AssetHealEvent($asset, $toVersion);
             $this->eventDispatcher->dispatch($preHeal, AssetPilotEvents::INTEGRITY_PRE_HEAL);
             if ($preHeal->isCancelled()) {
-                return new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Heal cancelled by a listener.');
+                return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Heal cancelled by a listener.'), $asset, $toVersion);
             }
 
-            $this->restore($asset, $version);
-            $this->healLog->record((int) $asset->getId(), $preHealVersion, $toVersion, $live->checker, IntegrityHealLog::STATUS_HEALED);
-            $this->eventDispatcher->dispatch(new AssetHealEvent($asset, $toVersion, HealOutcome::Healed), AssetPilotEvents::INTEGRITY_POST_HEAL);
+            // Two-phase audit: open a pending row BEFORE the destructive restore so a healed asset can
+            // never exist without an undo source, then commit it once the restore succeeds. If the row
+            // cannot be opened, do not heal (the asset is still untouched); if the restore throws, mark
+            // the row failed so it is never offered as undoable.
+            $logId = $this->healLog->beginHeal((int) $asset->getId(), $preHealVersion, $toVersion, $live->checker);
+            if ($logId === null) {
+                return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Could not open the integrity heal audit row; restore not attempted.'), $asset, $toVersion);
+            }
 
-            return new HealResult(HealOutcome::Healed, $live->checker, $toVersion);
+            try {
+                $this->restore($asset, $version);
+            } catch (\Throwable $e) {
+                $this->healLog->failHeal($logId);
+                $this->logger->error('Asset Pilot: integrity heal restore failed for asset {id}: {error}', [
+                    'id' => $asset->getId(),
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+
+                return $this->finish(new HealResult(HealOutcome::Skipped, $live->checker, $toVersion, 'Restore failed: ' . $e->getMessage()), $asset, $toVersion);
+            }
+
+            $this->healLog->commitHeal($logId);
+
+            return $this->finish(new HealResult(HealOutcome::Healed, $live->checker, $toVersion), $asset, $toVersion);
         }
 
         if (!$dryRun) {
             $firstUnrecoverable = $this->healLog->latestStatus((int) $asset->getId()) !== IntegrityHealLog::STATUS_UNRECOVERABLE;
             $this->healLog->record((int) $asset->getId(), null, null, $live->checker, IntegrityHealLog::STATUS_UNRECOVERABLE);
             $this->routeUnrecoverable($asset, $firstUnrecoverable);
+
+            return $this->finish(new HealResult(HealOutcome::Unrecoverable, $live->checker, null, 'No renderable version to roll back to.'), $asset, null);
         }
 
         return new HealResult(HealOutcome::Unrecoverable, $live->checker, null, 'No renderable version to roll back to.', $dryRun);
+    }
+
+    /**
+     * Dispatch INTEGRITY_POST_HEAL with the terminal outcome (every result that got past PRE_HEAL is
+     * reported, not only successes, so monitoring listeners can observe failures and vetoes) and
+     * return the result unchanged. $targetVersion is null when no version was rolled back to.
+     */
+    private function finish(HealResult $result, Asset $asset, ?int $targetVersion): HealResult
+    {
+        $this->eventDispatcher->dispatch(new AssetHealEvent($asset, $targetVersion, $result->outcome), AssetPilotEvents::INTEGRITY_POST_HEAL);
+
+        return $result;
     }
 
     /**
