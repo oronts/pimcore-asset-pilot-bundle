@@ -144,6 +144,19 @@ class QuarantineService
 
         $folder = $this->resolveFolder($originalDir);
         $filename = basename($originalPath);
+
+        // Restore only when the recorded original path is still free. Otherwise Pimcore would silently
+        // auto-rename the asset (or the save would throw), so it would not land where the record
+        // promises; fail loudly instead so the operator resolves the collision deliberately.
+        $occupant = $this->assetAtPath($originalPath);
+        if ($occupant !== null && (int) $occupant->getId() !== $assetId) {
+            throw new \RuntimeException(sprintf(
+                'Cannot restore asset %d: another asset already occupies its original path %s.',
+                $assetId,
+                $originalPath,
+            ));
+        }
+
         $this->moveGuarded($asset, $assetId, static function () use ($asset, $folder, $filename): void {
             $asset->setParent($folder);
             $asset->setFilename($filename);
@@ -156,6 +169,12 @@ class QuarantineService
         );
 
         return true;
+    }
+
+    /** The asset currently at a path (a seam over Asset::getByPath so restore() is unit-testable). */
+    protected function assetAtPath(string $path): ?Asset
+    {
+        return Asset::getByPath($path);
     }
 
     /**

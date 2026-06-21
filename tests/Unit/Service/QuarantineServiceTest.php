@@ -33,6 +33,7 @@ class QuarantineServiceTest extends TestCase
         bool $allowCreate = true,
         array $expiredIds = [],
         ?ContentUsageScanner $contentScanner = null,
+        array $assetsAtPath = [],
     ): object {
         $finder = $this->createMock(UnusedAssetFinderInterface::class);
         $finder->method('isReferenced')->willReturn($isReferenced);
@@ -48,13 +49,14 @@ class QuarantineServiceTest extends TestCase
             $allowCreate,
             $expiredIds,
             $contentScanner,
+            $assetsAtPath,
         ) extends QuarantineService {
             public array $recorded = [];
             public array $removed = [];
             public array $deleted = [];
 
             /** @param array<int, ?Asset> $assetsById @param array<int, ?string> $originalPaths @param list<int> $expiredIds */
-            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private bool $allowCreate, private array $expiredIds, ?ContentUsageScanner $scanner)
+            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private bool $allowCreate, private array $expiredIds, ?ContentUsageScanner $scanner, private array $assetsAtPath)
             {
                 parent::__construct($c, $lg, $f, $ed, $log, contentScanner: $scanner);
             }
@@ -92,6 +94,11 @@ class QuarantineServiceTest extends TestCase
             protected function findOriginalPath(int $assetId): ?string
             {
                 return $this->originalPaths[$assetId] ?? null;
+            }
+
+            protected function assetAtPath(string $path): ?Asset
+            {
+                return $this->assetsAtPath[$path] ?? null;
             }
 
             protected function deleteQuarantineRecord(int $assetId): void
@@ -202,6 +209,28 @@ class QuarantineServiceTest extends TestCase
 
         $this->expectException(NotPermittedException::class);
         $service->restore(5);
+    }
+
+    #[Test]
+    public function restoreRefusesWhenAnotherAssetOccupiesTheOriginalPath(): void
+    {
+        $occupant = $this->createMock(Asset::class);
+        $occupant->method('getId')->willReturn(99);
+
+        $service = $this->service(
+            [5 => $this->asset('/Quarantine/a.jpg')],
+            [5 => '/Products/a.jpg'],
+            assetsAtPath: ['/Products/a.jpg' => $occupant],
+        );
+
+        try {
+            $service->restore(5);
+            self::fail('expected a path collision to be refused');
+        } catch (\RuntimeException) {
+            // expected
+        }
+
+        self::assertSame([], $service->removed, 'a blocked restore must not clear the quarantine record');
     }
 
     #[Test]
