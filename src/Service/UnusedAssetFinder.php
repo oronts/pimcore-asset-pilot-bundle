@@ -374,6 +374,11 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             return [null, sprintf('Not permitted to %s this asset', $verb)];
         }
 
+        // Locked assets are protected from any automated move/delete, even when unreferenced.
+        if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+            return [null, 'Asset is locked'];
+        }
+
         // Race-condition safety: it may have been referenced since the listing. Moving also changes
         // the path, which would break a hard-coded path reference in object content.
         if ($this->isReferenced($id)) {

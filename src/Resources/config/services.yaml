@@ -227,6 +227,7 @@ services:
         arguments:
             $quarantineFolder: '%oronts_asset_pilot.quarantine.folder%'
             $graceDays: '%oronts_asset_pilot.quarantine.grace_days%'
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
     # -- Rule actions (post-move) -----------------------------------------------
 

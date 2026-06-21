@@ -59,7 +59,7 @@ class MovePlanner
             return MovePlan::skip($fullTargetPath, 'Cancelled by event listener');
         }
 
-        if ($asset->hasProperty($this->lockProperty) && $asset->getProperty($this->lockProperty)) {
+        if (AssetProtection::isLocked($asset, $this->lockProperty)) {
             return MovePlan::skip($fullTargetPath, 'Asset is locked');
         }
 

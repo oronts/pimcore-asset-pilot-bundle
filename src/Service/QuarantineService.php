@@ -35,6 +35,7 @@ class QuarantineService
         protected readonly string $quarantineFolder = '/Quarantine',
         protected readonly int $graceDays = 30,
         protected readonly ?ContentUsageScanner $contentScanner = null,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
@@ -70,6 +71,11 @@ class QuarantineService
                 }
                 if ($asset instanceof Asset\Folder) {
                     $errors[$assetId] = 'Cannot quarantine a folder';
+                    ++$failed;
+                    continue;
+                }
+                if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+                    $errors[$assetId] = 'Asset is locked';
                     ++$failed;
                     continue;
                 }
@@ -248,6 +254,13 @@ class QuarantineService
                         $this->deleteQuarantineRecord($assetId);
                     }
                     ++$purged;
+                    continue;
+                }
+
+                // Locked assets are protected from automated hard-delete, even past the grace period.
+                if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+                    ++$skipped;
+                    $this->logger->warning('Asset Pilot: quarantined asset {id} is locked; not purging.', ['id' => $assetId]);
                     continue;
                 }
 
