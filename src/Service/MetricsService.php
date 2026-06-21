@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
 
 /**
  * Operational metrics derived from the audit log: operation counts per status, the failure rate,
@@ -21,6 +22,7 @@ class MetricsService
      * @return array{
      *     operations: array<string, int>,
      *     total: int,
+     *     moveTotal: int,
      *     failureRate: float,
      *     durationMs: array{count: int, avgMs: float|null, minMs: int|null, maxMs: int|null}
      * }
@@ -39,11 +41,16 @@ class MetricsService
         }
 
         $failed = $operations['failed'] ?? 0;
+        // action_failed is a post-move side-effect outcome, not a move attempt: keep it visible in
+        // operations/total but out of the move failure-rate denominator so a failing action never
+        // distorts the rate of failed moves.
+        $moveTotal = $total - ($operations[OperationStatus::ActionFailed->value] ?? 0);
 
         return [
             'operations' => $operations,
             'total' => $total,
-            'failureRate' => $total > 0 ? round($failed / $total, 4) : 0.0,
+            'moveTotal' => $moveTotal,
+            'failureRate' => $moveTotal > 0 ? round($failed / $moveTotal, 4) : 0.0,
             'durationMs' => $this->auditLogger->getDurationStats(),
         ];
     }

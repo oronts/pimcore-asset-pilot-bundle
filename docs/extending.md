@@ -487,7 +487,9 @@ the others or the operation that triggered the alert.
 A rule can run post-move actions on the organized asset via its `actions` config. Each entry has a
 `type` resolved to a tagged `oronts_asset_pilot.rule_action` service, plus that action's own keys.
 Actions run only after a successful move, never in dry-run; a failing action is logged and isolated
-(it never undoes the move or aborts the others).
+(it never undoes the move or aborts the others). A failure is also recorded in the audit log under
+the `action_failed` status, so it surfaces in the audit trail and the metrics endpoint; it is kept
+out of the move failure rate, because the move itself succeeded.
 
 The built-in `set_property` action sets an asset property from a static `value` or, for
 object-derived metadata, from the owning object via a `from` getter:

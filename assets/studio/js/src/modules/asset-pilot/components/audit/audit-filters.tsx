@@ -8,7 +8,7 @@ interface AuditFiltersProps {
   onExport: () => void
 }
 
-const statusOptions = ['', 'completed', 'failed', 'skipped', 'pending']
+const statusOptions = ['', 'completed', 'failed', 'skipped', 'pending', 'action_failed']
 
 export const AuditFiltersBar: React.FC<AuditFiltersProps> = ({ filters, onChange, onExport }) => {
   const { t } = useTranslation()

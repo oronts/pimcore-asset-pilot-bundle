@@ -117,6 +117,7 @@ export const de: Record<string, string> = {
   'asset-pilot.status.failed': 'Fehlgeschlagen',
   'asset-pilot.status.skipped': 'Übersprungen',
   'asset-pilot.status.pending': 'Ausstehend',
+  'asset-pilot.status.action_failed': 'Aktion fehlgeschlagen',
 
   // Dashboard
   'asset-pilot.dashboard.organized': 'Organisiert',

@@ -139,7 +139,7 @@ Constants on `AssetPilotEvents`. Details in [DX](dx.md#events) and
 | `MoveStrategy` | `always`, `first_assignment`, `callback` |
 | `CollisionPattern` | `counter`, `timestamp`, `uuid` |
 | `PropertyType` | `text`, `bool`, `select` |
-| `OperationStatus` | `pending`, `in_progress`, `completed`, `failed`, `skipped` |
+| `OperationStatus` | `pending`, `in_progress`, `completed`, `failed`, `skipped`, `action_failed` |
 | `TriggerType` | `object_save`, `bulk_operation`, `manual`, `scheduled`, `api`, `asset_upload` |
 | `ConfidenceLevel` | `protected`, `historically_used`, `recently_uploaded`, `probably_unused`, `definitely_unused` |
 

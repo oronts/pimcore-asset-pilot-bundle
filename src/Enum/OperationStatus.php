@@ -11,4 +11,5 @@ enum OperationStatus: string
     case Completed = 'completed';
     case Failed = 'failed';
     case Skipped = 'skipped';
+    case ActionFailed = 'action_failed';
 }
