@@ -129,16 +129,22 @@ class AssetZipService
             foreach ($capped as $asset) {
                 $file = $this->localFileFor($asset, $options->thumbnail, $entryExtension);
                 // safeEntryName rejects zip-slip paths (absolute, .., backslash, control chars) that a
-                // custom strategy could emit; a rejected or unreadable asset is skipped, not packed.
-                $entry = $file !== null && is_file($file)
+                // custom strategy could emit; a missing, empty, or unreadable asset is skipped, not
+                // packed (a failed storage read surfaces in Pimcore as a 0-byte temp file).
+                $entry = $file !== null && $this->isPackable($file)
                     ? $this->safeEntryName($this->retargetExtension($strategy->entryPath($asset), $entryExtension))
                     : null;
                 if ($file === null || $entry === null) {
                     $skipped++;
                     continue;
                 }
-                $zip->addFile($file, $this->uniqueName($entry, $used));
-                $added++;
+                // Count what actually landed in the archive: if libzip refuses the entry (e.g. the
+                // file vanished between the check and the add), report it skipped, not added.
+                if ($zip->addFile($file, $this->uniqueName($entry, $used))) {
+                    $added++;
+                } else {
+                    $skipped++;
+                }
             }
             $zip->close();
         } catch (\Throwable $e) {
@@ -248,7 +254,27 @@ class AssetZipService
             }
         }
 
-        return $asset->getLocalFile();
+        try {
+            return $asset->getLocalFile();
+        } catch (\Throwable $e) {
+            // getLocalFile() throws if the binary cannot be materialised locally (e.g. a remote
+            // storage read fails). Skip this asset instead of aborting the whole archive build.
+            $this->logger->warning('Asset Pilot: could not resolve a local file for asset {id}, skipping it: {error}', [
+                'id' => $asset->getId(),
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * A resolved local file is packable only if it exists and is non-empty. A failed Storage read
+     * surfaces in Pimcore as a 0-byte temp file that would otherwise be packed as an empty entry.
+     */
+    private function isPackable(string $file): bool
+    {
+        return is_file($file) && @filesize($file) > 0;
     }
 
     private function retargetExtension(string $entry, ?string $newExtension): string

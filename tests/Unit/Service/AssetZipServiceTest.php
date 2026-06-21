@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -114,6 +115,61 @@ class AssetZipServiceTest extends TestCase
             {
                 return $this->uniqueName($entry, $used);
             }
+
+            /**
+             * @param Asset[] $assets
+             * @return array{path: ?string, added: int, skipped: int}
+             */
+            public function callBuild(array $assets, ?ZipBuildOptions $options = null): array
+            {
+                return $this->build($assets, $options);
+            }
+
+            public function callLocalFileFor(Asset $asset): ?string
+            {
+                return $this->localFileFor($asset, null);
+            }
         };
+    }
+
+    #[Test]
+    public function aThrowingGetLocalFileIsSkippedNotFatal(): void
+    {
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(42);
+        $asset->method('getLocalFile')->willThrowException(new \RuntimeException('storage read failed'));
+
+        self::assertNull($this->serviceWith([])->callLocalFileFor($asset));
+    }
+
+    #[Test]
+    public function buildSkipsEmptyFilesAndPacksOnlyNonEmptyAssets(): void
+    {
+        $good = (string) tempnam(sys_get_temp_dir(), 'apz_good_');
+        file_put_contents($good, 'real-bytes');
+        // tempnam creates a 0-byte file: the same shape Pimcore's empty-tmpfile storage fallback yields.
+        $empty = (string) tempnam(sys_get_temp_dir(), 'apz_empty_');
+
+        $goodAsset = $this->createMock(Asset::class);
+        $goodAsset->method('getFilename')->willReturn('good.png');
+        $goodAsset->method('getLocalFile')->willReturn($good);
+
+        $emptyAsset = $this->createMock(Asset::class);
+        $emptyAsset->method('getFilename')->willReturn('empty.png');
+        $emptyAsset->method('getLocalFile')->willReturn($empty);
+
+        $result = $this->serviceWith([])->callBuild([$goodAsset, $emptyAsset]);
+
+        try {
+            self::assertSame(1, $result['added'], 'only the non-empty asset is packed');
+            self::assertSame(1, $result['skipped'], 'the 0-byte asset is skipped, not packed empty');
+            self::assertNotNull($result['path']);
+        } finally {
+            if ($result['path'] !== null) {
+                @unlink($result['path']);
+            }
+            @unlink($good);
+            @unlink($empty);
+        }
     }
 }
