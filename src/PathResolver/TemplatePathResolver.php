@@ -83,6 +83,12 @@ class TemplatePathResolver implements PathResolverInterface
                 continue;
             }
             $segment = $this->sanitizeSegment($raw);
+            if ($segment === '') {
+                // A segment that sanitizes to nothing (e.g. a whitespace-only render) is not usable;
+                // drop it so an all-whitespace template hits the /Assets/<key> fallback below rather
+                // than collapsing to the asset root.
+                continue;
+            }
             if ($segment === 'unknown' && $segments !== [] && end($segments) === 'unknown') {
                 continue;
             }

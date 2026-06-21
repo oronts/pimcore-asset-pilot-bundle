@@ -166,6 +166,28 @@ class TemplatePathResolverTest extends TestCase
         self::assertSame('/Assets/unknown', $this->pathNormalizer()->normalize('', null));
     }
 
+    #[Test]
+    public function segmentsThatSanitizeToEmptyAreDroppedSoWhitespaceTemplatesStillFallBack(): void
+    {
+        // A realistic sanitizer: Pimcore's getValidKey turns a whitespace-only segment into ''.
+        $normalizer = new class (new \Psr\Log\NullLogger()) extends TemplatePathResolver {
+            protected function sanitizeSegment(string $segment): string
+            {
+                return trim($segment) === '' ? '' : trim($segment);
+            }
+
+            public function normalize(string $resolved, ?string $fallbackKey): string
+            {
+                return $this->normalizePath($resolved, $fallbackKey);
+            }
+        };
+
+        // A whitespace-only template must fall back to /Assets/<key>, never resolve to the asset root.
+        self::assertSame('/Assets/my-key', $normalizer->normalize('   ', 'my-key'));
+        // A whitespace segment between real ones is dropped, not kept as an empty path component.
+        self::assertSame('/a/b', $normalizer->normalize('a/   /b', null));
+    }
+
     private function pathNormalizer(): object
     {
         return new class (new \Psr\Log\NullLogger()) extends TemplatePathResolver {
