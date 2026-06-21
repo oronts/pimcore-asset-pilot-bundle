@@ -145,25 +145,27 @@ modified version or run it as a service, your modifications must be available un
   </a>
 </p>
 
-Asset Pilot is built and maintained by **Oronts**, an AI-first software company in Munich. We build and
-run commerce platforms, PIM and DAM systems, and data automation for mid-market and enterprise teams,
-with deep Pimcore experience across versions 10, 11, and 12. This bundle is how we file assets on our
-own client platforms; it is open source and free to use, and we offer commercial delivery and support
-around it.
+Asset Pilot is built and maintained by **Oronts**, an AI-first software company in Munich. We design and
+run commerce platforms, PIM and DAM systems, and the data automation around them for mid-market and
+enterprise teams, with Pimcore experience spanning versions 10, 11, and 12. This bundle is the
+asset-filing engine we run on our own client platforms; it is hardened in production and released as
+open source under AGPL-3.0. Use it freely. When you want it shaped to your data model or backed by an
+SLA, that is the work we do.
 
 **Where we help:**
 
-- **Production adoption.** Installation, rule design for your data model, async and multi-pod setup, and
-  migrating a messy asset library into a clean, predictable structure without downtime.
-- **Domain extensions.** Custom merge strategies, integrity checkers, condition functions, path-template
-  context, notifiers, and rule providers, all behind the bundle's documented extension seams.
-- **The platform underneath.** Pimcore bundles and DataHub integrations, PIM and DAM rollouts, headless
-  e-commerce, search with OpenSearch or MeiliSearch, and AI-assisted enrichment and classification.
-- **Support and SLAs.** Code review, version upgrades, performance tuning, and on-call cover for
+- **Production rollout.** Installation, rule design for your class and field model, async and multi-pod
+  tuning, and migrating a messy asset tree into a clean, predictable structure without downtime.
+- **Custom extensions.** Merge strategies, integrity checkers, condition functions, path-template
+  context, notifiers, and rule providers, each behind a documented seam so your logic stays out of the
+  core and survives upgrades.
+- **The platform around it.** Pimcore and DataHub integrations, PIM and DAM rollouts, headless commerce,
+  search on OpenSearch or MeiliSearch, and AI-assisted enrichment and classification.
+- **Support and SLAs.** Code review, version upgrades, performance work, and on-call cover for
   business-critical Pimcore systems.
 
-If your team files assets by hand, fights duplicates, or runs an unstructured DAM, we can fix both the
-workflow and the platform around it. Tell us what you are running and we will scope it.
+If your team files assets by hand, fights duplicates, or runs a DAM nobody trusts, we fix the workflow
+and the platform underneath it. Tell us what you run and we will scope it.
 
 **Contact:** office@oronts.com &middot; [oronts.com](https://oronts.com)
 
