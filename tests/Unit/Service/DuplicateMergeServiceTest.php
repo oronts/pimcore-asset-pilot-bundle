@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
@@ -47,9 +48,24 @@ class DuplicateMergeServiceTest extends TestCase
     /**
      * @param list<DuplicateMergeStrategyInterface> $strategies
      */
-    private function service(DuplicateReferenceRepointer $repointer, array $strategies): DuplicateMergeService
+    private function service(DuplicateReferenceRepointer $repointer, array $strategies, string $liveChecksum = 'abc'): DuplicateMergeService
     {
-        return new DuplicateMergeService($strategies, $repointer, new NullLogger(), 'quarantine');
+        $connection = $this->createMock(Connection::class);
+
+        // Override the live-binary lookup (which would hit Pimcore's Asset::getById): by default it
+        // returns the group's indexed checksum 'abc' so the apply path proceeds; a test can pass a
+        // different value to simulate a binary that changed since the last scan.
+        return new class ($strategies, $repointer, $connection, $liveChecksum) extends DuplicateMergeService {
+            public function __construct(iterable $strategies, DuplicateReferenceRepointer $repointer, Connection $connection, private readonly string $live)
+            {
+                parent::__construct($strategies, $repointer, new NullLogger(), $connection, 'quarantine');
+            }
+
+            protected function liveChecksum(int $assetId): ?string
+            {
+                return $this->live;
+            }
+        };
     }
 
     #[Test]
@@ -110,6 +126,21 @@ class DuplicateMergeServiceTest extends TestCase
         $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)])->merge($group, dryRun: true);
 
         self::assertSame([], $disposed->getArrayCopy(), 'a dry run must not dispose any copy');
+        self::assertSame(DispositionOutcome::Skipped, $outcome->dispositions[0]->outcome);
+    }
+
+    #[Test]
+    public function skipsACopyWhoseLiveBinaryNoLongerMatchesTheStaleIndex(): void
+    {
+        $disposed = new \ArrayObject();
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        // Stale index -> never repoint and never dispose a now-distinct asset.
+        $repointer->expects(self::never())->method('repoint');
+
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)], liveChecksum: 'changed')->merge($group);
+
+        self::assertSame([], $disposed->getArrayCopy(), 'a stale copy must never be disposed');
         self::assertSame(DispositionOutcome::Skipped, $outcome->dispositions[0]->outcome);
     }
 

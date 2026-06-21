@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
+use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -30,6 +32,7 @@ class DuplicateMergeService
         iterable $strategies,
         protected readonly DuplicateReferenceRepointer $repointer,
         protected readonly LoggerInterface $logger,
+        protected readonly Connection $connection,
         protected readonly string $defaultStrategy = 'quarantine',
     ) {
         foreach ($strategies as $strategy) {
@@ -65,8 +68,19 @@ class DuplicateMergeService
         // A non-repointing strategy (isolate) leaves references intact; the repointer is skipped.
         $repoints = $strategy->repointsReferences();
 
+        // Re-verify byte-identity against the live binaries before any destructive disposal: the
+        // checksum index is refreshed only by find-duplicates --scan, so a binary replaced since the
+        // scan must never be consolidated and disposed under its now-stale hash.
+        $canonicalLive = $dryRun ? null : $this->liveChecksum($canonical);
+
         $dispositions = [];
         foreach ($copies as $copyId) {
+            if (!$dryRun && ($canonicalLive !== $group->checksum || $this->liveChecksum($copyId) !== $group->checksum)) {
+                $this->forgetStaleChecksum($copyId);
+                $dispositions[] = new CopyDisposition($copyId, DispositionOutcome::Skipped, 'Stale duplicate index: a binary changed since the last scan; re-run find-duplicates --scan.');
+                continue;
+            }
+
             $report = $repoints
                 ? $this->repointer->repoint($copyId, $canonical, $dryRun)
                 : new RepointReport($copyId, $canonical, 0, []);
@@ -89,6 +103,30 @@ class DuplicateMergeService
         }
 
         return new MergeOutcome($group->checksum, $canonical, $dispositions);
+    }
+
+    /** Live content hash of the asset (same source as the index: Asset::getChecksum()), or null. */
+    protected function liveChecksum(int $assetId): ?string
+    {
+        $asset = Asset::getById($assetId);
+        if (!$asset instanceof Asset || $asset instanceof Asset\Folder) {
+            return null;
+        }
+        $checksum = $asset->getChecksum();
+
+        return $checksum === '' ? null : $checksum;
+    }
+
+    private function forgetStaleChecksum(int $assetId): void
+    {
+        try {
+            $this->connection->delete(DuplicateDetectionService::TABLE, ['asset_id' => $assetId]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Asset Pilot: could not drop stale checksum row for asset {id}: {error}', [
+                'id' => $assetId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function resolveStrategy(string $name): DuplicateMergeStrategyInterface
