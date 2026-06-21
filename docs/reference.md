@@ -80,7 +80,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
 | `asset-pilot:metrics` | Output metrics as Prometheus text exposition or JSON (`--format`) |
 | `asset-pilot:capture-storage-snapshot` | Record an unused-storage snapshot for trend reporting |
-| `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--async`) |
+| `asset-pilot:reorganize-assets` | Re-organize the owners of assets in a folder or by id (`--folder`, `--by-ids`, `--limit`, `--async`) |
 | `asset-pilot:quarantine-purge` | Hard-delete quarantined assets past the grace period (`--grace-days`, `--dry-run`) |
 | `asset-pilot:sweep-empty-folders` | Find / `--delete` empty asset folders (`--folder`, `--limit`) |
 | `asset-pilot:normalize-filenames` | Preview / `--apply` filename sanitization (`--by-ids`, `--folder`, `--type`, `--limit`) |
@@ -97,7 +97,7 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity`, `/duplicates`, `/duplicates/strategies` | View |
+| GET | `/dashboard`, `/dashboard/class-stats`, `/health`, `/metrics`, `/integrity`, `/duplicates`, `/duplicates/strategies`, `/duplicates/export` | View |
 | GET | `/rules`, `/rules/{name}`, `/rules/{name}/preview`, `/rules/export`, `/rules/overlap`, `/rules/drift` | View |
 | POST | `/rules/diff` | View |
 | POST | `/rules/{name}/apply` | Operate |
@@ -108,16 +108,17 @@ mutating = Operate, revert = Admin (see [Permissions](permissions.md)).
 | POST | `/folders/empty/delete` | Operate |
 | POST | `/organize`, `/organize/bulk` | Operate |
 | POST | `/organize/explain`, `/operations/bulk-preview` | View |
-| POST | `/operations/replay` | Operate |
+| POST | `/operations/replay`, `/operations/reorganize` | Operate |
 | GET | `/operations/status` | View |
 | GET | `/audit`, `/audit/export` | View |
 | POST | `/audit/{id}/revert` | Admin |
-| GET | `/unused-assets`, `/unused-assets/stats` | View |
+| GET | `/unused-assets`, `/unused-assets/stats`, `/unused-assets/export` | View |
 | POST | `/unused-assets/bulk-delete`, `/unused-assets/bulk-move`, `/unused-assets/bulk-quarantine` | Operate |
-| GET | `/quarantine` | View |
+| GET | `/quarantine`, `/quarantine/export` | View |
 | POST | `/quarantine/{assetId}/restore` | Operate |
 | GET | `/assets/search`, `/assets/tags` | View |
 | POST | `/assets/bulk-tag`, `/assets/bulk-property` | Operate |
+| POST | `/assets/download-zip` | View |
 | POST / DELETE | `/assets/{id}/lock` | Operate |
 
 ## Events
@@ -159,6 +160,8 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.rule_action` | `RuleActionInterface` (post-move actions, built-in `set_property`) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` (broken-asset detection; built-ins stream/image/document) |
 | `oronts_asset_pilot.notifier` | `NotifierInterface` (alert transport; built-in Pimcore in-app notifier) |
+| `oronts_asset_pilot.duplicate_merge_strategy` | `DuplicateMergeStrategyInterface` (copy disposition for merge; built-ins quarantine/delete/isolate) |
+| `oronts_asset_pilot.zip_strategy` | `ZipEntryStrategyInterface` (download-zip archive layout; built-ins flat/folder/type) |
 
 The default path resolver is a single replaceable service (`PathResolverInterface`, below), not a
 tagged chain.

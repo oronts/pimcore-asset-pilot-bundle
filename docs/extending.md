@@ -336,7 +336,7 @@ multi-tenancy, none of which require changing the bundle:
    ```php
    class TenantContextProvider implements ContextProviderInterface
    {
-       public function getContext(AbstractObject $object, Asset $asset, ?string $locale = null): array
+       public function getContext(AbstractObject $object, Asset $asset, ?string $locale): array
        {
            // Derive the tenant however your domain does (object field, folder, the acting user, ...).
            return ['tenant' => $object instanceof Concrete ? ($object->get('tenant') ?? 'shared') : 'shared'];
@@ -585,6 +585,40 @@ No service config is needed beyond autowiring. Then select it: `duplicates: { me
 > top-level asset relations (image / many-to-one / many-to-many) and hard-coded asset paths/ids in
 > WYSIWYG fields; references inside documents, nested bricks/blocks/fieldcollections or advanced/metadata
 > relations are reported as blocked and that copy is left untouched (never silently merged).
+
+### Add a ZIP Layout Strategy
+
+The download-zip subsystem (CLI `asset-pilot:download-zip`, REST `POST /assets/download-zip`) decides
+where each asset lands inside the archive via a `ZipEntryStrategyInterface`. Built-ins are `flat`
+(no folders), `folder` (mirrors the asset tree), and `type` (grouped by asset type). Add your own by
+implementing the interface; it is auto-tagged `oronts_asset_pilot.zip_strategy` and selected by
+`getName()`:
+
+```php
+namespace App\AssetPilot;
+
+use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
+use Pimcore\Model\Asset;
+
+class InvoiceZipStrategy implements ZipEntryStrategyInterface
+{
+    public function getName(): string
+    {
+        return 'invoice';
+    }
+
+    public function entryPath(Asset $asset): string
+    {
+        // Return the asset's relative path inside the archive (a trailing filename, no leading slash).
+        return 'invoices/' . $asset->getFilename();
+    }
+}
+```
+
+Select it as the default via `zip: { default_strategy: invoice }`, or per request with the CLI
+`--strategy=invoice` option / the REST `strategy` body field. Returning a path that collides with
+another entry is de-duplicated by the archive builder, so two assets that map to the same name still
+both pack.
 
 ### Events
 

@@ -29,7 +29,8 @@ tests/
 │   ├── Model/              Rule, RuleMatch, MoveOperation, OperationResult, AssetFieldInfo
 │   ├── Naming/             SafeNamingStrategy collision resolution
 │   ├── PathResolver/       TemplatePathResolver rendering and validation
-│   ├── Service/            LoopGuard, ConfidenceScorer, SortWhitelist, AssetOrganizer seams
+│   ├── Service/            LoopGuard, ConfidenceScorer, AssetOrganizer seams
+│   │   └── Query/          SortWhitelist, ConfidenceFilter, Like, AssetSortColumns
 │   └── Strategy/           Always, FirstAssignment, Callback, ConflictResolver
 └── bootstrap.php
 ```

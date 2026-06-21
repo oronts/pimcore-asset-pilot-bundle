@@ -33,6 +33,8 @@ no config edits.
 | `oronts_asset_pilot.rule_action` | `RuleActionInterface` | post-move actions selected by a rule's `actions` | [link](extending.md#rule-actions-do-more-than-move) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` | highest-priority `supports()` match render-tests the asset | [link](extending.md#add-an-integrity-checker) |
 | `oronts_asset_pilot.notifier` | `NotifierInterface` | every tagged notifier receives each dispatched alert (built-in: Pimcore in-app) | [link](extending.md#add-a-notifier) |
+| `oronts_asset_pilot.duplicate_merge_strategy` | `DuplicateMergeStrategyInterface` | copy disposition for merge, selected by `name()` (built-ins quarantine/delete/isolate) | [link](extending.md#duplicate-merge-strategies) |
+| `oronts_asset_pilot.zip_strategy` | `ZipEntryStrategyInterface` | download-zip archive layout, selected by `getName()` (built-ins flat/folder/type) | [link](extending.md#add-a-zip-layout-strategy) |
 
 The default path resolver is a single service, not a tagged chain; to change it, replace the
 `PathResolverInterface` alias (see below and [Overriding](overriding.md)).

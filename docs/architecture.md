@@ -133,7 +133,7 @@ flowchart TD
 
 ```
 src/
-├── Action/                 RuleActionInterface + set-property/tag actions beyond moving
+├── Action/                 RuleActionInterface + set-property action beyond moving
 ├── Audit/                  AuditLogger — database-backed operation logging
 ├── Cache/                  Stampede-safe stats caching
 ├── Command/                CLI: organize, debug-rule, validate-config, status, audit, cleanup-unused, ...
@@ -164,6 +164,7 @@ src/
 ├── Strategy/               ConflictStrategyInterface + Always/FirstAssignment/Callback
 ├── Support/                Relocate-safe shared helpers (e.g. BulkIds)
 ├── Webpack/                Module Federation entry point provider
+├── Zip/                    ZipEntryStrategyInterface + flat/folder/type layout strategies + ZipBuildOptions
 ├── Installer.php           Database schema + permission registration
 └── OrontsAssetPilotBundle.php
 ```
