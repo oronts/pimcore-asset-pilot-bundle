@@ -14,6 +14,8 @@ import { EmptyFoldersTab } from './folders/empty-folders-tab'
 import { DriftTab } from './drift/drift-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
 
+const DOCS_URL = 'https://github.com/oronts/asset-pilot-bundle/tree/main/docs'
+
 const tabKeys = ['dashboard', 'rules', 'operations', 'audit', 'unused', 'duplicates', 'integrity', 'quarantine', 'storage', 'folders', 'drift', 'management'] as const
 type TabKey = typeof tabKeys[number]
 
@@ -52,6 +54,15 @@ export const AssetPilotDashboard: React.FC = () => {
           }}>
             {t('asset-pilot.nav.by-oronts')}
           </span>
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t('asset-pilot.nav.docs-aria')}
+            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: '#1677ff', textDecoration: 'none' }}
+          >
+            {t('asset-pilot.nav.docs')} ↗
+          </a>
         </div>
 
         <div style={{ display: 'flex', gap: 0 }}>

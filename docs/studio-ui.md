@@ -5,7 +5,11 @@
 Asset Pilot integrates into Pimcore Studio as a Module Federation remote, registered under
 Experience & E-commerce → Asset Pilot. It has a tab per feature (Dashboard, Rules, Operations, Audit
 Log, Unused Assets, Duplicates, Integrity, Quarantine, Storage, Empty Folders, Drift, Asset
-Management). The core tabs:
+Management).
+
+![Asset Pilot in Pimcore Studio: the Unused Assets gallery, with filters, confidence badges, page-size control, and the documentation link](images/unused-assets-gallery.png)
+
+The core tabs:
 
 | Tab | Description |
 |-----|-------------|
@@ -13,8 +17,22 @@ Management). The core tabs:
 | **Rules** | View all configured rules with priority, strategy, target path. Export the rule set as a portable artifact. An overlap panel warns about rules competing for the same assets. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. |
 | **Operations** | Single object organize (with dry-run, async, and explain modes). Bulk organize by class with paginated preview and "Organize All" button. Replay failed operations (Operate permission). System status with refresh. |
 | **Audit Log** | Full operation history with sorting. Filter by class, status, and rule name. CSV export. Revert individual operations. |
-| **Unused Assets** | Confidence-scored unused asset list with color-coded badges. Filter by type, extensions, date range, folder, and confidence level. Bulk delete or move selected assets. Filter presets. |
-| **Asset Management** | Search assets by filename/path, filter by type, folder, or Object ID. Lock/unlock assets. Bulk assign tags. Bulk set custom properties. Sortable columns with pagination. |
+| **Unused Assets** | Confidence-scored unused assets in a list or gallery view with color-coded badges. Filter by type, extensions, date range, folder, and confidence level. User-adjustable page size and CSV export. Bulk delete, move, or quarantine selected assets. Filter presets. |
+| **Asset Management** | Search assets by filename/path; filter by type, folder, Object ID, file extension, or relation (referenced/unreferenced). List or gallery view. Lock/unlock assets. Bulk assign tags. Bulk set custom properties. Sortable columns with pagination. |
+
+### Screenshots
+
+The Unused Assets list view, with type/confidence filters, sortable columns, a page-size control, and CSV export:
+
+![Unused Assets list view](images/unused-assets-list.png)
+
+The Storage tab plots the unused-storage trend from captured snapshots:
+
+![Unused storage trend](images/storage-trend.png)
+
+The Asset Management tab searches the asset catalog by filename or path, type, folder, Object ID, file extension, or relation (referenced / unreferenced), in a list or gallery view:
+
+![Asset Management search](images/asset-management.png)
 
 ### Confidence Badges
 

@@ -2,6 +2,8 @@ export const de: Record<string, string> = {
   // Navigation
   'asset-pilot.nav.title': 'Asset Pilot',
   'asset-pilot.nav.by-oronts': 'von Oronts',
+  'asset-pilot.nav.docs': 'Doku',
+  'asset-pilot.nav.docs-aria': 'Asset Pilot Dokumentation in neuem Tab öffnen',
 
   // Tabs
   'asset-pilot.tabs.dashboard': 'Dashboard',
