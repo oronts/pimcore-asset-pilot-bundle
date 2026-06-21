@@ -40,6 +40,15 @@ class DataObjectSaveListener
             return;
         }
 
+        // Draft autosaves and version-only saves dispatch postUpdate but never persist the object; do
+        // not organize (which physically moves assets) for a draft the user has not committed.
+        if ($event->hasArgument('saveVersionOnly') && $event->getArgument('saveVersionOnly')) {
+            return;
+        }
+        if ($event->hasArgument('isAutoSave') && $event->getArgument('isAutoSave')) {
+            return;
+        }
+
         $object = $event->getObject();
 
         if (!$object instanceof Concrete) {
