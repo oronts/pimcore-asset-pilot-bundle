@@ -26,7 +26,9 @@ export const UnusedAssetsTab: React.FC = () => {
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useUnusedAssets(mergedFilters)
   const { data: stats } = useUnusedStats()
-  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
+  // Locked assets are excluded from cleanup, so they must never enter a bulk selection (the backend
+  // also rejects them per-asset; this keeps the UI from offering an action that would be refused).
+  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items, a => !a.locked)
   const [actionLoading, setActionLoading] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('list')
 
