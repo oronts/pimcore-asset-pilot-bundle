@@ -42,7 +42,7 @@ class RuleEngine implements RuleEngineInterface
             }
         }
         $parsed = array_filter($parsed);
-        usort($parsed, static fn (Rule $a, Rule $b): int => $b->priority <=> $a->priority);
+        usort($parsed, static fn (Rule $a, Rule $b): int => ($b->priority <=> $a->priority) ?: strcmp($a->name, $b->name));
         $this->sortedRules = $parsed;
     }
 

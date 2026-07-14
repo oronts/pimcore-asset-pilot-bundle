@@ -15,6 +15,7 @@ use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\MovePlan;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Model\RuleMatch;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
@@ -51,7 +52,6 @@ class AssetOrganizer
 
         try {
             $results = [];
-            $processedAssetIds = [];
             $fieldInfos = $this->fieldExtractor->extract($object);
 
             $this->logger->info('Asset Pilot: organizing assets for {class}:{id} ({fieldCount} asset fields)', [
@@ -60,44 +60,12 @@ class AssetOrganizer
                 'fieldCount' => count($fieldInfos),
             ]);
 
-            foreach ($fieldInfos as $fieldInfo) {
-                foreach ($fieldInfo->assets as $asset) {
-                    $assetId = (int) $asset->getId();
-
-                    $this->loopGuard->refreshObject($objectId);
-
-                    // Skip if this asset was already processed by a higher-priority rule
-                    // (same asset can appear in multiple fields)
-                    if (isset($processedAssetIds[$assetId])) {
-                        $this->logger->debug('Asset Pilot: asset {assetId} already processed by rule "{rule}", skipping field "{field}"', [
-                            'assetId' => $assetId,
-                            'rule' => $processedAssetIds[$assetId],
-                            'field' => $fieldInfo->fieldName,
-                        ]);
-                        continue;
-                    }
-
-                    $matches = $this->ruleEngine->matchField($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
-
-                    if ($ruleName !== null) {
-                        $matches = array_values(array_filter($matches, static fn ($m): bool => $m->rule->name === $ruleName));
-                    }
-
-                    if (empty($matches)) {
-                        $this->logger->debug('Asset Pilot: no rules matched for asset {assetId} in field "{field}"', [
-                            'assetId' => $assetId,
-                            'field' => $fieldInfo->fieldName,
-                        ]);
-                        continue;
-                    }
-
-                    // Use highest priority match
-                    $match = $matches[0];
-                    $processedAssetIds[$assetId] = $match->rule->name;
-
-                    $plan = $this->movePlanner->plan($asset, $object, $match->rule, $match->resolvedPath, $triggerType, dryRun: false);
-                    $results[] = $this->executeMove($asset, $plan, $object, $match->rule, $triggerType);
-                }
+            foreach ($this->bestMatches($object, $fieldInfos, $ruleName) as $candidate) {
+                $this->loopGuard->refreshObject($objectId);
+                $asset = $candidate['asset'];
+                $match = $candidate['match'];
+                $plan = $this->movePlanner->plan($asset, $object, $match->rule, $match->resolvedPath, $triggerType, dryRun: false);
+                $results[] = $this->executeMove($asset, $plan, $object, $match->rule, $triggerType);
             }
 
             $moved = count(array_filter($results, static fn (OperationResult $r) => $r->status === OperationStatus::Completed));
@@ -123,36 +91,18 @@ class AssetOrganizer
     public function dryRun(AbstractObject $object, TriggerType $triggerType = TriggerType::Manual, ?string $ruleName = null): array
     {
         $operations = [];
-        $processedAssetIds = [];
         $objectId = (int) $object->getId();
         $objectClass = $this->resolveObjectClass($object);
         $fieldInfos = $this->fieldExtractor->extract($object);
 
-        foreach ($fieldInfos as $fieldInfo) {
-            foreach ($fieldInfo->assets as $asset) {
-                $assetId = (int) $asset->getId();
-
-                // Skip if this asset was already processed by a higher-priority rule
-                if (isset($processedAssetIds[$assetId])) {
-                    continue;
-                }
-
-                $matches = $this->ruleEngine->matchField($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
-                if ($ruleName !== null) {
-                    $matches = array_values(array_filter($matches, static fn ($m): bool => $m->rule->name === $ruleName));
-                }
-                if (empty($matches)) {
-                    continue;
-                }
-
-                $match = $matches[0];
-                $processedAssetIds[$assetId] = true;
-                $assetPath = $asset->getRealFullPath();
-
-                $plan = $this->movePlanner->plan($asset, $object, $match->rule, $match->resolvedPath, $triggerType, dryRun: true);
-                $status = $plan->isSkip() ? OperationStatus::Skipped : OperationStatus::Pending;
-                $operations[] = $this->operation($assetId, $assetPath, $plan->targetPath, $objectId, $objectClass, $match->rule, $triggerType, $status, $plan->skipReason);
-            }
+        foreach ($this->bestMatches($object, $fieldInfos, $ruleName) as $candidate) {
+            $asset = $candidate['asset'];
+            $match = $candidate['match'];
+            $assetId = (int) $asset->getId();
+            $assetPath = $asset->getRealFullPath();
+            $plan = $this->movePlanner->plan($asset, $object, $match->rule, $match->resolvedPath, $triggerType, dryRun: true);
+            $status = $plan->isSkip() ? OperationStatus::Skipped : OperationStatus::Pending;
+            $operations[] = $this->operation($assetId, $assetPath, $plan->targetPath, $objectId, $objectClass, $match->rule, $triggerType, $status, $plan->skipReason);
         }
 
         $pendingMoves = array_filter($operations, static fn (MoveOperation $op): bool => $op->status === OperationStatus::Pending);
@@ -163,6 +113,65 @@ class AssetOrganizer
         ]);
 
         return $operations;
+    }
+
+    /**
+     * @param iterable<\Oronts\AssetPilotBundle\Model\AssetFieldInfo> $fieldInfos
+     *
+     * @return list<array{asset: Asset, match: RuleMatch, field: string, locale: ?string}>
+     */
+    private function bestMatches(AbstractObject $object, iterable $fieldInfos, ?string $ruleName): array
+    {
+        $best = [];
+
+        foreach ($fieldInfos as $fieldInfo) {
+            foreach ($fieldInfo->assets as $asset) {
+                $assetId = (int) $asset->getId();
+                $matches = $this->ruleEngine->matchField($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
+
+                foreach ($matches as $match) {
+                    if ($ruleName !== null && $match->rule->name !== $ruleName) {
+                        continue;
+                    }
+
+                    $candidate = [
+                        'asset' => $asset,
+                        'match' => $match,
+                        'field' => $fieldInfo->fieldName,
+                        'locale' => $fieldInfo->locale,
+                    ];
+
+                    if (!isset($best[$assetId]) || $this->precedes($candidate, $best[$assetId])) {
+                        $best[$assetId] = $candidate;
+                    }
+                }
+            }
+        }
+
+        ksort($best, SORT_NUMERIC);
+
+        return array_values($best);
+    }
+
+    /**
+     * @param array{match: RuleMatch, field: string, locale: ?string} $candidate
+     * @param array{match: RuleMatch, field: string, locale: ?string} $current
+     */
+    private function precedes(array $candidate, array $current): bool
+    {
+        if ($candidate['match']->rule->priority !== $current['match']->rule->priority) {
+            return $candidate['match']->rule->priority > $current['match']->rule->priority;
+        }
+
+        return [
+            $candidate['match']->rule->name,
+            $candidate['field'],
+            $candidate['locale'] ?? '',
+        ] < [
+            $current['match']->rule->name,
+            $current['field'],
+            $current['locale'] ?? '',
+        ];
     }
 
     /** @return OperationResult[] */

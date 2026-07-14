@@ -89,6 +89,17 @@ class RuleEngineTest extends TestCase
     }
 
     #[Test]
+    public function equalPriorityRulesAreSortedByName(): void
+    {
+        $engine = $this->createEngine([
+            $this->createRule('zeta', 'Product', 10),
+            $this->createRule('alpha', 'Product', 10),
+        ]);
+
+        self::assertSame(['alpha', 'zeta'], array_map(static fn (Rule $rule): string => $rule->name, $engine->getRules()));
+    }
+
+    #[Test]
     public function ruleProvidersContributeRulesMergedAndSortedByPriority(): void
     {
         $configRule = $this->createRule('config', 'Product', 50);

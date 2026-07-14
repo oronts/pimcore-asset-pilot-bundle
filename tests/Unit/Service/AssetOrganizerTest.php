@@ -6,14 +6,18 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
+use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
+use Oronts\AssetPilotBundle\Model\AssetFieldInfo;
 use Oronts\AssetPilotBundle\Model\MovePlan;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Model\RuleMatch;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\MovePlanner;
@@ -88,6 +92,52 @@ class AssetOrganizerTest extends TestCase
         $result = $this->executeMove($loopGuard, MovePlan::skip('/target/f.jpg', 'Asset is locked'));
 
         self::assertSame(OperationStatus::Skipped, $result->status);
+    }
+
+    #[Test]
+    public function dryRunSelectsTheHighestPriorityRuleAcrossEveryField(): void
+    {
+        $object = $this->createMock(\Pimcore\Model\DataObject\Concrete::class);
+        $object->method('getId')->willReturn(7);
+        $object->method('getClassName')->willReturn('Product');
+
+        $asset = $this->asset('/source/f.jpg');
+        $low = Rule::fromConfig('low', ['class' => 'Product', 'fields' => ['first'], 'target_path' => '/low', 'priority' => 10]);
+        $high = Rule::fromConfig('high', ['class' => 'Product', 'fields' => ['second'], 'target_path' => '/high', 'priority' => 100]);
+
+        $engine = $this->createMock(RuleEngineInterface::class);
+        $engine->method('matchField')->willReturnMap([
+            [$object, $asset, 'first', null, [new RuleMatch($low, $object, $asset, '/low')]],
+            [$object, $asset, 'second', null, [new RuleMatch($high, $object, $asset, '/high')]],
+        ]);
+
+        $extractor = $this->createMock(AssetFieldExtractorInterface::class);
+        $extractor->method('extract')->willReturn([
+            new AssetFieldInfo('first', null, 'image', [$asset]),
+            new AssetFieldInfo('second', null, 'image', [$asset]),
+        ]);
+
+        $planner = $this->createMock(MovePlanner::class);
+        $planner->expects(self::once())
+            ->method('plan')
+            ->with($asset, $object, $high, '/high', TriggerType::Manual, true)
+            ->willReturn(MovePlan::proceed('/high', 'f.jpg', '/high/f.jpg'));
+
+        $organizer = new AssetOrganizer(
+            $engine,
+            $extractor,
+            $planner,
+            $this->createMock(AuditLogger::class),
+            new EventDispatcher(),
+            $this->createMock(LoopGuard::class),
+            new NullLogger(),
+        );
+
+        $operations = $organizer->dryRun($object);
+
+        self::assertCount(1, $operations);
+        self::assertSame('high', $operations[0]->ruleName);
+        self::assertSame('/high/f.jpg', $operations[0]->targetPath);
     }
 
     private function executeMove(LoopGuard $loopGuard, MovePlan $plan): OperationResult
