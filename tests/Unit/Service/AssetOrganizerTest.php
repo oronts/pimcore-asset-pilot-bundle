@@ -8,6 +8,7 @@ use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
+use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
@@ -21,6 +22,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\MovePlanner;
+use Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -140,6 +142,86 @@ class AssetOrganizerTest extends TestCase
         self::assertSame('/high/f.jpg', $operations[0]->targetPath);
     }
 
+    #[Test]
+    public function firstAssignmentIsRecordedOnTheAssetBeforeSave(): void
+    {
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(1);
+        $asset->method('getRealFullPath')->willReturn('/source/f.jpg');
+        $asset->method('isAllowed')->with('publish')->willReturn(true);
+        $asset->method('getProperty')->with(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY)->willReturn(null);
+        $asset->expects(self::once())->method('setProperty')->with(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY, 'bool', true);
+        $asset->expects(self::once())->method('save');
+
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->expects(self::once())->method('releaseAsset')->with(1);
+
+        $folder = $this->createMock(Asset\Folder::class);
+        $organizer = new class (
+            $this->createMock(RuleEngine::class),
+            $this->createMock(AssetFieldExtractor::class),
+            $this->createMock(MovePlanner::class),
+            $this->createMock(AuditLogger::class),
+            new EventDispatcher(),
+            $loopGuard,
+            new NullLogger(),
+            $asset,
+            $folder,
+        ) extends AssetOrganizer {
+            public function __construct(
+                RuleEngine $engine,
+                AssetFieldExtractor $extractor,
+                MovePlanner $planner,
+                AuditLogger $audit,
+                EventDispatcher $dispatcher,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                private readonly Asset $liveAsset,
+                private readonly Asset\Folder $folder,
+            ) {
+                parent::__construct($engine, $extractor, $planner, $audit, $dispatcher, $loopGuard, $logger);
+            }
+
+            public function run(Asset $asset, MovePlan $plan, AbstractObject $object, Rule $rule): OperationResult
+            {
+                return $this->executeMove($asset, $plan, $object, $rule, TriggerType::Manual);
+            }
+
+            protected function reloadAsset(Asset $asset): ?Asset
+            {
+                return $this->liveAsset;
+            }
+
+            protected function createFolderIfNeeded(string $path): Asset\Folder
+            {
+                return $this->folder;
+            }
+        };
+
+        $rule = new Rule(
+            name: 'first',
+            class: 'Product',
+            fields: [],
+            condition: null,
+            targetPath: '/target',
+            strategy: MoveStrategy::FirstAssignment,
+            callback: null,
+            priority: 10,
+            enabled: true,
+            filters: [],
+        );
+
+        $result = $organizer->run(
+            $asset,
+            MovePlan::proceed('/target', 'f.jpg', '/target/f.jpg'),
+            $this->createMock(AbstractObject::class),
+            $rule,
+        );
+
+        self::assertSame(OperationStatus::Completed, $result->status);
+    }
+
     private function executeMove(LoopGuard $loopGuard, MovePlan $plan): OperationResult
     {
         $organizer = new class (
@@ -154,6 +236,11 @@ class AssetOrganizerTest extends TestCase
             public function runMove(Asset $a, MovePlan $p, AbstractObject $o, Rule $r): OperationResult
             {
                 return $this->executeMove($a, $p, $o, $r, TriggerType::Manual);
+            }
+
+            protected function reloadAsset(Asset $asset): ?Asset
+            {
+                return $asset;
             }
         };
 

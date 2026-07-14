@@ -6,7 +6,9 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
+use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
+use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetMoveEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
@@ -16,6 +18,7 @@ use Oronts\AssetPilotBundle\Model\MovePlan;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleMatch;
+use Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
@@ -252,10 +255,29 @@ class AssetOrganizer
         }
 
         try {
+            $liveAsset = $this->reloadAsset($asset);
+            if ($liveAsset === null || $liveAsset instanceof Asset\Folder) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset no longer exists');
+            }
+            $asset = $liveAsset;
+
+            if ($asset->getRealFullPath() !== $sourcePath) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset changed after planning');
+            }
+            if (!$asset->isAllowed('publish')) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Not permitted to move this asset');
+            }
+            if ($rule->strategy === MoveStrategy::FirstAssignment && $asset->getProperty(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY) === true) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset was already assigned');
+            }
+
             $folder = $this->createFolderIfNeeded((string) $plan->folderPath);
 
             $asset->setParent($folder);
             $asset->setFilename((string) $plan->targetFilename);
+            if ($rule->strategy === MoveStrategy::FirstAssignment) {
+                $asset->setProperty(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY, PropertyType::Bool->value, true);
+            }
 
             // Mark recently-moved (5min TTL) before unmarking processing so the asset never sits in a
             // window where it is neither flagged — that gap could let async ping-pong slip through when
@@ -365,5 +387,10 @@ class AssetOrganizer
         $this->logger->debug('Asset Pilot: ensured folder exists at "{path}"', ['path' => $path]);
 
         return $folder;
+    }
+
+    protected function reloadAsset(Asset $asset): ?Asset
+    {
+        return Asset::getById((int) $asset->getId(), ['force' => true]);
     }
 }
