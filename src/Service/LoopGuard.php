@@ -21,17 +21,24 @@ use Symfony\Component\Lock\LockInterface;
  */
 class LoopGuard
 {
-    private const int DEFAULT_TTL = 60; // seconds — auto-expires to prevent deadlocks
     private const int RECENTLY_MOVED_TTL = 300; // 5 minutes — prevents async ping-pong
     private const int DISPATCH_DEDUP_TTL = 10; // seconds — prevents duplicate message dispatches
 
     /** @var array<string, LockInterface> locks held by this process, keyed by resource */
     private array $heldLocks = [];
 
+    /** @var array<string, positive-int> */
+    private array $lockDepth = [];
+
     public function __construct(
         private readonly CacheItemPoolInterface $cache,
         private readonly LockFactory $lockFactory,
-    ) {}
+        private readonly float $lockTtl = 60.0,
+    ) {
+        if ($this->lockTtl <= 0) {
+            throw new \InvalidArgumentException('The lock TTL must be greater than zero.');
+        }
+    }
 
     public function acquireObject(int $objectId): bool
     {
@@ -50,7 +57,7 @@ class LoopGuard
      */
     public function refreshObject(int $objectId): void
     {
-        ($this->heldLocks['asset_pilot_lock_object_' . $objectId] ?? null)?->refresh();
+        $this->refresh('asset_pilot_lock_object_' . $objectId);
     }
 
     public function acquireAsset(int $assetId): bool
@@ -63,18 +70,41 @@ class LoopGuard
         $this->release('asset_pilot_lock_asset_' . $assetId);
     }
 
+    public function refreshAsset(int $assetId): void
+    {
+        $this->refresh('asset_pilot_lock_asset_' . $assetId);
+    }
+
+    public function acquireTarget(string $targetPath): bool
+    {
+        return $this->acquire($this->targetResource($targetPath));
+    }
+
+    public function releaseTarget(string $targetPath): void
+    {
+        $this->release($this->targetResource($targetPath));
+    }
+
+    public function refreshTarget(string $targetPath): void
+    {
+        $this->refresh($this->targetResource($targetPath));
+    }
+
     private function acquire(string $resource): bool
     {
         if (isset($this->heldLocks[$resource])) {
+            ++$this->lockDepth[$resource];
+
             return true;
         }
 
-        $lock = $this->lockFactory->createLock($resource, (float) self::DEFAULT_TTL);
+        $lock = $this->lockFactory->createLock($resource, $this->lockTtl);
         if (!$lock->acquire()) {
             return false;
         }
 
         $this->heldLocks[$resource] = $lock;
+        $this->lockDepth[$resource] = 1;
 
         return true;
     }
@@ -86,13 +116,31 @@ class LoopGuard
             return;
         }
 
-        unset($this->heldLocks[$resource]);
+        if ($this->lockDepth[$resource] > 1) {
+            --$this->lockDepth[$resource];
+
+            return;
+        }
+
+        unset($this->heldLocks[$resource], $this->lockDepth[$resource]);
 
         // Best-effort: a failed release (lock already lost/expired) self-heals via the TTL.
         try {
             $lock->release();
         } catch (\Throwable) {
         }
+    }
+
+    private function refresh(string $resource): void
+    {
+        ($this->heldLocks[$resource] ?? null)?->refresh($this->lockTtl);
+    }
+
+    private function targetResource(string $targetPath): string
+    {
+        $normalizedPath = '/' . ltrim(preg_replace('#/+#', '/', trim($targetPath)) ?? '', '/');
+
+        return 'asset_pilot_lock_target_' . hash('sha256', $normalizedPath);
     }
 
     public function isProcessingAsset(int $assetId): bool
@@ -103,7 +151,7 @@ class LoopGuard
     public function markAssetProcessing(int $assetId): void
     {
         $item = $this->cache->getItem($this->assetKey($assetId));
-        $item->set(true)->expiresAfter(self::DEFAULT_TTL);
+        $item->set(true)->expiresAfter((int) ceil($this->lockTtl));
         $this->cache->save($item);
     }
 
@@ -120,7 +168,7 @@ class LoopGuard
     public function markObjectProcessing(int $objectId): void
     {
         $item = $this->cache->getItem($this->objectKey($objectId));
-        $item->set(true)->expiresAfter(self::DEFAULT_TTL);
+        $item->set(true)->expiresAfter((int) ceil($this->lockTtl));
         $this->cache->save($item);
     }
 

@@ -18,6 +18,7 @@ use Oronts\AssetPilotBundle\Model\MovePlan;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleMatch;
+use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -254,6 +255,8 @@ class AssetOrganizer
             return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset is being processed by another job');
         }
 
+        $targetLockAcquired = false;
+
         try {
             $liveAsset = $this->reloadAsset($asset);
             if ($liveAsset === null || $liveAsset instanceof Asset\Folder) {
@@ -271,6 +274,23 @@ class AssetOrganizer
                 return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Asset was already assigned');
             }
 
+            if (!$this->loopGuard->acquireTarget($plan->targetPath)) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Target path is being allocated by another job');
+            }
+            $targetLockAcquired = true;
+
+            if ($this->loadAssetAtPath($plan->targetPath) !== null) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Target path is no longer available');
+            }
+
+            $targetParent = $this->nearestExistingFolder((string) $plan->folderPath);
+            if ($targetParent !== null && !$targetParent->isAllowed('create')) {
+                return $this->skip($assetId, $sourcePath, $plan->targetPath, $objectId, $objectClass, $rule, $triggerType, $startTime, 'Not permitted to create the target path');
+            }
+
+            $this->loopGuard->refreshAsset($assetId);
+            $this->loopGuard->refreshTarget($plan->targetPath);
+
             $folder = $this->createFolderIfNeeded((string) $plan->folderPath);
 
             $asset->setParent($folder);
@@ -284,6 +304,8 @@ class AssetOrganizer
             // the asset is shared between multiple objects. Only set it once the save actually lands.
             $this->loopGuard->markAssetProcessing($assetId);
             try {
+                $this->loopGuard->refreshAsset($assetId);
+                $this->loopGuard->refreshTarget($plan->targetPath);
                 $asset->save(['versionNote' => 'Asset Pilot: organized by rule "' . $rule->name . '" -> ' . $plan->targetPath]);
                 $this->loopGuard->markAssetRecentlyMoved($assetId);
             } finally {
@@ -327,6 +349,9 @@ class AssetOrganizer
 
             return OperationResult::failed($e->getMessage(), $operation);
         } finally {
+            if ($targetLockAcquired) {
+                $this->loopGuard->releaseTarget($plan->targetPath);
+            }
             $this->loopGuard->releaseAsset($assetId);
         }
     }
@@ -392,5 +417,15 @@ class AssetOrganizer
     protected function reloadAsset(Asset $asset): ?Asset
     {
         return Asset::getById((int) $asset->getId(), ['force' => true]);
+    }
+
+    protected function loadAssetAtPath(string $path): ?Asset
+    {
+        return Asset::getByPath($path);
+    }
+
+    protected function nearestExistingFolder(string $path): ?Asset\Folder
+    {
+        return AssetFolders::nearestExisting($path);
     }
 }

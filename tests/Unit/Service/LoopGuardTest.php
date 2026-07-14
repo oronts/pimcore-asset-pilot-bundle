@@ -60,6 +60,67 @@ class LoopGuardTest extends TestCase
     }
 
     #[Test]
+    public function targetLocksNormalizeEquivalentPathsAndAreExclusive(): void
+    {
+        $store = new InMemoryStore();
+        $jobA = new LoopGuard($this->cache, new LockFactory($store));
+        $jobB = new LoopGuard($this->cache, new LockFactory($store));
+
+        self::assertTrue($jobA->acquireTarget('/products//images/photo.jpg'));
+        self::assertFalse($jobB->acquireTarget('products/images/photo.jpg'));
+
+        $jobA->releaseTarget('/products/images/photo.jpg');
+        self::assertTrue($jobB->acquireTarget('/products/images/photo.jpg'));
+    }
+
+    #[Test]
+    public function nestedAcquisitionOnlyReleasesAfterMatchingRelease(): void
+    {
+        $store = new InMemoryStore();
+        $jobA = new LoopGuard($this->cache, new LockFactory($store));
+        $jobB = new LoopGuard($this->cache, new LockFactory($store));
+
+        self::assertTrue($jobA->acquireAsset(12));
+        self::assertTrue($jobA->acquireAsset(12));
+
+        $jobA->releaseAsset(12);
+        self::assertFalse($jobB->acquireAsset(12));
+
+        $jobA->releaseAsset(12);
+        self::assertTrue($jobB->acquireAsset(12));
+    }
+
+    #[Test]
+    public function refreshAssetAndTargetAreNoOpsWithoutLocks(): void
+    {
+        $this->expectNotToPerformAssertions();
+
+        $this->guard->refreshAsset(99);
+        $this->guard->refreshTarget('/missing.jpg');
+    }
+
+    #[Test]
+    public function lockTtlMustBePositive(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new LoopGuard($this->cache, new LockFactory(new InMemoryStore()), 0);
+    }
+
+    #[Test]
+    public function configuredTtlIsUsedForProcessingFlags(): void
+    {
+        $item = $this->createMock(CacheItemInterface::class);
+        $item->method('set')->with(true)->willReturn($item);
+        $item->expects(self::once())->method('expiresAfter')->with(91)->willReturn($item);
+        $this->cache->method('getItem')->willReturn($item);
+        $this->cache->expects(self::once())->method('save')->with($item);
+
+        $guard = new LoopGuard($this->cache, new LockFactory(new InMemoryStore()), 90.1);
+        $guard->markAssetProcessing(42);
+    }
+
+    #[Test]
     public function refreshObjectIsANoOpWhenNoLockIsHeld(): void
     {
         $this->expectNotToPerformAssertions();

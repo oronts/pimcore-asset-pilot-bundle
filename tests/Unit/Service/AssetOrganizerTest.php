@@ -97,6 +97,62 @@ class AssetOrganizerTest extends TestCase
     }
 
     #[Test]
+    public function executeMoveSkipsWhenTheTargetLockIsUnavailable(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->method('acquireTarget')->willReturn(false);
+        $loopGuard->expects(self::once())->method('releaseAsset')->with(1);
+        $loopGuard->expects(self::never())->method('releaseTarget');
+
+        $result = $this->executeMove($loopGuard, MovePlan::proceed('/target', 'f.jpg', '/target/f.jpg'));
+
+        self::assertSame(OperationStatus::Skipped, $result->status);
+        self::assertSame('Target path is being allocated by another job', $result->message);
+    }
+
+    #[Test]
+    public function executeMoveRechecksTheTargetAfterAcquiringItsLock(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->method('acquireTarget')->willReturn(true);
+        $loopGuard->expects(self::once())->method('releaseTarget')->with('/target/f.jpg');
+        $loopGuard->expects(self::once())->method('releaseAsset')->with(1);
+
+        $result = $this->executeMove(
+            $loopGuard,
+            MovePlan::proceed('/target', 'f.jpg', '/target/f.jpg'),
+            $this->asset('/target/f.jpg'),
+        );
+
+        self::assertSame(OperationStatus::Skipped, $result->status);
+        self::assertSame('Target path is no longer available', $result->message);
+    }
+
+    #[Test]
+    public function executeMoveChecksCreatePermissionBeforeCreatingTargetFolders(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->method('acquireTarget')->willReturn(true);
+        $loopGuard->expects(self::once())->method('releaseTarget')->with('/target/f.jpg');
+        $loopGuard->expects(self::once())->method('releaseAsset')->with(1);
+
+        $parent = $this->createMock(Asset\Folder::class);
+        $parent->expects(self::once())->method('isAllowed')->with('create')->willReturn(false);
+
+        $result = $this->executeMove(
+            $loopGuard,
+            MovePlan::proceed('/target', 'f.jpg', '/target/f.jpg'),
+            targetParent: $parent,
+        );
+
+        self::assertSame(OperationStatus::Skipped, $result->status);
+        self::assertSame('Not permitted to create the target path', $result->message);
+    }
+
+    #[Test]
     public function dryRunSelectsTheHighestPriorityRuleAcrossEveryField(): void
     {
         $object = $this->createMock(\Pimcore\Model\DataObject\Concrete::class);
@@ -155,7 +211,9 @@ class AssetOrganizerTest extends TestCase
 
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->method('acquireTarget')->willReturn(true);
         $loopGuard->expects(self::once())->method('releaseAsset')->with(1);
+        $loopGuard->expects(self::once())->method('releaseTarget')->with('/target/f.jpg');
 
         $folder = $this->createMock(Asset\Folder::class);
         $organizer = new class (
@@ -197,6 +255,16 @@ class AssetOrganizerTest extends TestCase
             {
                 return $this->folder;
             }
+
+            protected function loadAssetAtPath(string $path): ?Asset
+            {
+                return null;
+            }
+
+            protected function nearestExistingFolder(string $path): ?Asset\Folder
+            {
+                return null;
+            }
         };
 
         $rule = new Rule(
@@ -222,7 +290,12 @@ class AssetOrganizerTest extends TestCase
         self::assertSame(OperationStatus::Completed, $result->status);
     }
 
-    private function executeMove(LoopGuard $loopGuard, MovePlan $plan): OperationResult
+    private function executeMove(
+        LoopGuard $loopGuard,
+        MovePlan $plan,
+        ?Asset $assetAtTarget = null,
+        ?Asset\Folder $targetParent = null,
+    ): OperationResult
     {
         $organizer = new class (
             $this->createMock(RuleEngine::class),
@@ -232,7 +305,23 @@ class AssetOrganizerTest extends TestCase
             new EventDispatcher(),
             $loopGuard,
             new NullLogger(),
+            $assetAtTarget,
+            $targetParent,
         ) extends AssetOrganizer {
+            public function __construct(
+                RuleEngine $engine,
+                AssetFieldExtractor $extractor,
+                MovePlanner $planner,
+                AuditLogger $audit,
+                EventDispatcher $dispatcher,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                private readonly ?Asset $assetAtTarget,
+                private readonly ?Asset\Folder $targetParent,
+            ) {
+                parent::__construct($engine, $extractor, $planner, $audit, $dispatcher, $loopGuard, $logger);
+            }
+
             public function runMove(Asset $a, MovePlan $p, AbstractObject $o, Rule $r): OperationResult
             {
                 return $this->executeMove($a, $p, $o, $r, TriggerType::Manual);
@@ -241,6 +330,16 @@ class AssetOrganizerTest extends TestCase
             protected function reloadAsset(Asset $asset): ?Asset
             {
                 return $asset;
+            }
+
+            protected function loadAssetAtPath(string $path): ?Asset
+            {
+                return $this->assetAtTarget;
+            }
+
+            protected function nearestExistingFolder(string $path): ?Asset\Folder
+            {
+                return $this->targetParent;
             }
         };
 
@@ -257,6 +356,7 @@ class AssetOrganizerTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $asset->method('getId')->willReturn(1);
         $asset->method('getRealFullPath')->willReturn($path);
+        $asset->method('isAllowed')->with('publish')->willReturn(true);
 
         return $asset;
     }
