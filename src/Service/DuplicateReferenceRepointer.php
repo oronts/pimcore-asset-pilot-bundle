@@ -230,10 +230,26 @@ class DuplicateReferenceRepointer
     protected function replacePathInHtml(string $html, string $fromPath, string $toPath, int $fromId, int $toId): array
     {
         $new = str_replace(
-            ['="' . $fromPath . '"', "='" . $fromPath . "'", 'pimcore_id="' . $fromId . '"'],
-            ['="' . $toPath . '"', "='" . $toPath . "'", 'pimcore_id="' . $toId . '"'],
+            ['="' . $fromPath . '"', "='" . $fromPath . "'"],
+            ['="' . $toPath . '"', "='" . $toPath . "'"],
             $html,
         );
+
+        $tagPattern = '/<[^>]*\\bpimcore_id=(["\'])' . preg_quote((string) $fromId, '/') . '\\1[^>]*>/i';
+        $new = preg_replace_callback($tagPattern, static function (array $tag) use ($fromId, $toId): string {
+            if (preg_match('/\\bpimcore_type=(["\'])asset\\1/i', $tag[0]) !== 1) {
+                return $tag[0];
+            }
+
+            $idPattern = '/\\bpimcore_id=(["\'])' . preg_quote((string) $fromId, '/') . '\\1/i';
+
+            return (string) preg_replace_callback(
+                $idPattern,
+                static fn (array $id): string => 'pimcore_id=' . $id[1] . $toId . $id[1],
+                $tag[0],
+                1,
+            );
+        }, $new) ?? $new;
 
         return [$new !== $html, $new];
     }

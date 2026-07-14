@@ -203,13 +203,28 @@ class DuplicateReferenceRepointerTest extends TestCase
     #[Test]
     public function rewritesBothThePathAndTheEmbeddedIdInWysiwyg(): void
     {
-        $html = 'see <a href="/copy.jpg">x</a> and <img pimcore_id="9" src="/copy.jpg">';
+        $html = 'see <a href="/copy.jpg">x</a> and <img pimcore_id="9" pimcore_type="asset" src="/copy.jpg">';
         [$changed, $new] = $this->repointer([])->exposeHtml($html, '/copy.jpg', '/canonical.jpg', 9, 105);
 
         self::assertTrue($changed);
         self::assertStringContainsString('/canonical.jpg', $new);
         self::assertStringContainsString('pimcore_id="105"', $new);
         self::assertStringNotContainsString('/copy.jpg', $new);
+    }
+
+    #[Test]
+    public function leavesNonAssetPimcoreIdsUntouched(): void
+    {
+        $html = '<a pimcore_type="object" pimcore_id="9">object</a>'
+            . '<a pimcore_id="9" pimcore_type="document">document</a>'
+            . '<img pimcore_type="asset" pimcore_id="9">';
+
+        [$changed, $new] = $this->repointer([])->exposeHtml($html, '/copy.jpg', '/canonical.jpg', 9, 105);
+
+        self::assertTrue($changed);
+        self::assertStringContainsString('pimcore_type="object" pimcore_id="9"', $new);
+        self::assertStringContainsString('pimcore_id="9" pimcore_type="document"', $new);
+        self::assertStringContainsString('pimcore_type="asset" pimcore_id="105"', $new);
     }
 
     #[Test]
