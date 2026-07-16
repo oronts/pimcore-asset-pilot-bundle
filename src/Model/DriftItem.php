@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Model;
 
+use Oronts\AssetPilotBundle\Enum\DriftEligibility;
+
 /**
  * One asset that is not where the current rules say it should be: it sits at currentPath but a rule
  * resolves it to expectedPath. Surfaced by the location-drift audit after a rule change relocates
@@ -16,5 +18,7 @@ readonly class DriftItem
         public string $currentPath,
         public string $expectedPath,
         public string $ruleName,
+        public DriftEligibility $eligibility = DriftEligibility::NoKnownBlock,
+        public ?string $reason = null,
     ) {}
 }

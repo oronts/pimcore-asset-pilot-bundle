@@ -128,6 +128,14 @@ class RuleEvaluationTest extends TestCase
     }
 
     #[Test]
+    public function describeLocaleMismatchIncludesFilterDetails(): void
+    {
+        $eval = $this->evaluation(rejectionReason: 'locale_mismatch', filterDetails: 'locale "de" not in [en]');
+
+        self::assertSame('locale_mismatch: locale "de" not in [en]', $eval->describe());
+    }
+
+    #[Test]
     public function describeConditionFailedIncludesExpressionAndError(): void
     {
         $eval = $this->evaluation(

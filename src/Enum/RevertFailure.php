@@ -16,4 +16,5 @@ enum RevertFailure: string
     case PermissionDenied = 'permission_denied';
     case PathConflict = 'path_conflict';
     case ExecutionFailed = 'execution_failed';
+    case RecoveryRequired = 'recovery_required';
 }

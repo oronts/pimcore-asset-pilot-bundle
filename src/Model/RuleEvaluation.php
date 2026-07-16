@@ -29,6 +29,7 @@ readonly class RuleEvaluation
             'disabled' => 'disabled',
             'class_mismatch' => 'class_mismatch: ' . ($this->filterDetails ?? ''),
             'field_mismatch' => 'field_mismatch: ' . ($this->filterDetails ?? ''),
+            'locale_mismatch' => 'locale_mismatch: ' . ($this->filterDetails ?? ''),
             'condition_failed' => 'condition_failed: ' . ($this->conditionExpression ?? '') .
                 ($this->conditionError !== null ? ' (error: ' . $this->conditionError . ')' : ''),
             'filter_rejected' => 'filter_rejected: ' . ($this->filterDetails ?? ''),

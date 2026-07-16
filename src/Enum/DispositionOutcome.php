@@ -10,5 +10,6 @@ enum DispositionOutcome: string
     case Deleted = 'deleted';
     case LeftReferenced = 'left_referenced';
     case LeftError = 'left_error';
+    case Blocked = 'blocked';
     case Skipped = 'skipped';
 }

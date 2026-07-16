@@ -14,5 +14,6 @@ final class RevertResult
         public readonly int $assetId,
         public readonly string $fromPath,
         public readonly string $toPath,
+        public readonly ?string $warning = null,
     ) {}
 }
