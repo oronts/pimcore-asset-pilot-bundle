@@ -9,7 +9,7 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleOverlap;
 
 /**
- * Static analysis of the rule set: finds pairs of enabled rules that can match the same
+ * Static analysis of the rule set: finds pairs of enabled rules that may match the same
  * (class, field) and so compete for the same assets. Pure, catalog-free — it inspects the rule
  * definitions only, never scans objects, so it is safe to run synchronously.
  */
@@ -37,6 +37,12 @@ class RuleOverlapAnalyzer
                 $b = $rules[$j];
 
                 if (!$this->classesOverlap($a, $b)) {
+                    continue;
+                }
+                if (!$this->valuesOverlap($a->locales, $b->locales)
+                    || !$this->valuesOverlap($a->filters['types'] ?? [], $b->filters['types'] ?? [])
+                    || !$this->valuesOverlap($a->filters['extensions'] ?? [], $b->filters['extensions'] ?? [])
+                    || !$this->sizeRangesOverlap($a, $b)) {
                     continue;
                 }
 
@@ -96,5 +102,21 @@ class RuleOverlapAnalyzer
         $intersection = array_values(array_intersect($a->fields, $b->fields));
 
         return $intersection === [] ? null : $intersection;
+    }
+
+    /** @param list<string> $a @param list<string> $b */
+    private function valuesOverlap(array $a, array $b): bool
+    {
+        return $a === [] || $b === [] || array_intersect($a, $b) !== [];
+    }
+
+    private function sizeRangesOverlap(Rule $a, Rule $b): bool
+    {
+        $aMin = (int) ($a->filters['min_size'] ?? 0);
+        $bMin = (int) ($b->filters['min_size'] ?? 0);
+        $aMax = isset($a->filters['max_size']) ? (int) $a->filters['max_size'] : PHP_INT_MAX;
+        $bMax = isset($b->filters['max_size']) ? (int) $b->filters['max_size'] : PHP_INT_MAX;
+
+        return $aMin <= $bMax && $bMin <= $aMax;
     }
 }

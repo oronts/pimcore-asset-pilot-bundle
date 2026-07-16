@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Cache\CacheItemInterface;
 use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\InMemoryStore;
 
@@ -37,6 +38,24 @@ class LoopGuardTest extends TestCase
 
         $jobA->releaseObject(42);
         self::assertTrue($jobB->acquireObject(42), 'the lock is free once the owner releases it');
+    }
+
+    #[Test]
+    public function operationRunItemLocksAreExclusiveAndOwnerReleased(): void
+    {
+        $store = new InMemoryStore();
+        $jobA = new LoopGuard($this->cache, new LockFactory($store));
+        $jobB = new LoopGuard($this->cache, new LockFactory($store));
+
+        self::assertTrue($jobA->acquireOperationRunItem('run-1', 'object:42'));
+        self::assertFalse($jobB->acquireOperationRunItem('run-1', 'object:42'));
+        self::assertFalse($jobB->acquireOperationRunItem('run-2', 'object:42'));
+        self::assertFalse($jobB->acquireObject(42));
+        self::assertTrue($jobB->acquireOperationRunItem('run-1', 'object:43'));
+
+        $jobA->refreshOperationRunItem('run-1', 'object:42');
+        $jobA->releaseOperationRunItem('run-1', 'object:42');
+        self::assertTrue($jobB->acquireOperationRunItem('run-1', 'object:42'));
     }
 
     #[Test]
@@ -118,6 +137,17 @@ class LoopGuardTest extends TestCase
 
         $guard = new LoopGuard($this->cache, new LockFactory(new InMemoryStore()), 90.1);
         $guard->markAssetProcessing(42);
+    }
+
+    #[Test]
+    public function dirtyObjectMarkerCanBeConsumedExactlyOnce(): void
+    {
+        $guard = new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()));
+
+        self::assertFalse($guard->consumeObjectDirty(42));
+        $guard->markObjectDirty(42);
+        self::assertTrue($guard->consumeObjectDirty(42));
+        self::assertFalse($guard->consumeObjectDirty(42));
     }
 
     #[Test]

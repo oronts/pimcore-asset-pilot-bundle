@@ -16,8 +16,8 @@ class PrometheusFormatterTest extends TestCase
     public function rendersCountersGaugesAndDurationAggregates(): void
     {
         $output = (new PrometheusFormatter())->format([
-            'operations' => ['completed' => 120, 'failed' => 4, 'action_failed' => 6],
-            'total' => 130,
+            'operations' => ['completed' => 120, 'failed' => 4],
+            'total' => 124,
             'moveTotal' => 124,
             'failureRate' => 0.0323,
             'durationMs' => ['count' => 120, 'avgMs' => 45.5, 'minMs' => 10, 'maxMs' => 800],
@@ -26,8 +26,7 @@ class PrometheusFormatterTest extends TestCase
         self::assertStringContainsString('# TYPE asset_pilot_operations gauge', $output);
         self::assertStringContainsString('asset_pilot_operations{status="completed"} 120', $output);
         self::assertStringContainsString('asset_pilot_operations{status="failed"} 4', $output);
-        self::assertStringContainsString('asset_pilot_operations{status="action_failed"} 6', $output);
-        self::assertStringContainsString('asset_pilot_operations_count 130', $output);
+        self::assertStringContainsString('asset_pilot_operations_count 124', $output);
         self::assertStringContainsString('asset_pilot_move_operations_count 124', $output);
         self::assertStringContainsString('asset_pilot_failure_rate 0.0323', $output);
         self::assertStringContainsString('asset_pilot_operation_duration_ms{aggregate="avg"} 45.5', $output);

@@ -32,19 +32,18 @@ class MetricsService
         $operations = [];
         $total = 0;
         foreach ($this->auditLogger->getStats() as $key => $value) {
-            // getStats() also carries a 'by_class' map; keep only the per-status integer counters.
-            if (!is_int($value)) {
+            if (!is_int($value) || OperationStatus::tryFrom((string) $key) === null) {
                 continue;
             }
             $operations[$key] = $value;
             $total += $value;
         }
 
-        $failed = $operations['failed'] ?? 0;
-        // action_failed is a post-move side-effect outcome, not a move attempt: keep it visible in
-        // operations/total but out of the move failure-rate denominator so a failing action never
-        // distorts the rate of failed moves.
-        $moveTotal = $total - ($operations[OperationStatus::ActionFailed->value] ?? 0);
+        $failed = $operations[OperationStatus::Failed->value] ?? 0;
+        $moveTotal = $total
+            - ($operations[OperationStatus::Pending->value] ?? 0)
+            - ($operations[OperationStatus::InProgress->value] ?? 0)
+            - ($operations[OperationStatus::RecoveryRequired->value] ?? 0);
 
         return [
             'operations' => $operations,

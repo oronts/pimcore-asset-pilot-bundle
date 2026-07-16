@@ -6,10 +6,16 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Exception\NotPermittedException;
+use Oronts\AssetPilotBundle\Merge\ReferrerSnapshot;
+use Oronts\AssetPilotBundle\Merge\RepointPreflight;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
+use Pimcore\Model\Document;
+use Pimcore\Model\Element\AbstractElement;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -34,7 +40,44 @@ class DuplicateReferenceRepointer
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly Connection $connection,
+        protected readonly ElementAuthorization $authorization,
     ) {}
+
+    public function preflight(int $fromAssetId, int $toAssetId, string $permission): RepointPreflight
+    {
+        $from = $this->loadAsset($fromAssetId);
+        $to = $this->loadAsset($toAssetId);
+        if ($from === null || $to === null) {
+            return new RepointPreflight($fromAssetId, $toAssetId, [], ['the source or canonical asset no longer exists']);
+        }
+
+        $referrers = [];
+        $blocked = [];
+        foreach ($this->collectReferrers($fromAssetId) as $row) {
+            $type = (string) ($row['type'] ?? '');
+            $id = (int) ($row['id'] ?? 0);
+            if ($type === '' || $id <= 0) {
+                $blocked[] = 'an invalid reverse dependency was reported';
+                continue;
+            }
+
+            $element = $this->loadReferrer($type, $id);
+            if ($element === null) {
+                $blocked[] = sprintf('%s %d no longer exists', $type, $id);
+                continue;
+            }
+            if (!$this->referrerAllows($element, $permission)) {
+                throw new NotPermittedException(sprintf('Not permitted to merge a copy referenced by %s %d.', $type, $id));
+            }
+
+            $referrers[] = new ReferrerSnapshot($type, $id, $this->referrerFingerprint($type, $id, $element));
+            if ($type !== 'object') {
+                $blocked[] = sprintf('%s %d references the copy and is not rewritten in this version', $type, $id);
+            }
+        }
+
+        return new RepointPreflight($fromAssetId, $toAssetId, $referrers, $blocked);
+    }
 
     public function repoint(int $fromAssetId, int $toAssetId, bool $dryRun = false): RepointReport
     {
@@ -124,55 +167,66 @@ class DuplicateReferenceRepointer
      */
     private function repointObject(int $objectId, Asset $from, Asset $to, bool $dryRun): array
     {
-        $object = $this->loadObject($objectId);
-        if ($object === null) {
-            // Stale reverse-dependency row: the object is gone, nothing to rewrite.
-            return [false, null];
+        if (!$dryRun && !$this->loopGuard->acquireObject($objectId)) {
+            return [false, sprintf('object %d is being processed by another job', $objectId)];
         }
 
-        $fromId = (int) $from->getId();
-        $changed = false;
-
-        foreach ($this->relationFieldDefs($object) as [$name, $type]) {
-            [$fieldChanged, $newValue] = $this->replaceAssetReference($type, $this->fieldValue($object, $name), $fromId, $to);
-            if ($fieldChanged) {
-                $this->setFieldValue($object, $name, $newValue);
-                $changed = true;
+        try {
+            $object = $this->loadObject($objectId);
+            if ($object === null) {
+                return [false, null];
             }
-        }
-
-        $fromPath = $from->getRealFullPath();
-        $toPath = $to->getRealFullPath();
-        $toId = (int) $to->getId();
-        foreach ($this->wysiwygFieldNames($object) as $name) {
-            [$fieldChanged, $newHtml] = $this->replacePathInHtml((string) $this->fieldValue($object, $name), $fromPath, $toPath, $fromId, $toId);
-            if ($fieldChanged) {
-                $this->setFieldValue($object, $name, $newHtml);
-                $changed = true;
+            $permission = $dryRun ? 'view' : 'publish';
+            if (!$this->objectAllows($object, $permission)) {
+                return [false, sprintf('object %d is outside the actor workspace', $objectId)];
             }
-        }
 
-        if ($dryRun) {
-            // Preview: nothing is saved, so Pimcore cannot recompute dependencies and we cannot confirm
-            // a brick/block/fieldcollection or advanced relation does not also reference the copy.
-            // Report only what would change; whether the copy is disposable is decided on --apply.
+            $fromId = (int) $from->getId();
+            $changed = false;
+
+            foreach ($this->relationFieldDefs($object) as [$name, $type]) {
+                [$fieldChanged, $newValue] = $this->replaceAssetReference($type, $this->fieldValue($object, $name), $fromId, $to);
+                if ($fieldChanged) {
+                    $this->setFieldValue($object, $name, $newValue);
+                    $changed = true;
+                }
+            }
+
+            $fromPath = $from->getRealFullPath();
+            $toPath = $to->getRealFullPath();
+            $toId = (int) $to->getId();
+            foreach ($this->wysiwygFieldNames($object) as $name) {
+                [$fieldChanged, $newHtml] = $this->replacePathInHtml((string) $this->fieldValue($object, $name), $fromPath, $toPath, $fromId, $toId);
+                if ($fieldChanged) {
+                    $this->setFieldValue($object, $name, $newHtml);
+                    $changed = true;
+                }
+            }
+
+            if ($dryRun) {
+                return [$changed, null];
+            }
+
+            if ($changed) {
+                $this->loopGuard->refreshObject($objectId);
+                $this->loopGuard->markObjectProcessing($objectId);
+                try {
+                    $this->saveObject($object);
+                } finally {
+                    $this->loopGuard->unmarkObjectProcessing($objectId);
+                }
+            }
+
+            if ($this->objectStillReferences($objectId, $fromId)) {
+                return [$changed, sprintf('object %d still references the copy after repoint (nested/advanced field not rewritten in this version)', $objectId)];
+            }
+
             return [$changed, null];
-        }
-
-        if ($changed) {
-            $this->loopGuard->markObjectProcessing($objectId);
-            try {
-                $this->saveObject($object);
-            } finally {
-                $this->loopGuard->unmarkObjectProcessing($objectId);
+        } finally {
+            if (!$dryRun) {
+                $this->loopGuard->releaseObject($objectId);
             }
         }
-
-        if ($this->objectStillReferences($objectId, $fromId)) {
-            return [$changed, sprintf('object %d still references the copy after repoint (nested/advanced field not rewritten in this version)', $objectId)];
-        }
-
-        return [$changed, null];
     }
 
     /**
@@ -270,7 +324,7 @@ class DuplicateReferenceRepointer
 
     protected function loadAsset(int $id): ?Asset
     {
-        return Asset::getById($id);
+        return Asset::getById($id, ['force' => true]);
     }
 
     /**
@@ -288,7 +342,48 @@ class DuplicateReferenceRepointer
 
     protected function loadObject(int $id): ?Concrete
     {
-        return Concrete::getById($id);
+        return Concrete::getById($id, ['force' => true]);
+    }
+
+    protected function loadReferrer(string $type, int $id): ?AbstractElement
+    {
+        return match ($type) {
+            'asset' => Asset::getById($id, ['force' => true]),
+            'document' => Document::getById($id, ['force' => true]),
+            'object' => $this->loadObject($id),
+            default => null,
+        };
+    }
+
+    protected function referrerAllows(AbstractElement $element, string $permission): bool
+    {
+        return $element instanceof Concrete
+            ? $this->objectAllows($element, $permission)
+            : $this->authorization->isAllowed($element, $permission);
+    }
+
+    protected function referrerFingerprint(string $type, int $id, AbstractElement $element): string
+    {
+        return hash('sha256', json_encode([
+            'class' => $element::class,
+            'dependencies' => $this->dependencyTargets($type, $id),
+            'modifiedAt' => $element->getModificationDate(),
+            'path' => $element->getRealFullPath(),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    }
+
+    /** @return list<array{targettype: mixed, targetid: mixed}> */
+    protected function dependencyTargets(string $type, int $id): array
+    {
+        return $this->connection->fetchAllAssociative(
+            'SELECT targettype, targetid FROM ' . PimcoreSchema::TABLE_DEPENDENCIES . ' WHERE sourcetype = ? AND sourceid = ? ORDER BY targettype ASC, targetid ASC',
+            [$type, $id],
+        );
+    }
+
+    protected function objectAllows(Concrete $object, string $permission): bool
+    {
+        return $this->authorization->isAllowed($object, $permission);
     }
 
     /**

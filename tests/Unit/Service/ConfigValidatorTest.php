@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Action\RuleActionResolver;
+use Oronts\AssetPilotBundle\Action\SetPropertyAction;
 use Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
 use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
+use Oronts\AssetPilotBundle\Service\AssetPropertyService;
 use Oronts\AssetPilotBundle\Service\ConfigValidator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -48,6 +51,8 @@ class ConfigValidatorTest extends TestCase
         int $priority = 10,
         bool $enabled = true,
         array $filters = [],
+        array $actions = [],
+        array $locales = [],
     ): Rule {
         return new Rule(
             name: $name,
@@ -60,6 +65,8 @@ class ConfigValidatorTest extends TestCase
             priority: $priority,
             enabled: $enabled,
             filters: $filters,
+            actions: $actions,
+            locales: $locales,
         );
     }
 
@@ -97,6 +104,22 @@ class ConfigValidatorTest extends TestCase
         $condResult = array_values(array_filter($results, static fn (ValidationResult $r) => $r->check === 'condition_syntax'))[0];
 
         self::assertSame('pass', $condResult->status, 'conditions using the bundle\'s own functions must validate');
+    }
+
+    #[Test]
+    public function validateRejectsInvalidLiteralPathRegex(): void
+    {
+        $results = $this->validator->validate([
+            $this->createRule(condition: 'path_matches(asset, "#[invalid#")'),
+        ]);
+
+        $condition = array_values(array_filter(
+            $results,
+            static fn (ValidationResult $result): bool => $result->check === 'condition_syntax',
+        ))[0];
+
+        self::assertSame('fail', $condition->status);
+        self::assertStringContainsString('Invalid regular expression', $condition->message);
     }
 
     #[Test]
@@ -371,5 +394,69 @@ class ConfigValidatorTest extends TestCase
         // Should contain results for both rules (and possibly "rule_1, rule_2" for duplicate priority)
         self::assertContains('rule_1', $ruleNames);
         self::assertContains('rule_2', $ruleNames);
+    }
+
+    #[Test]
+    public function validateDuplicateRuleNamesFails(): void
+    {
+        $results = $this->validator->validate([$this->createRule(name: 'same'), $this->createRule(name: 'same', priority: 20)]);
+        $result = array_values(array_filter($results, static fn (ValidationResult $item): bool => $item->check === 'unique_name'))[0];
+
+        self::assertSame('fail', $result->status);
+    }
+
+    #[Test]
+    public function validateSetPropertyActionSchema(): void
+    {
+        $action = new SetPropertyAction($this->createMock(AssetPropertyService::class));
+        $validator = new ConfigValidator(
+            $this->container,
+            new ExpressionConditionEvaluator(new NullLogger()),
+            new TemplatePathResolver(new NullLogger()),
+            new RuleActionResolver([$action]),
+        );
+        $results = $validator->validate([$this->createRule(actions: [[
+            'type' => 'set_property',
+            'property_type' => 'unsupported',
+        ]])]);
+        $result = array_values(array_filter($results, static fn (ValidationResult $item): bool => $item->check === 'actions'))[0];
+
+        self::assertSame('fail', $result->status);
+        self::assertStringContainsString('requires a non-empty "name"', $result->message);
+        self::assertStringContainsString('property_type must be one of', $result->message);
+        self::assertStringContainsString('requires either "value"', $result->message);
+    }
+
+    #[Test]
+    public function validateUnknownActionTypeFails(): void
+    {
+        $validator = new ConfigValidator(
+            $this->container,
+            new ExpressionConditionEvaluator(new NullLogger()),
+            new TemplatePathResolver(new NullLogger()),
+            new RuleActionResolver([]),
+        );
+        $results = $validator->validate([$this->createRule(actions: [['type' => 'missing']])]);
+        $result = array_values(array_filter($results, static fn (ValidationResult $item): bool => $item->check === 'actions'))[0];
+
+        self::assertSame('fail', $result->status);
+        self::assertStringContainsString('unknown type', $result->message);
+    }
+
+    #[Test]
+    public function validateUnknownRuleLocaleFails(): void
+    {
+        $validator = new class ($this->container, new ExpressionConditionEvaluator(new NullLogger()), new TemplatePathResolver(new NullLogger())) extends ConfigValidator {
+            protected function validLocales(): array
+            {
+                return ['en', 'de'];
+            }
+        };
+
+        $results = $validator->validate([$this->createRule(locales: ['de', 'xx'])]);
+        $result = array_values(array_filter($results, static fn (ValidationResult $item): bool => $item->check === 'locales'))[0];
+
+        self::assertSame('fail', $result->status);
+        self::assertStringContainsString('xx', $result->message);
     }
 }

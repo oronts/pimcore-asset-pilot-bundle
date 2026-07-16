@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\IntegrityStatus;
 use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -22,6 +23,7 @@ class AssetIntegrityService
     public function __construct(
         protected readonly CompositeIntegrityChecker $checker,
         protected readonly LoggerInterface $logger,
+        protected readonly ElementAuthorization $authorization,
         protected readonly bool $enabled = true,
         protected readonly array $skipExtensions = ['svg'],
     ) {}
@@ -33,13 +35,13 @@ class AssetIntegrityService
 
     /**
      * @param array{type?: string, folder?: string, extension?: string} $filters
-     * @return array{items: list<array{id: int, path: string, checker: string, reason: ?string}>, scanned: int, broken: int, page: int, limit: int}
+     * @return array{items: list<array{id: int, path: string, checker: string, reason: ?string}>, scanned: int, broken: int, page: int, limit: int, hasNext: bool}
      */
     public function findBroken(array $filters = [], int $page = 1, int $limit = 50): array
     {
         $page = max(1, $page);
         $limit = max(1, $limit);
-        $empty = ['items' => [], 'scanned' => 0, 'broken' => 0, 'page' => $page, 'limit' => $limit];
+        $empty = ['items' => [], 'scanned' => 0, 'broken' => 0, 'page' => $page, 'limit' => $limit, 'hasNext' => false];
 
         if (!$this->enabled) {
             return $empty;
@@ -47,9 +49,14 @@ class AssetIntegrityService
 
         $items = [];
         $scanned = 0;
-        foreach ($this->listAssetIds($filters, ($page - 1) * $limit, $limit) as $id) {
+        $ids = $this->listAssetIds($filters, ($page - 1) * $limit, $limit + 1);
+        $hasNext = count($ids) > $limit;
+        foreach (array_slice($ids, 0, $limit) as $id) {
             $asset = $this->loadAsset((int) $id);
             if ($asset === null || $asset instanceof Asset\Folder) {
+                continue;
+            }
+            if (!$this->authorization->isAllowed($asset, 'view')) {
                 continue;
             }
             $extension = strtolower(pathinfo((string) $asset->getFilename(), PATHINFO_EXTENSION));
@@ -64,7 +71,14 @@ class AssetIntegrityService
             }
         }
 
-        return ['items' => $items, 'scanned' => $scanned, 'broken' => count($items), 'page' => $page, 'limit' => $limit];
+        return [
+            'items' => $items,
+            'scanned' => $scanned,
+            'broken' => count($items),
+            'page' => $page,
+            'limit' => $limit,
+            'hasNext' => $hasNext,
+        ];
     }
 
     /**
@@ -72,7 +86,7 @@ class AssetIntegrityService
      * gate it — the caller named them). Folders and missing assets are skipped.
      *
      * @param int[] $ids
-     * @return array{items: list<array{id: int, path: string, checker: string, reason: ?string}>, scanned: int, broken: int, page: int, limit: int}
+     * @return array{items: list<array{id: int, path: string, checker: string, reason: ?string}>, scanned: int, broken: int, page: int, limit: int, hasNext: bool}
      */
     public function checkAssets(array $ids): array
     {
@@ -83,6 +97,9 @@ class AssetIntegrityService
             if ($asset === null || $asset instanceof Asset\Folder) {
                 continue;
             }
+            if (!$this->authorization->isAllowed($asset, 'view')) {
+                continue;
+            }
             ++$scanned;
             $item = $this->brokenItem((int) $id, $asset);
             if ($item !== null) {
@@ -90,7 +107,7 @@ class AssetIntegrityService
             }
         }
 
-        return ['items' => $items, 'scanned' => $scanned, 'broken' => count($items), 'page' => 1, 'limit' => count($ids)];
+        return ['items' => $items, 'scanned' => $scanned, 'broken' => count($items), 'page' => 1, 'limit' => count($ids), 'hasNext' => false];
     }
 
     /**
@@ -112,7 +129,7 @@ class AssetIntegrityService
      */
     protected function listAssetIds(array $filters, int $offset, int $limit): array
     {
-        [$condition, $params] = AssetFilter::condition($filters);
+        [$condition, $params] = $this->listingCondition($filters);
 
         $listing = new Asset\Listing();
         if ($condition !== '') {
@@ -122,6 +139,12 @@ class AssetIntegrityService
         $listing->setLimit($limit);
 
         return array_map('intval', $listing->loadIdList());
+    }
+
+    /** @return array{string, list<string>} */
+    protected function listingCondition(array $filters): array
+    {
+        return AssetFilter::condition($filters, excludeFolders: true);
     }
 
     protected function loadAsset(int $id): ?Asset

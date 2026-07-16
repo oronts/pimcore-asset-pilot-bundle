@@ -10,7 +10,7 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 
-readonly class AlwaysMoveStrategy implements ConflictStrategyInterface
+readonly class AlwaysMoveStrategy implements SideEffectFreeConflictStrategyInterface
 {
     public function __construct(
         private LoggerInterface $logger,

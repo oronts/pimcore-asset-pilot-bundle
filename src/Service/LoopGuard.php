@@ -75,6 +75,21 @@ class LoopGuard
         $this->refresh('asset_pilot_lock_asset_' . $assetId);
     }
 
+    public function acquireReferrer(string $type, int $id): bool
+    {
+        return $this->acquire($this->referrerResource($type, $id));
+    }
+
+    public function releaseReferrer(string $type, int $id): void
+    {
+        $this->release($this->referrerResource($type, $id));
+    }
+
+    public function refreshReferrer(string $type, int $id): void
+    {
+        $this->refresh($this->referrerResource($type, $id));
+    }
+
     public function acquireTarget(string $targetPath): bool
     {
         return $this->acquire($this->targetResource($targetPath));
@@ -88,6 +103,21 @@ class LoopGuard
     public function refreshTarget(string $targetPath): void
     {
         $this->refresh($this->targetResource($targetPath));
+    }
+
+    public function acquireOperationRunItem(string $runId, string $itemKey): bool
+    {
+        return $this->acquire($this->operationRunItemResource($runId, $itemKey));
+    }
+
+    public function releaseOperationRunItem(string $runId, string $itemKey): void
+    {
+        $this->release($this->operationRunItemResource($runId, $itemKey));
+    }
+
+    public function refreshOperationRunItem(string $runId, string $itemKey): void
+    {
+        $this->refresh($this->operationRunItemResource($runId, $itemKey));
     }
 
     private function acquire(string $resource): bool
@@ -143,6 +173,28 @@ class LoopGuard
         return 'asset_pilot_lock_target_' . hash('sha256', $normalizedPath);
     }
 
+    private function referrerResource(string $type, int $id): string
+    {
+        return match ($type) {
+            'asset' => 'asset_pilot_lock_asset_' . $id,
+            'object' => 'asset_pilot_lock_object_' . $id,
+            'document' => 'asset_pilot_lock_document_' . $id,
+            default => 'asset_pilot_lock_referrer_' . hash('sha256', $type . ':' . $id),
+        };
+    }
+
+    private function operationRunItemResource(string $runId, string $itemKey): string
+    {
+        [$type, $rawId] = array_pad(explode(':', $itemKey, 2), 2, null);
+        $id = is_string($rawId) && ctype_digit($rawId) ? (int) $rawId : 0;
+
+        return match (true) {
+            $type === 'object' && $id > 0 => 'asset_pilot_lock_object_' . $id,
+            $type === 'asset' && $id > 0 => 'asset_pilot_lock_asset_' . $id,
+            default => 'asset_pilot_lock_operation_run_item_' . hash('sha256', $runId . ':' . $itemKey),
+        };
+    }
+
     public function isProcessingAsset(int $assetId): bool
     {
         return $this->cache->hasItem($this->assetKey($assetId));
@@ -175,6 +227,34 @@ class LoopGuard
     public function unmarkObjectProcessing(int $objectId): void
     {
         $this->cache->deleteItem($this->objectKey($objectId));
+    }
+
+    public function markObjectDirty(int $objectId): void
+    {
+        $item = $this->cache->getItem($this->dirtyObjectKey($objectId));
+        $item->set(true)->expiresAfter((int) ceil($this->lockTtl));
+        $this->cache->save($item);
+    }
+
+    public function consumeObjectDirty(int $objectId): bool
+    {
+        if (!$this->isObjectDirty($objectId)) {
+            return false;
+        }
+
+        $this->clearObjectDirty($objectId);
+
+        return true;
+    }
+
+    public function isObjectDirty(int $objectId): bool
+    {
+        return $this->cache->hasItem($this->dirtyObjectKey($objectId));
+    }
+
+    public function clearObjectDirty(int $objectId): void
+    {
+        $this->cache->deleteItem($this->dirtyObjectKey($objectId));
     }
 
     /**
@@ -221,6 +301,11 @@ class LoopGuard
     private function objectKey(int $id): string
     {
         return 'asset_pilot.loop_guard.object.' . $id;
+    }
+
+    private function dirtyObjectKey(int $id): string
+    {
+        return 'asset_pilot.dirty_object.' . $id;
     }
 
     private function dispatchedKey(int $id): string

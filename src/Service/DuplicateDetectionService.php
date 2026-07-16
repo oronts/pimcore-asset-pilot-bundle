@@ -7,10 +7,15 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
+use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
+use Pimcore\Tool\Storage;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -25,8 +30,6 @@ use Psr\Log\LoggerInterface;
  */
 class DuplicateDetectionService
 {
-    public const string TABLE = 'asset_pilot_checksum';
-
     /** Assets indexed per page during a scan — bounds the work and memory of one batch. */
     private const int SCAN_BATCH = 200;
 
@@ -36,6 +39,8 @@ class DuplicateDetectionService
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoggerInterface $logger,
+        protected readonly ElementAuthorization $authorization,
+        protected readonly AssetWorkspaceQueryScope $workspaceScope,
     ) {}
 
     /**
@@ -68,6 +73,10 @@ class DuplicateDetectionService
                     ++$skipped;
                     continue;
                 }
+                if (!$this->authorization->isAllowed($asset, 'view')) {
+                    ++$skipped;
+                    continue;
+                }
                 $checksum = $this->checksumOf($asset);
                 if ($checksum === '') {
                     // No hash available (e.g. the storage adapter could not provide one) — never group
@@ -94,31 +103,33 @@ class DuplicateDetectionService
      *
      * @return list<DuplicateGroup> content hashes shared by at least $minCopies indexed assets, paged
      */
-    public function findDuplicates(int $page = 1, int $limit = 50, int $minCopies = 2, ?string $type = null): array
+    public function findDuplicates(int $page = 1, int $limit = 50, int $minCopies = 2, ?string $type = null, array $filters = []): array
     {
         $page = max(1, $page);
         $limit = max(1, $limit);
+        $filters = $this->normalizeFilters($filters, $type);
 
         $groups = [];
-        foreach ($this->fetchDuplicateRows(($page - 1) * $limit, $limit, $minCopies, $type) as $row) {
+        foreach ($this->fetchDuplicateRows(($page - 1) * $limit, $limit, $minCopies, $type, $filters) as $row) {
             $checksum = (string) $row['checksum'];
             $groups[] = new DuplicateGroup(
                 $checksum,
                 (int) $row['file_size'],
                 (int) $row['cnt'],
-                $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP, $type),
+                $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP, $type, $filters),
             );
         }
 
         return $groups;
     }
 
-    public function countDuplicateGroups(int $minCopies = 2, ?string $type = null): int
+    public function countDuplicateGroups(int $minCopies = 2, ?string $type = null, array $filters = []): int
     {
+        $filters = $this->normalizeFilters($filters, $type);
         try {
             // INNER JOIN assets so a deleted asset's stale index row is not counted (no ghost groups).
             // Same filters as fetchDuplicateRows, so the count matches the paged list.
-            $inner = $this->groupQuery($minCopies, $type)->select('c.checksum');
+            $inner = $this->groupQuery($minCopies, $type, $filters)->select('c.checksum');
 
             return (int) $this->connection->fetchOne(
                 sprintf('SELECT COUNT(*) FROM (%s) AS grouped', $inner->getSQL()),
@@ -144,14 +155,14 @@ class DuplicateDetectionService
         }
 
         try {
-            $ids = $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP);
+            $ids = $this->visibleAssetIds($this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP));
             if (count($ids) < 2) {
                 return null;
             }
 
             $fileSize = (int) $this->connection->createQueryBuilder()
                 ->select('MIN(c.file_size)')
-                ->from(self::TABLE, 'c')
+                ->from(Installer::TABLE_CHECKSUM, 'c')
                 ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
                 ->where('c.checksum = :checksum')
                 ->setParameter('checksum', $checksum)
@@ -172,6 +183,10 @@ class DuplicateDetectionService
      */
     public function groupForAsset(int $assetId): ?DuplicateGroup
     {
+        if (!$this->isAssetVisible($assetId)) {
+            return null;
+        }
+
         $checksum = $this->indexedChecksumFor($assetId);
 
         return $checksum === null ? null : $this->groupForChecksum($checksum);
@@ -182,7 +197,7 @@ class DuplicateDetectionService
         try {
             $checksum = $this->connection->createQueryBuilder()
                 ->select('checksum')
-                ->from(self::TABLE)
+                ->from(Installer::TABLE_CHECKSUM)
                 ->where('asset_id = :id')
                 ->setParameter('id', $assetId)
                 ->executeQuery()
@@ -226,29 +241,33 @@ class DuplicateDetectionService
         return $asset->getChecksum();
     }
 
-    protected function fileSizeOf(Asset $asset): int
+    protected function fileSizeOf(Asset $asset): ?int
     {
-        return $asset->getFileSize();
+        try {
+            return Storage::get('asset')->fileSize($asset->getRealFullPath());
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
-    protected function upsert(int $assetId, string $checksum, int $fileSize): void
+    protected function upsert(int $assetId, string $checksum, ?int $fileSize): void
     {
         $this->connection->executeStatement(
             sprintf(
-                'INSERT INTO %s (asset_id, checksum, file_size, indexed_at) VALUES (?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE checksum = VALUES(checksum), file_size = VALUES(file_size), indexed_at = VALUES(indexed_at)',
-                self::TABLE,
+                'INSERT INTO %s (asset_id, checksum, file_size, size_known, indexed_at) VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE checksum = VALUES(checksum), file_size = VALUES(file_size), size_known = VALUES(size_known), indexed_at = VALUES(indexed_at)',
+                Installer::TABLE_CHECKSUM,
             ),
-            [$assetId, $checksum, $fileSize, (new \DateTimeImmutable())->format('Y-m-d H:i:s')],
+            [$assetId, $checksum, $fileSize ?? 0, $fileSize !== null ? 1 : 0, (new \DateTimeImmutable())->format('Y-m-d H:i:s')],
         );
     }
 
     /**
      * @return list<array{checksum: string, file_size: int|string, cnt: int|string}>
      */
-    protected function fetchDuplicateRows(int $offset, int $limit, int $minCopies = 2, ?string $type = null): array
+    protected function fetchDuplicateRows(int $offset, int $limit, int $minCopies = 2, ?string $type = null, array $filters = []): array
     {
-        return $this->groupQuery($minCopies, $type)
+        return $this->groupQuery($minCopies, $type, $filters)
             ->select('c.checksum', 'MIN(c.file_size) AS file_size', 'COUNT(*) AS cnt')
             ->orderBy('cnt', 'DESC')
             ->addOrderBy('c.checksum', 'ASC')
@@ -263,18 +282,17 @@ class DuplicateDetectionService
      * stale row never forms a ghost group), with the min-copies and optional type filters applied.
      * Shared by the paged list and the count so the two always agree.
      */
-    protected function groupQuery(int $minCopies, ?string $type): QueryBuilder
+    protected function groupQuery(int $minCopies, ?string $type, array $filters = []): QueryBuilder
     {
         $qb = $this->connection->createQueryBuilder()
-            ->from(self::TABLE, 'c')
+            ->from(Installer::TABLE_CHECKSUM, 'c')
             ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
             ->groupBy('c.checksum')
             ->having('COUNT(*) >= :minCopies')
             ->setParameter('minCopies', max(2, $minCopies), ParameterType::INTEGER);
 
-        if ($type !== null && $type !== '') {
-            $qb->andWhere('a.type = :type')->setParameter('type', $type);
-        }
+        $this->applyFilters($qb, $this->normalizeFilters($filters, $type));
+        $this->workspaceScope->applyView($qb, 'a', 'duplicateGroup');
 
         return $qb;
     }
@@ -285,21 +303,59 @@ class DuplicateDetectionService
      *
      * @return list<int>
      */
-    protected function assetIdsForChecksum(string $checksum, int $cap, ?string $type = null): array
+    protected function assetIdsForChecksum(string $checksum, int $cap, ?string $type = null, array $filters = []): array
     {
         $qb = $this->connection->createQueryBuilder()
             ->select('c.asset_id')
-            ->from(self::TABLE, 'c')
+            ->from(Installer::TABLE_CHECKSUM, 'c')
             ->innerJoin('c', PimcoreSchema::TABLE_ASSETS, 'a', 'a.id = c.asset_id')
             ->where('c.checksum = :checksum')
             ->setParameter('checksum', $checksum)
             ->orderBy('c.asset_id', 'ASC')
             ->setMaxResults($cap);
 
-        if ($type !== null && $type !== '') {
-            $qb->andWhere('a.type = :type')->setParameter('type', $type);
-        }
+        $this->applyFilters($qb, $this->normalizeFilters($filters, $type));
+        $this->workspaceScope->applyView($qb, 'a', 'duplicateAssets');
 
         return array_map('intval', $qb->executeQuery()->fetchFirstColumn());
+    }
+
+    /** @param array{type?: string, folder?: string, extension?: string} $filters */
+    private function normalizeFilters(array $filters, ?string $type): array
+    {
+        if ($type !== null && $type !== '') {
+            $filters['type'] = $type;
+        }
+
+        return $filters;
+    }
+
+    /** @param array{type?: string, folder?: string, extension?: string} $filters */
+    private function applyFilters(QueryBuilder $qb, array $filters): void
+    {
+        if (!empty($filters['folder'])) {
+            $folder = Like::escape(rtrim((string) $filters['folder'], '/') . '/') . '%';
+            $qb->andWhere('a.path LIKE :folderPath')->setParameter('folderPath', $folder);
+        }
+        if (!empty($filters['type'])) {
+            $qb->andWhere('a.type = :type')->setParameter('type', (string) $filters['type']);
+        }
+        if (!empty($filters['extension'])) {
+            $extension = '%.' . Like::escape(ltrim((string) $filters['extension'], '.'));
+            $qb->andWhere('a.filename LIKE :extension')->setParameter('extension', $extension);
+        }
+    }
+
+    /** @param list<int> $ids @return list<int> */
+    private function visibleAssetIds(array $ids): array
+    {
+        return array_values(array_filter($ids, fn (int $id): bool => $this->isAssetVisible($id)));
+    }
+
+    protected function isAssetVisible(int $assetId): bool
+    {
+        $asset = $this->loadAsset($assetId);
+
+        return $asset !== null && $this->authorization->isAllowed($asset, 'view');
     }
 }

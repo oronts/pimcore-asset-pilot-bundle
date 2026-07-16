@@ -9,8 +9,13 @@ use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\RevertFailure;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\RevertException;
+use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Model\OperationHandle;
+use Oronts\AssetPilotBundle\Model\OperationIntent;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OperationJournalInterface;
 use Oronts\AssetPilotBundle\Service\OperationReverter;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -97,12 +102,76 @@ class OperationReverterTest extends TestCase
         self::assertSame([true], $reverted);
     }
 
-    /**
-     * The revert save re-triggers pimcore.asset.postUpdate -> AssetUploadListener -> organize, which
-     * would move the asset straight back. The guard must mark processing before the save, mark
-     * recently-moved before releasing the processing guard (so the listener is never unguarded), and
-     * always release the processing guard. (P0-3, P2-21 — preserved through the controller->service move.)
-     */
+    #[Test]
+    public function observerFailureDoesNotTurnACompletedRevertIntoAnExecutionFailure(): void
+    {
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::REVERTED, static fn (): never => throw new \RuntimeException('observer unavailable'));
+        $logged = [];
+
+        $result = $this->reverter($this->completedEntry(), $this->asset('/organized/a.png', allowed: true), $dispatcher, $logged)->revertById(1);
+
+        self::assertSame(7, $result->assetId);
+        self::assertSame('/source/a.png', $result->toPath);
+        self::assertSame('The asset was reverted, but an observer did not complete.', $result->warning);
+        self::assertSame(OperationStatus::CompletedWithObserverError, $logged[0]->status);
+        self::assertSame('Observer delivery failed.', $logged[0]->errorMessage);
+    }
+
+    #[Test]
+    public function revertCompletesTheSameDurableAuditEntryThatWasStartedBeforeSave(): void
+    {
+        $journal = $this->createMock(OperationJournalInterface::class);
+        $journal->expects(self::once())
+            ->method('begin')
+            ->with(self::callback(static fn (OperationIntent $intent): bool => $intent->parentOperationId === 1))
+            ->willReturnCallback(static fn (OperationIntent $intent): OperationHandle => new OperationHandle(91, $intent));
+        $journal->expects(self::once())
+            ->method('complete')
+            ->with(self::callback(static fn (OperationHandle $operation): bool => $operation->operationId === 91), OperationStatus::Completed, null)
+            ->willReturn(true);
+
+        $result = $this->reverter(
+            $this->completedEntry(),
+            $this->asset('/organized/a.png', allowed: true),
+            journalOverride: $journal,
+        )->revertById(1);
+
+        self::assertSame('/source/a.png', $result->toPath);
+    }
+
+    #[Test]
+    public function failedSaveThatDidNotMoveTheAssetCompletesTheJournalAsFailed(): void
+    {
+        $logged = [];
+        $reason = $this->revertFailure($this->reverter(
+            $this->completedEntry(),
+            $this->asset('/organized/a.png', allowed: true),
+            loggedRef: $logged,
+            classification: OperationStatus::Failed,
+            saveError: new \RuntimeException('storage unavailable'),
+        ), 1);
+
+        self::assertSame(RevertFailure::ExecutionFailed, $reason);
+        self::assertSame(OperationStatus::Failed, $logged[0]->status);
+    }
+
+    #[Test]
+    public function uncertainPersistedStateIsMarkedForRecovery(): void
+    {
+        $logged = [];
+        $reason = $this->revertFailure($this->reverter(
+            $this->completedEntry(),
+            $this->asset('/organized/a.png', allowed: true),
+            loggedRef: $logged,
+            classification: OperationStatus::RecoveryRequired,
+            saveError: new \RuntimeException('storage result unknown'),
+        ), 1);
+
+        self::assertSame(RevertFailure::RecoveryRequired, $reason);
+        self::assertSame(OperationStatus::RecoveryRequired, $logged[0]->status);
+    }
+
     #[Test]
     public function saveRevertedGuardsTheSaveInTheCorrectOrder(): void
     {
@@ -125,7 +194,7 @@ class OperationReverterTest extends TestCase
             return $asset;
         });
 
-        $reverter = new class ($this->createMock(AuditLoggerInterface::class), $loopGuard, new EventDispatcher(), new NullLogger()) extends OperationReverter {
+        $reverter = new class ($this->createMock(AuditLoggerInterface::class), $this->createMock(OperationJournalInterface::class), $loopGuard, new EventDispatcher(), new NullLogger(), $this->authorization()) extends OperationReverter {
             public function exposeSaveReverted(Asset $asset, int $assetId): void
             {
                 $this->saveReverted($asset, $assetId);
@@ -173,28 +242,65 @@ class OperationReverterTest extends TestCase
      * @param array<string, mixed>|null  $entry
      * @param list<MoveOperation>|null    $loggedRef captures the logged revert operations by reference
      */
-    private function reverter(?array $entry, ?Asset $asset, ?EventDispatcher $dispatcher = null, ?array &$loggedRef = null): OperationReverter
-    {
-        $auditLogger = $this->createMock(AuditLoggerInterface::class);
-        $auditLogger->method('findById')->willReturn($entry);
-        $auditLogger->method('log')->willReturnCallback(static function (MoveOperation $op) use (&$loggedRef): void {
-            if ($loggedRef !== null) {
-                $loggedRef[] = $op;
-            }
-        });
+    private function reverter(
+        ?array $entry,
+        ?Asset $asset,
+        ?EventDispatcher $dispatcher = null,
+        ?array &$loggedRef = null,
+        ?AuditLoggerInterface $auditLoggerOverride = null,
+        ?OperationJournalInterface $journalOverride = null,
+        OperationStatus $classification = OperationStatus::Completed,
+        ?\Throwable $saveError = null,
+    ): OperationReverter {
+        $auditLogger = $auditLoggerOverride;
+        if ($auditLogger === null) {
+            $auditLogger = $this->createMock(AuditLoggerInterface::class);
+            $auditLogger->method('findById')->willReturn($entry);
+            $auditLogger->method('log')->willReturnCallback(static function (MoveOperation $op) use (&$loggedRef): void {
+                if ($loggedRef !== null) {
+                    $loggedRef[] = $op;
+                }
+            });
+        }
+
+        $journal = $journalOverride ?? $this->createMock(OperationJournalInterface::class);
+        if ($journalOverride === null) {
+            $journal->method('begin')->willReturnCallback(
+                static fn (OperationIntent $intent): OperationHandle => new OperationHandle(91, $intent),
+            );
+            $journal->method('complete')->willReturnCallback(static function (
+                OperationHandle $handle,
+                OperationStatus $status,
+                ?string $error = null,
+                ?int $duration = null,
+            ) use (&$loggedRef): bool {
+                if ($loggedRef !== null) {
+                    $loggedRef[] = $handle->intent->toMoveOperation($status, $error, $duration);
+                }
+
+                return true;
+            });
+        }
 
         $folder = $this->createMock(Asset\Folder::class);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->method('acquireTarget')->willReturn(true);
 
-        return new class ($auditLogger, $this->createMock(LoopGuard::class), $dispatcher ?? new EventDispatcher(), new NullLogger(), $asset, $folder) extends OperationReverter {
+        return new class ($auditLogger, $journal, $loopGuard, $dispatcher ?? new EventDispatcher(), new NullLogger(), $this->authorization(), $asset, $folder, $classification, $saveError) extends OperationReverter {
             public function __construct(
                 AuditLoggerInterface $auditLogger,
+                OperationJournalInterface $journal,
                 LoopGuard $loopGuard,
                 EventDispatcher $dispatcher,
                 NullLogger $logger,
+                ElementAuthorization $authorization,
                 private readonly ?Asset $stubAsset,
                 private readonly Asset\Folder $stubFolder,
+                private readonly OperationStatus $classification,
+                private readonly ?\Throwable $saveError,
             ) {
-                parent::__construct($auditLogger, $loopGuard, $dispatcher, $logger);
+                parent::__construct($auditLogger, $journal, $loopGuard, $dispatcher, $logger, $authorization);
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -212,12 +318,34 @@ class OperationReverterTest extends TestCase
                 return $this->stubFolder;
             }
 
-            protected function saveReverted(Asset $asset, int $assetId): void {}
-
-            protected function currentUserId(): ?int
+            protected function assetAtPath(string $path): ?Asset
             {
-                return 42;
+                return null;
             }
+
+            protected function saveReverted(Asset $asset, int $assetId): void
+            {
+                if ($this->saveError !== null) {
+                    throw $this->saveError;
+                }
+            }
+
+            protected function classifyPersistedRevert(int $assetId, string $sourcePath, string $targetPath): OperationStatus
+            {
+                return $this->classification;
+            }
+
         };
+    }
+
+    private function authorization(): ElementAuthorization
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturnCallback(
+            static fn (Asset $asset, string $permission): bool => $asset->isAllowed($permission),
+        );
+        $authorization->method('currentActor')->willReturn(ActorContext::user(42));
+
+        return $authorization;
     }
 }

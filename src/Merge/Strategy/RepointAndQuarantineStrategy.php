@@ -6,8 +6,8 @@ namespace Oronts\AssetPilotBundle\Merge\Strategy;
 
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
-use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
+use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 
 /**
@@ -15,7 +15,7 @@ use Oronts\AssetPilotBundle\Service\QuarantineService;
  * asset, move the copy to quarantine (restorable) rather than deleting it. A copy whose references
  * could not all be repointed is left in place and reported, never quarantined.
  */
-class RepointAndQuarantineStrategy implements DuplicateMergeStrategyInterface
+class RepointAndQuarantineStrategy implements ResumableDuplicateMergeStrategyInterface
 {
     public function __construct(
         protected readonly QuarantineService $quarantine,
@@ -43,6 +43,13 @@ class RepointAndQuarantineStrategy implements DuplicateMergeStrategyInterface
         }
 
         return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'quarantine did not move the copy');
+    }
+
+    public function recoverDisposition(int $copyId, RepointReport $report): ?CopyDisposition
+    {
+        return $this->quarantine->recoverQuarantine($copyId)
+            ? new CopyDisposition($copyId, DispositionOutcome::Quarantined)
+            : null;
     }
 
     private function blockedReason(RepointReport $report): string

@@ -58,6 +58,22 @@ class IsolateUnreferencedStrategyTest extends TestCase
     }
 
     #[Test]
+    public function recoversACommittedIsolationMove(): void
+    {
+        $quarantine = $this->createMock(QuarantineService::class);
+        $quarantine->expects(self::once())->method('recoverQuarantine')->with(9)->willReturn(true);
+        $strategy = new IsolateUnreferencedStrategy(
+            $this->createMock(AssetDependencyResolver::class),
+            $quarantine,
+        );
+
+        $disposition = $strategy->recoverDisposition(9, new RepointReport(9, 5, 0, []));
+
+        self::assertNotNull($disposition);
+        self::assertSame(DispositionOutcome::Quarantined, $disposition->outcome);
+    }
+
+    #[Test]
     public function reportsAnErrorWhenQuarantineDoesNotMoveTheCopy(): void
     {
         $resolver = $this->createMock(AssetDependencyResolver::class);

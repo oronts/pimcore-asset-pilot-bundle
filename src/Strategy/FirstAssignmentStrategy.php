@@ -9,7 +9,7 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 
-readonly class FirstAssignmentStrategy implements ConflictStrategyInterface
+readonly class FirstAssignmentStrategy implements SideEffectFreeConflictStrategyInterface
 {
     public const string ASSIGNMENT_PROPERTY = 'asset_pilot_first_assignment';
 

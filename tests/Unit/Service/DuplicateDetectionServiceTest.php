@@ -6,8 +6,12 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
+use Oronts\AssetPilotBundle\Security\ActorContextProvider;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
+use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -29,8 +33,8 @@ class DuplicateDetectionServiceTest extends TestCase
      * @param list<int>             $idsToScan
      * @param array<int, ?Asset>    $assetsById
      * @param array<int, string>    $checksumById
-     * @param array<int, int>       $sizeById
-     * @param \ArrayObject<int, array{0:int,1:string,2:int}> $upserts
+     * @param array<int, int|null>  $sizeById
+     * @param \ArrayObject          $upserts
      * @param list<array{checksum: string, file_size: int, cnt: int}> $duplicateRows
      * @param array<string, list<int>> $idsByChecksum
      */
@@ -42,16 +46,20 @@ class DuplicateDetectionServiceTest extends TestCase
         ?\ArrayObject $upserts = null,
         array $duplicateRows = [],
         array $idsByChecksum = [],
+        ?array $visibleIds = null,
     ): DuplicateDetectionService {
         $upserts ??= new \ArrayObject();
 
-        return new class ($idsToScan, $assetsById, $checksumById, $sizeById, $upserts, $duplicateRows, $idsByChecksum) extends DuplicateDetectionService {
+        $connection = (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor();
+        [$authorization, $workspaceScope] = $this->security($connection, $visibleIds);
+
+        return new class ($idsToScan, $assetsById, $checksumById, $sizeById, $upserts, $duplicateRows, $idsByChecksum, $connection, $authorization, $workspaceScope, $visibleIds) extends DuplicateDetectionService {
             /**
              * @param list<int>          $idsToScan
              * @param array<int, ?Asset> $assetsById
              * @param array<int, string> $checksumById
-             * @param array<int, int>    $sizeById
-             * @param \ArrayObject<int, array{0:int,1:string,2:int}> $upserts
+             * @param array<int, int|null> $sizeById
+             * @param \ArrayObject $upserts
              * @param list<array{checksum: string, file_size: int, cnt: int}> $duplicateRows
              * @param array<string, list<int>> $idsByChecksum
              */
@@ -63,10 +71,16 @@ class DuplicateDetectionServiceTest extends TestCase
                 private readonly \ArrayObject $upserts,
                 private readonly array $duplicateRows,
                 private readonly array $idsByChecksum,
+                Connection $connection,
+                ElementAuthorization $authorization,
+                AssetWorkspaceQueryScope $workspaceScope,
+                private readonly ?array $visibleIds,
             ) {
                 parent::__construct(
-                    (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(),
+                    $connection,
                     new NullLogger(),
+                    $authorization,
+                    $workspaceScope,
                 );
             }
 
@@ -85,24 +99,31 @@ class DuplicateDetectionServiceTest extends TestCase
                 return $this->checksumById[(int) $asset->getId()] ?? '';
             }
 
-            protected function fileSizeOf(Asset $asset): int
+            protected function fileSizeOf(Asset $asset): ?int
             {
-                return $this->sizeById[(int) $asset->getId()] ?? 0;
+                $id = (int) $asset->getId();
+
+                return array_key_exists($id, $this->sizeById) ? $this->sizeById[$id] : 0;
             }
 
-            protected function upsert(int $assetId, string $checksum, int $fileSize): void
+            protected function upsert(int $assetId, string $checksum, ?int $fileSize): void
             {
                 $this->upserts->append([$assetId, $checksum, $fileSize]);
             }
 
-            protected function fetchDuplicateRows(int $offset, int $limit, int $minCopies = 2, ?string $type = null): array
+            protected function fetchDuplicateRows(int $offset, int $limit, int $minCopies = 2, ?string $type = null, array $filters = []): array
             {
                 return array_slice($this->duplicateRows, $offset, $limit);
             }
 
-            protected function assetIdsForChecksum(string $checksum, int $cap, ?string $type = null): array
+            protected function assetIdsForChecksum(string $checksum, int $cap, ?string $type = null, array $filters = []): array
             {
                 return array_slice($this->idsByChecksum[$checksum] ?? [], 0, $cap);
+            }
+
+            protected function isAssetVisible(int $assetId): bool
+            {
+                return $this->visibleIds === null || in_array($assetId, $this->visibleIds, true);
             }
         };
     }
@@ -121,6 +142,22 @@ class DuplicateDetectionServiceTest extends TestCase
 
         self::assertSame(['scanned' => 2, 'indexed' => 2, 'skipped' => 0], $stats);
         self::assertSame([[1, 'aaa', 10], [2, 'bbb', 20]], $upserts->getArrayCopy());
+    }
+
+    #[Test]
+    public function indexPreservesAnUnknownStorageSize(): void
+    {
+        $upserts = new \ArrayObject();
+        $stats = $this->service(
+            idsToScan: [1],
+            assetsById: [1 => $this->asset(1)],
+            checksumById: [1 => 'aaa'],
+            sizeById: [1 => null],
+            upserts: $upserts,
+        )->index();
+
+        self::assertSame(1, $stats['indexed']);
+        self::assertSame([[1, 'aaa', null]], $upserts->getArrayCopy());
     }
 
     #[Test]
@@ -172,6 +209,43 @@ class DuplicateDetectionServiceTest extends TestCase
     }
 
     #[Test]
+    public function workspaceFilteringRemovesHiddenMembersAndKeepsCountInSync(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, path TEXT, filename TEXT, type TEXT)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_checksum (asset_id INTEGER, checksum TEXT, file_size INTEGER, indexed_at TEXT)');
+        $connection->executeStatement('CREATE TABLE users_workspaces_asset (userId INTEGER, cpath TEXT, view INTEGER)');
+        foreach ([[1, '/visible/', '1.png'], [2, '/visible/', '2.png'], [3, '/secret/', '3.png'], [7, '/visible/', '7.png'], [8, '/secret/', '8.png']] as [$id, $path, $filename]) {
+            $connection->insert('assets', ['id' => $id, 'path' => $path, 'filename' => $filename, 'type' => 'image']);
+        }
+        foreach ([[1, 'aaa'], [2, 'aaa'], [3, 'aaa'], [7, 'bbb'], [8, 'bbb']] as [$assetId, $checksum]) {
+            $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => $checksum, 'file_size' => 10, 'indexed_at' => '2026-07-15 00:00:00']);
+        }
+        $connection->insert('users_workspaces_asset', ['userId' => 7, 'cpath' => '/visible', 'view' => 1]);
+
+        $actor = ActorContext::user(7);
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn($actor);
+        $actors = $this->createMock(ActorContextProvider::class);
+        $actors->method('resolveUser')->with($actor)->willReturn(
+            (new \Pimcore\Model\User())->setId(7)->setActive(true)->setAdmin(false)->setPermissions(['assets']),
+        );
+        $service = new DuplicateDetectionService(
+            $connection,
+            new NullLogger(),
+            $authorization,
+            new AssetWorkspaceQueryScope($connection, $authorization, $actors),
+        );
+
+        $groups = $service->findDuplicates();
+
+        self::assertCount(1, $groups);
+        self::assertSame([1, 2], $groups[0]->assetIds);
+        self::assertSame(2, $groups[0]->count);
+        self::assertSame(1, $service->countDuplicateGroups());
+    }
+
+    #[Test]
     public function findDuplicatesExcludesRowsForDeletedAssetsViaTheJoin(): void
     {
         $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
@@ -185,7 +259,7 @@ class DuplicateDetectionServiceTest extends TestCase
             $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => $checksum, 'file_size' => 100, 'indexed_at' => '2026-06-19 00:00:00']);
         }
 
-        $service = new DuplicateDetectionService($connection, new NullLogger());
+        $service = $this->databaseService($connection);
 
         $groups = $service->findDuplicates();
         self::assertCount(1, $groups, 'the "ghost" group has only one live asset and must not appear');
@@ -208,7 +282,7 @@ class DuplicateDetectionServiceTest extends TestCase
             $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => 'dup', 'file_size' => 100, 'indexed_at' => '2026-06-20 00:00:00']);
         }
 
-        $service = new DuplicateDetectionService($connection, new NullLogger());
+        $service = $this->databaseService($connection);
 
         $all = $service->findDuplicates();
         self::assertCount(1, $all);
@@ -225,6 +299,35 @@ class DuplicateDetectionServiceTest extends TestCase
         self::assertSame([], $service->findDuplicates(type: 'document'));
         self::assertSame(0, $service->countDuplicateGroups(type: 'document'));
     }
+    #[Test]
+    public function folderFilterScopesGroupsCountsAndMemberIds(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, path TEXT, filename TEXT, type TEXT)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_checksum (asset_id INTEGER, checksum TEXT, file_size INTEGER, indexed_at TEXT)');
+        foreach ([
+            [1, '/wanted/', 'one.png'],
+            [2, '/wanted/', 'two.png'],
+            [3, '/other/', 'three.png'],
+            [4, '/other/', 'four.png'],
+            [5, '/other/', 'five.png'],
+        ] as [$id, $path, $filename]) {
+            $connection->insert('assets', ['id' => $id, 'path' => $path, 'filename' => $filename, 'type' => 'image']);
+        }
+        foreach ([[1, 'shared'], [2, 'shared'], [3, 'shared'], [4, 'outside'], [5, 'outside']] as [$assetId, $checksum]) {
+            $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => $checksum, 'file_size' => 100, 'indexed_at' => '2026-07-15 00:00:00']);
+        }
+        $service = $this->databaseService($connection);
+        $filters = ['folder' => '/wanted'];
+
+        $groups = $service->findDuplicates(filters: $filters);
+
+        self::assertCount(1, $groups);
+        self::assertSame(2, $groups[0]->count);
+        self::assertSame([1, 2], $groups[0]->assetIds);
+        self::assertSame(1, $service->countDuplicateGroups(filters: $filters));
+    }
+
 
     #[Test]
     public function groupForChecksumReturnsLiveMembersOrNullWhenTooFewRemain(): void
@@ -240,7 +343,7 @@ class DuplicateDetectionServiceTest extends TestCase
             $connection->insert('asset_pilot_checksum', ['asset_id' => $assetId, 'checksum' => $checksum, 'file_size' => $size, 'indexed_at' => '2026-06-19 00:00:00']);
         }
 
-        $service = new DuplicateDetectionService($connection, new NullLogger());
+        $service = $this->databaseService($connection);
 
         $group = $service->groupForChecksum('dup');
         self::assertNotNull($group);
@@ -258,10 +361,12 @@ class DuplicateDetectionServiceTest extends TestCase
     {
         $sentinel = new DuplicateGroup('aaa', 100, 2, [5, 6]);
 
-        $service = new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), new NullLogger(), $sentinel) extends DuplicateDetectionService {
-            public function __construct(Connection $c, NullLogger $l, private readonly DuplicateGroup $sentinel)
+        $connection = (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor();
+        [$authorization, $workspaceScope] = $this->security($connection);
+        $service = new class ($connection, new NullLogger(), $authorization, $workspaceScope, $sentinel) extends DuplicateDetectionService {
+            public function __construct(Connection $c, NullLogger $l, ElementAuthorization $authorization, AssetWorkspaceQueryScope $workspaceScope, private readonly DuplicateGroup $sentinel)
             {
-                parent::__construct($c, $l);
+                parent::__construct($c, $l, $authorization, $workspaceScope);
             }
 
             protected function indexedChecksumFor(int $assetId): ?string
@@ -273,9 +378,41 @@ class DuplicateDetectionServiceTest extends TestCase
             {
                 return $checksum === 'aaa' ? $this->sentinel : null;
             }
+
+            protected function isAssetVisible(int $assetId): bool
+            {
+                return true;
+            }
         };
 
         self::assertSame($sentinel, $service->groupForAsset(5));
         self::assertNull($service->groupForAsset(9), 'an unindexed asset has no duplicate group');
+    }
+
+    private function databaseService(Connection $connection): DuplicateDetectionService
+    {
+        [$authorization, $workspaceScope] = $this->security($connection);
+
+        return new class ($connection, new NullLogger(), $authorization, $workspaceScope) extends DuplicateDetectionService {
+            protected function isAssetVisible(int $assetId): bool
+            {
+                return true;
+            }
+        };
+    }
+
+    /** @param list<int>|null $visibleIds @return array{ElementAuthorization, AssetWorkspaceQueryScope} */
+    private function security(Connection $connection, ?array $visibleIds = null): array
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn(ActorContext::system());
+        $authorization->method('isAllowed')->willReturnCallback(
+            static fn (Asset $asset): bool => $visibleIds === null || in_array((int) $asset->getId(), $visibleIds, true),
+        );
+
+        return [
+            $authorization,
+            new AssetWorkspaceQueryScope($connection, $authorization, $this->createMock(ActorContextProvider::class)),
+        ];
     }
 }

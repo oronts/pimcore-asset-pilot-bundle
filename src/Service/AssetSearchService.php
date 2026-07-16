@@ -8,7 +8,8 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
-use Oronts\AssetPilotBundle\Service\Query\AssetStorageSize;
+use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\IndexedAssetSize;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
@@ -19,6 +20,7 @@ class AssetSearchService implements AssetSearchServiceInterface
     public function __construct(
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
+        private readonly AssetWorkspaceQueryScope $workspaceScope,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
@@ -32,15 +34,12 @@ class AssetSearchService implements AssetSearchServiceInterface
         [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
-            $qb = $this->createBaseQuery()
-                ->orderBy($sortColumn, $sortDir)
-                ->setFirstResult($offset)
-                ->setMaxResults($limit);
-
+            $qb = $this->createBaseQuery()->orderBy($sortColumn, $sortDir)->setFirstResult($offset)->setMaxResults($limit);
             $countQb = $this->createCountQuery();
-
             $this->applySearchFilters($qb, $filters);
             $this->applySearchFilters($countQb, $filters);
+            $this->workspaceScope->applyView($qb, 'a', 'assetSearch');
+            $this->workspaceScope->applyView($countQb, 'a', 'assetSearchCount');
 
             $total = (int) $countQb->executeQuery()->fetchOne();
             $items = $this->hydrateItems($qb->executeQuery()->fetchAllAssociative());
@@ -68,13 +67,11 @@ class AssetSearchService implements AssetSearchServiceInterface
         }
 
         try {
-            $rows = $this->hydrateItems(
-                $this->createBaseQuery()
-                    ->andWhere('a.id IN (:ids)')
-                    ->setParameter('ids', $ids, ArrayParameterType::INTEGER)
-                    ->executeQuery()
-                    ->fetchAllAssociative(),
-            );
+            $query = $this->createBaseQuery()
+                ->andWhere('a.id IN (:ids)')
+                ->setParameter('ids', $ids, ArrayParameterType::INTEGER);
+            $this->workspaceScope->applyView($query, 'a', 'assetSummary');
+            $rows = $this->hydrateItems($query->executeQuery()->fetchAllAssociative());
 
             $byId = [];
             foreach ($rows as $row) {
@@ -91,7 +88,7 @@ class AssetSearchService implements AssetSearchServiceInterface
 
     private function createBaseQuery(): QueryBuilder
     {
-        return $this->connection->createQueryBuilder()
+        $query = $this->connection->createQueryBuilder()
             ->select('a.id, a.path, a.filename, a.type, a.mimetype, a.creationDate as created_at, a.modificationDate as modified_at')
             ->addSelect('CASE WHEN lp.data = \'1\' THEN 1 ELSE 0 END as locked')
             ->from(PimcoreSchema::TABLE_ASSETS, 'a')
@@ -100,6 +97,9 @@ class AssetSearchService implements AssetSearchServiceInterface
             ->setParameter('folder_type', PimcoreSchema::ASSET_TYPE_FOLDER)
             ->setParameter('lock_ctype', PimcoreSchema::ELEMENT_TYPE_ASSET)
             ->setParameter('lock_prop', $this->lockProperty);
+        IndexedAssetSize::join($query);
+
+        return $query;
     }
 
     private function createCountQuery(): QueryBuilder
@@ -167,19 +167,16 @@ class AssetSearchService implements AssetSearchServiceInterface
     private function hydrateItems(array $items): array
     {
         foreach ($items as &$item) {
+            $item['file_size'] = IndexedAssetSize::bytes($item);
+            $item['size_known'] = $item['file_size'] !== null;
             $item['created_at'] = $item['created_at'] ? date('Y-m-d H:i:s', (int) $item['created_at']) : null;
             $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
             $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
             $item['locked'] = (bool) ($item['locked'] ?? false);
-            $item['file_size'] = $this->fileSize($item['full_path']);
+            unset($item['indexed_file_size'], $item['indexed_size_known'], $item['size_indexed_at']);
         }
 
         return $items;
-    }
-
-    protected function fileSize(string $fullPath): int
-    {
-        return AssetStorageSize::bytes($fullPath);
     }
 
     private function paginatedResponse(array $items, int $total, int $page, int $limit): array
@@ -191,4 +188,5 @@ class AssetSearchService implements AssetSearchServiceInterface
             'pages' => $limit > 0 ? (int) ceil($total / $limit) : 0,
         ];
     }
+
 }

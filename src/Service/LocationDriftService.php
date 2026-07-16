@@ -4,24 +4,16 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Enum\OperationStatus;
-use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\DriftItem;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Listing;
-use Psr\Log\LoggerInterface;
 
-/**
- * Organization-drift detection: after a rule change, previously-organized assets silently stay in
- * their old location. This compares each asset's actual path against where the current rules resolve
- * it (a dry run) and reports the mismatches. The per-class scan is paged and bounded so it never
- * turns into a full-catalog block; a whole-catalog sweep belongs in the CLI/async, not a request.
- */
 class LocationDriftService
 {
     public function __construct(
         protected readonly AssetOrganizer $organizer,
-        protected readonly LoggerInterface $logger,
+        protected readonly ElementAuthorization $authorization,
         protected readonly int $defaultLimit = 50,
     ) {}
 
@@ -30,16 +22,11 @@ class LocationDriftService
      */
     public function driftForObject(AbstractObject $object): array
     {
-        $drift = [];
-        foreach ($this->organizer->dryRun($object, TriggerType::Manual) as $operation) {
-            // A Pending dry-run op is an asset the rules would move = it is not where they want it.
-            // Skipped ops (already-at-target, locked, excluded) are not drift.
-            if ($operation->status === OperationStatus::Pending) {
-                $drift[] = new DriftItem($operation->assetId, $operation->sourcePath, $operation->targetPath, $operation->ruleName);
-            }
+        if (!$this->isVisible($object)) {
+            return [];
         }
 
-        return $drift;
+        return $this->organizer->analyzeDrift($object);
     }
 
     /**
@@ -51,22 +38,15 @@ class LocationDriftService
         $page = max(1, $page);
         $offset = ($page - 1) * $limit;
 
-        $ids = $this->listObjectIds($className, $offset, $limit);
-
         $items = [];
-        $scanned = 0;
-        foreach ($ids as $id) {
-            $object = $this->loadObject((int) $id);
-            if ($object === null) {
-                continue;
-            }
-            ++$scanned;
+        $objects = $this->visibleObjects($className, $offset, $limit);
+        foreach ($objects as $object) {
             foreach ($this->driftForObject($object) as $driftItem) {
                 $items[] = $driftItem;
             }
         }
 
-        return ['items' => $items, 'objectsScanned' => $scanned, 'page' => $page, 'limit' => $limit];
+        return ['items' => $items, 'objectsScanned' => count($objects), 'page' => $page, 'limit' => $limit];
     }
 
     /**
@@ -77,7 +57,7 @@ class LocationDriftService
     public function driftForObjectId(int $objectId): ?array
     {
         $object = $this->loadObject($objectId);
-        if ($object === null) {
+        if ($object === null || !$this->isVisible($object)) {
             return null;
         }
 
@@ -101,5 +81,39 @@ class LocationDriftService
     protected function loadObject(int $id): ?AbstractObject
     {
         return AbstractObject::getById($id);
+    }
+
+    protected function isVisible(AbstractObject $object): bool
+    {
+        return $this->authorization->isAllowed($object, 'view');
+    }
+
+    /** @return list<AbstractObject> */
+    private function visibleObjects(string $className, int $visibleOffset, int $limit): array
+    {
+        $objects = [];
+        $visibleSeen = 0;
+        $rawOffset = 0;
+        $batchSize = min(500, max(50, $limit));
+
+        do {
+            $ids = $this->listObjectIds($className, $rawOffset, $batchSize);
+            foreach ($ids as $id) {
+                $object = $this->loadObject($id);
+                if ($object === null || !$this->isVisible($object)) {
+                    continue;
+                }
+                if ($visibleSeen++ < $visibleOffset) {
+                    continue;
+                }
+                $objects[] = $object;
+                if (count($objects) >= $limit) {
+                    break 2;
+                }
+            }
+            $rawOffset += $batchSize;
+        } while (count($ids) === $batchSize);
+
+        return $objects;
     }
 }

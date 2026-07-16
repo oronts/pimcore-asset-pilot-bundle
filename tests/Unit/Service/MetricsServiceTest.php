@@ -43,19 +43,28 @@ class MetricsServiceTest extends TestCase
     }
 
     #[Test]
-    public function actionFailuresAreVisibleButExcludedFromTheMoveFailureRate(): void
+    public function unknownAuditStatusesAreExcludedFromMetrics(): void
     {
         $metrics = $this->service(
-            ['completed' => 10, 'failed' => 2, 'skipped' => 8, 'action_failed' => 5, 'by_class' => ['Product' => 25]],
+            ['completed' => 10, 'failed' => 2, 'skipped' => 8, 'retired_status' => 5, 'by_class' => ['Product' => 25]],
             ['count' => 10, 'avgMs' => 42.5, 'minMs' => 5, 'maxMs' => 300],
         )->collect();
 
-        self::assertSame(5, $metrics['operations']['action_failed']);
-        self::assertSame(25, $metrics['total']);
-        // total counts every audit row; moveTotal is the failure-rate denominator (excludes action_failed).
+        self::assertArrayNotHasKey('retired_status', $metrics['operations']);
+        self::assertSame(20, $metrics['total']);
+        self::assertSame(0.1, $metrics['failureRate']);
+    }
+
+    #[Test]
+    public function nonterminalOperationsAreVisibleButExcludedFromTheFailureRate(): void
+    {
+        $metrics = $this->service(
+            ['completed' => 10, 'failed' => 2, 'skipped' => 8, 'pending' => 3, 'in_progress' => 2, 'recovery_required' => 1],
+            ['count' => 10, 'avgMs' => 42.5, 'minMs' => 5, 'maxMs' => 300],
+        )->collect();
+
+        self::assertSame(26, $metrics['total']);
         self::assertSame(20, $metrics['moveTotal']);
-        // failed moves / move attempts (action failures are post-move side effects, not move attempts):
-        // 2 / (25 - 5) = 0.1, NOT 2 / 25 = 0.08.
         self::assertSame(0.1, $metrics['failureRate']);
     }
 

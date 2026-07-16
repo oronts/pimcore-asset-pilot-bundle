@@ -11,6 +11,8 @@ namespace Oronts\AssetPilotBundle\Service\Query;
 final class PimcoreSchema
 {
     public const string TABLE_ASSETS = 'assets';
+    public const string TABLE_OBJECTS = 'objects';
+    public const string TABLE_DOCUMENTS = 'documents';
     public const string TABLE_DEPENDENCIES = 'dependencies';
     public const string TABLE_PROPERTIES = 'properties';
 

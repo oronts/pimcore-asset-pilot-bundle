@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Action\RuleActionConfigValidatorInterface;
+use Oronts\AssetPilotBundle\Action\RuleActionResolver;
 use Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
@@ -14,6 +16,7 @@ use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
 use Pimcore\Model\DataObject\Fieldcollection;
 use Pimcore\Model\DataObject\Objectbrick;
+use Pimcore\Tool;
 use Psr\Container\ContainerInterface;
 
 class ConfigValidator
@@ -28,6 +31,7 @@ class ConfigValidator
         private readonly ContainerInterface $callbacks,
         private readonly ExpressionConditionEvaluator $conditionEvaluator,
         private readonly TemplatePathResolver $pathResolver,
+        private readonly ?RuleActionResolver $actionResolver = null,
     ) {}
 
     /** @return ValidationResult[] */
@@ -39,7 +43,7 @@ class ConfigValidator
             $results = [...$results, ...$this->validateRule($rule)];
         }
 
-        $results = [...$results, ...$this->validateDuplicatePriorities($rules)];
+        $results = [...$results, ...$this->validateUniqueNames($rules), ...$this->validateDuplicatePriorities($rules)];
 
         return $results;
     }
@@ -55,6 +59,8 @@ class ConfigValidator
             ...$this->validateCallbackService($rule),
             ...$this->validateFilterValues($rule),
             ...$this->validateStrategyCallback($rule),
+            ...$this->validateLocales($rule),
+            ...$this->validateActions($rule),
         ];
     }
 
@@ -272,6 +278,87 @@ class ConfigValidator
         }
 
         return [];
+    }
+
+    /** @return ValidationResult[] */
+    private function validateLocales(Rule $rule): array
+    {
+        if ($rule->locales === []) {
+            return [];
+        }
+        $validLocales = $this->validLocales();
+        $unknown = array_values(array_diff($rule->locales, $validLocales));
+        if ($unknown !== []) {
+            return [new ValidationResult($rule->name, 'locales', 'fail', 'Unknown Pimcore locale(s): ' . implode(', ', $unknown))];
+        }
+
+        return [new ValidationResult($rule->name, 'locales', 'pass', 'Rule locales are valid')];
+    }
+
+    /** @return list<string> */
+    protected function validLocales(): array
+    {
+        return Tool::getValidLanguages();
+    }
+
+    /** @return ValidationResult[] */
+    private function validateActions(Rule $rule): array
+    {
+        if ($rule->actions === []) {
+            return [];
+        }
+        if ($this->actionResolver === null) {
+            return [new ValidationResult($rule->name, 'actions', 'warning', 'Action services are unavailable to semantic validation')];
+        }
+
+        $results = [];
+        foreach ($rule->actions as $index => $config) {
+            if (!is_array($config)) {
+                $results[] = new ValidationResult($rule->name, 'actions', 'fail', sprintf('Action %d must be a key/value map', $index + 1));
+                continue;
+            }
+            $type = trim((string) ($config['type'] ?? ''));
+            $action = $type === '' ? null : $this->actionResolver->resolve($type);
+            if ($action === null) {
+                $results[] = new ValidationResult($rule->name, 'actions', 'fail', sprintf('Action %d has unknown type "%s"', $index + 1, $type));
+                continue;
+            }
+            if (!$action instanceof RuleActionConfigValidatorInterface) {
+                $results[] = new ValidationResult($rule->name, 'actions', 'pass', sprintf('Action %d type "%s" is registered', $index + 1, $type));
+                continue;
+            }
+            $errors = $action->validateConfig($config);
+            $results[] = new ValidationResult(
+                $rule->name,
+                'actions',
+                $errors === [] ? 'pass' : 'fail',
+                $errors === []
+                    ? sprintf('Action %d type "%s" is valid', $index + 1, $type)
+                    : sprintf('Action %d type "%s" %s', $index + 1, $type, implode('; ', $errors)),
+            );
+        }
+
+        return $results;
+    }
+
+    /** @param list<Rule> $rules
+     * @return ValidationResult[]
+     */
+    private function validateUniqueNames(array $rules): array
+    {
+        $seen = [];
+        $duplicates = [];
+        foreach ($rules as $rule) {
+            if (isset($seen[$rule->name])) {
+                $duplicates[$rule->name] = true;
+            }
+            $seen[$rule->name] = true;
+        }
+
+        return array_map(
+            static fn (string $name): ValidationResult => new ValidationResult($name, 'unique_name', 'fail', sprintf('Duplicate rule name "%s"', $name)),
+            array_keys($duplicates),
+        );
     }
 
     /** @return ValidationResult[] */

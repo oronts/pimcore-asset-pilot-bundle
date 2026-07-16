@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Types\JsonType;
+use Doctrine\DBAL\Types\StringType;
+use Doctrine\DBAL\Types\TextType;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Pimcore\Model\Asset;
-use Pimcore\Model\DataObject\ClassDefinition;
-use Pimcore\Model\DataObject\ClassDefinition\Data;
-use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Service\ResetInterface;
 
@@ -18,44 +18,44 @@ use Symfony\Contracts\Service\ResetInterface;
  *
  * The dependencies table tracks WYSIWYG *element links* (pimcore_id/pimcore_type), so those are
  * already caught by UnusedAssetFinder. What it misses is a HARD-CODED asset path pasted into a
- * wysiwyg/textarea/input field (e.g. <img src="/Products/x.jpg">). This searches the configured
- * classes' text columns for the asset's path so such an asset is not treated as unused.
+ * wysiwyg/textarea/input field (e.g. <img src="/Products/x.jpg">). This searches Pimcore content
+ * tables for the asset's path so such an asset is not treated as unused.
  *
- * Opt-in (disabled by default) and used only as a delete/move guard — bounded to the assets actually
- * being mutated, never the listing — because a leading-wildcard LIKE over text columns is a table
- * scan. Nested structures (bricks, blocks, field collections) are not scanned (a known limitation;
- * those live in separate tables). A scan that errors fails CLOSED (treats the asset as referenced),
- * so an opt-in safety check can never let a possibly-referenced asset be deleted on a scan failure.
+ * Opt-in (disabled by default) and used only as a delete/move guard. Global schema discovery covers
+ * object stores, nested structures, documents, properties, and classification-store text columns.
+ * A scan error fails closed so an unverifiable asset is never authorized for mutation.
  */
 class ContentUsageScanner implements ResetInterface
 {
-    private const array TEXT_FIELD_TYPES = ['wysiwyg', 'textarea', 'input'];
+    /** @var list<array{0: string, 1: list<string>}>|null */
+    private ?array $globalColumns = null;
 
-    /** @var array<string, list<array{0: string, 1: list<string>}>> per-batch per-class column cache */
-    private array $columnsByClass = [];
+    /** @var array<string, bool> */
+    private array $referencesByPath = [];
 
-    /**
-     * @param string[] $classes DataObject class names to scan (empty = feature inert)
-     */
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoggerInterface $logger,
-        protected readonly array $classes = [],
         protected readonly bool $enabled = false,
     ) {}
 
     /**
-     * Drop the per-class column cache so a long-running worker that processes a fresh message picks
-     * up class-definition changes (a newly added text field) rather than scanning a stale column set.
+     * Rebuild schema discovery for each worker message so new content tables and columns are included.
      */
     public function reset(): void
     {
-        $this->columnsByClass = [];
+        $this->globalColumns = null;
+        $this->referencesByPath = [];
+    }
+
+    public function canVerify(): bool
+    {
+        return $this->enabled;
     }
 
     public function isReferencedInContent(Asset $asset): bool
     {
-        if (!$this->enabled || $this->classes === [] || $asset instanceof Asset\Folder) {
+        if (!$this->canVerify() || $asset instanceof Asset\Folder) {
             return false;
         }
 
@@ -63,61 +63,59 @@ class ContentUsageScanner implements ResetInterface
         if ($needle === '') {
             return false;
         }
-
-        foreach ($this->classes as $className) {
-            $className = (string) $className;
-            // Memoize the per-class column discovery: a batch (e.g. normalize) scans many assets
-            // against the same classes, and introspecting the class definition each time is wasteful.
-            $this->columnsByClass[$className] ??= $this->textColumnsFor($className);
-            foreach ($this->columnsByClass[$className] as [$table, $columns]) {
-                if ($columns !== [] && $this->matchesAny($table, $columns, $needle)) {
-                    return true;
-                }
-            }
+        if (array_key_exists($needle, $this->referencesByPath)) {
+            return $this->referencesByPath[$needle];
         }
 
-        return false;
+        try {
+            $this->globalColumns ??= $this->discoverGlobalContentColumns();
+            foreach ($this->globalColumns as [$table, $columns]) {
+                if ($columns !== [] && $this->matchesAny($table, $columns, $needle)) {
+                    return $this->referencesByPath[$needle] = true;
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: global content-reference discovery failed; destructive actions remain blocked.', [
+                'exception' => $e,
+            ]);
+
+            return $this->referencesByPath[$needle] = true;
+        }
+
+        return $this->referencesByPath[$needle] = false;
     }
 
-    /**
-     * The text columns to search per class: [table, columns] for the object store and, separately,
-     * the localized-data table (localized text fields live there with the same column names).
-     *
-     * @return list<array{0: string, 1: list<string>}>
-     */
-    protected function textColumnsFor(string $className): array
+    /** @return list<array{0: string, 1: list<string>}> */
+    protected function discoverGlobalContentColumns(): array
     {
-        $classDef = ClassDefinition::getByName($className);
-        if ($classDef === null) {
-            return [];
-        }
-
-        $classId = $classDef->getId();
-        $store = [];
-        $localized = [];
-        foreach ($classDef->getFieldDefinitions() as $fieldDef) {
-            if ($fieldDef instanceof Localizedfields) {
-                foreach ($fieldDef->getFieldDefinitions() as $localizedFieldDef) {
-                    if ($this->isTextField($localizedFieldDef)) {
-                        $localized[] = $localizedFieldDef->getName();
-                    }
-                }
+        $tables = [];
+        $schema = $this->connection->createSchemaManager();
+        foreach ($schema->listTableNames() as $table) {
+            if (!$this->isContentTable($table)) {
                 continue;
             }
-            if ($this->isTextField($fieldDef)) {
-                $store[] = $fieldDef->getName();
+
+            $columns = [];
+            foreach ($schema->listTableColumns($table) as $column) {
+                $type = $column->getType();
+                if ($type instanceof StringType || $type instanceof TextType || $type instanceof JsonType) {
+                    $columns[] = $column->getName();
+                }
+            }
+            if ($columns !== []) {
+                $tables[] = [$table, $columns];
             }
         }
 
-        $pairs = [];
-        if ($store !== []) {
-            $pairs[] = ['object_store_' . $classId, $store];
-        }
-        if ($localized !== []) {
-            $pairs[] = ['object_localized_data_' . $classId, $localized];
-        }
+        return $tables;
+    }
 
-        return $pairs;
+    private function isContentTable(string $table): bool
+    {
+        return $table === 'properties'
+            || str_starts_with($table, 'object_')
+            || str_starts_with($table, 'documents_')
+            || str_starts_with($table, 'classificationstore_');
     }
 
     /**
@@ -142,14 +140,10 @@ class ContentUsageScanner implements ResetInterface
             $this->logger->warning('Asset Pilot: content-usage scan failed for {table}; treating the asset as referenced. {error}', [
                 'table' => $table,
                 'error' => $e->getMessage(),
+                'exception' => $e,
             ]);
 
             return true;
         }
-    }
-
-    private function isTextField(Data $fieldDef): bool
-    {
-        return in_array($fieldDef->getFieldType(), self::TEXT_FIELD_TYPES, true);
     }
 }

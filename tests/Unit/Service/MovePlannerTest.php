@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Enum\DriftEligibility;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetMoveEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
@@ -11,6 +12,7 @@ use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Service\MovePlanner;
 use Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface;
+use Oronts\AssetPilotBundle\Strategy\SideEffectFreeConflictStrategyInterface;
 use Oronts\AssetPilotBundle\Strategy\StrategyResolver;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -112,10 +114,64 @@ class MovePlannerTest extends TestCase
         self::assertSame('/target/f.jpg', $plan->targetPath);
     }
 
+    #[Test]
+    public function driftAssessmentReportsLockedMismatchWithoutDispatchingOrRunningTheStrategy(): void
+    {
+        $strategy = $this->createMock(SideEffectFreeConflictStrategyInterface::class);
+        $strategy->expects(self::never())->method('resolve');
+        $resolver = $this->createMock(StrategyResolver::class);
+        $resolver->expects(self::never())->method('resolve');
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::PRE_MOVE, static fn (): never => throw new \RuntimeException('must not run'));
+        $naming = $this->createMock(NamingStrategyInterface::class);
+        $naming->method('generateName')->willReturn('f.jpg');
+        $planner = new MovePlanner($resolver, $naming, $dispatcher);
+
+        $assessment = $planner->assessDrift($this->asset('/source/f.jpg', locked: true), $this->object(), $this->rule(), '/target');
+
+        self::assertSame('/target/f.jpg', $assessment->targetPath);
+        self::assertSame(DriftEligibility::Blocked, $assessment->eligibility);
+        self::assertSame('Asset is locked', $assessment->reason);
+    }
+
+    #[Test]
+    public function driftAssessmentDoesNotInvokeCallbackStrategies(): void
+    {
+        $strategy = $this->createMock(ConflictStrategyInterface::class);
+        $strategy->expects(self::never())->method('resolve');
+        $resolver = $this->createMock(StrategyResolver::class);
+        $resolver->method('resolve')->willReturn($strategy);
+        $naming = $this->createMock(NamingStrategyInterface::class);
+        $naming->method('generateName')->willReturn('f.jpg');
+        $planner = new MovePlanner($resolver, $naming, new EventDispatcher());
+
+        $assessment = $planner->assessDrift($this->asset('/source/f.jpg', locked: false), $this->object(), $this->rule(), '/target');
+
+        self::assertSame(DriftEligibility::RuntimeCheckRequired, $assessment->eligibility);
+        self::assertNotNull($assessment->reason);
+    }
+
+    #[Test]
+    public function driftAssessmentEvaluatesOptedInSideEffectFreeStrategies(): void
+    {
+        $strategy = $this->createMock(SideEffectFreeConflictStrategyInterface::class);
+        $strategy->expects(self::once())->method('resolve')->willReturn(false);
+        $resolver = $this->createMock(StrategyResolver::class);
+        $resolver->method('resolve')->willReturn($strategy);
+        $naming = $this->createMock(NamingStrategyInterface::class);
+        $naming->method('generateName')->willReturn('f.jpg');
+        $planner = new MovePlanner($resolver, $naming, new EventDispatcher());
+
+        $assessment = $planner->assessDrift($this->asset('/source/f.jpg', locked: false), $this->object(), $this->rule(), '/target');
+
+        self::assertSame(DriftEligibility::Blocked, $assessment->eligibility);
+        self::assertSame('Strategy rejected move', $assessment->reason);
+    }
+
     /** @param string[] $excludeFolders */
     private function planner(bool $strategyAllows, EventDispatcher $dispatcher, array $excludeFolders = []): MovePlanner
     {
-        $strategy = $this->createMock(ConflictStrategyInterface::class);
+        $strategy = $this->createMock(SideEffectFreeConflictStrategyInterface::class);
         $strategy->method('resolve')->willReturn($strategyAllows);
         $resolver = $this->createMock(StrategyResolver::class);
         $resolver->method('resolve')->willReturn($strategy);

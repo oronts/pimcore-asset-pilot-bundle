@@ -6,8 +6,8 @@ namespace Oronts\AssetPilotBundle\Merge\Strategy;
 
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
-use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
+use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Service\AssetDependencyResolver;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 
@@ -16,7 +16,7 @@ use Oronts\AssetPilotBundle\Service\QuarantineService;
  * unreferenced and leaves (reports) any copy still referenced, so consolidating referenced duplicates
  * is a deliberate choice of one of the repointing strategies, not this one.
  */
-class IsolateUnreferencedStrategy implements DuplicateMergeStrategyInterface
+class IsolateUnreferencedStrategy implements ResumableDuplicateMergeStrategyInterface
 {
     public function __construct(
         protected readonly AssetDependencyResolver $dependencies,
@@ -31,6 +31,13 @@ class IsolateUnreferencedStrategy implements DuplicateMergeStrategyInterface
     public function repointsReferences(): bool
     {
         return false;
+    }
+
+    public function recoverDisposition(int $copyId, RepointReport $report): ?CopyDisposition
+    {
+        return $this->quarantine->recoverQuarantine($copyId)
+            ? new CopyDisposition($copyId, DispositionOutcome::Quarantined)
+            : null;
     }
 
     public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition

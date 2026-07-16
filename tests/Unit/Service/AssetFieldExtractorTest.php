@@ -18,6 +18,7 @@ use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Pimcore\Model\DataObject\Fieldcollection;
 use Pimcore\Model\DataObject\Fieldcollection\Data\AbstractData;
 use Pimcore\Model\DataObject\Fieldcollection\Definition;
+use Pimcore\Model\DataObject\Localizedfield;
 use Psr\Log\NullLogger;
 
 #[CoversClass(AssetFieldExtractor::class)]
@@ -49,6 +50,11 @@ class AssetFieldExtractorTest extends TestCase
             public function read(object $holder, string $fieldName): mixed
             {
                 return $this->readField($holder, $fieldName);
+            }
+
+            public function localizedFields(object $holder): ?Localizedfield
+            {
+                return $this->localizedFieldsOf($holder);
             }
         };
     }
@@ -142,6 +148,23 @@ class AssetFieldExtractorTest extends TestCase
     }
 
     #[Test]
+    public function localizedFieldsUsesTheGeneratedPimcoreAccessor(): void
+    {
+        $localizedFields = new Localizedfield();
+        $holder = new class ($localizedFields) {
+            public function __construct(private readonly Localizedfield $localizedFields) {}
+
+            public function getLocalizedfields(): Localizedfield
+            {
+                return $this->localizedFields;
+            }
+        };
+
+        self::assertSame($localizedFields, $this->extractor->localizedFields($holder));
+        self::assertNull($this->extractor->localizedFields(new \stdClass()));
+    }
+
+    #[Test]
     public function collectQualifiesNestedAssetFieldNamesWithThePrefix(): void
     {
         $asset = $this->createMock(Asset::class);
@@ -221,7 +244,7 @@ class AssetFieldExtractorTest extends TestCase
                 return ['en'];
             }
 
-            protected function fieldcollectionDefinition(string $key): ?Definition
+            protected function fieldcollectionDefinition(string $key): Definition
             {
                 return $this->fcDef;
             }

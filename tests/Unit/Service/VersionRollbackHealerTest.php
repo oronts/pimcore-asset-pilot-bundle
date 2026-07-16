@@ -6,11 +6,19 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Oronts\AssetPilotBundle\Enum\HealOutcome;
 use Oronts\AssetPilotBundle\Enum\IntegrityStatus;
+use Oronts\AssetPilotBundle\Enum\UndoHealOutcome;
+use Oronts\AssetPilotBundle\Enum\UndoHealReason;
 use Oronts\AssetPilotBundle\Event\AssetHealEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
+use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
 use Oronts\AssetPilotBundle\Notification\NotificationDispatcher;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
+use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
@@ -101,13 +109,21 @@ class VersionRollbackHealerTest extends TestCase
         ?NotificationDispatcher $notifier = null,
         string $liveBinary = '',
         bool $throwOnRestore = false,
+        ?LoopGuard $loopGuard = null,
+        ?ElementAuthorization $authorization = null,
+        ?EventDispatcher $dispatcher = null,
+        array $excludeFolders = [],
+        ?IntegrityHealFingerprintService $healFingerprints = null,
     ): VersionRollbackHealer {
-        $dispatcher = new EventDispatcher();
+        $dispatcher ??= new EventDispatcher();
         if ($cancelPreHeal) {
             $dispatcher->addListener('oronts_asset_pilot.integrity_pre_heal', static fn (AssetHealEvent $e) => $e->cancel());
         }
 
-        return new class ($checker, $healLog, $dispatcher, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier, $liveBinary, $throwOnRestore) extends VersionRollbackHealer {
+        $loopGuard ??= new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()));
+        $authorization ??= $this->authorization();
+
+        return new class ($checker, $loopGuard, $healLog, $dispatcher, $authorization, $restored, $versions, $binaryByVersionId, $quarantine, $onUnrecoverable, $assetsById, $versionsById, $notifier, $liveBinary, $throwOnRestore, $excludeFolders, $healFingerprints) extends VersionRollbackHealer {
             /**
              * @param \ArrayObject<int, int> $restored
              * @param list<Version>          $versions
@@ -117,8 +133,10 @@ class VersionRollbackHealerTest extends TestCase
              */
             public function __construct(
                 CompositeIntegrityChecker $checker,
+                LoopGuard $loopGuard,
                 IntegrityHealLog $healLog,
                 EventDispatcher $dispatcher,
+                ElementAuthorization $authorization,
                 private readonly \ArrayObject $restored,
                 private readonly array $versions,
                 private readonly array $binaryByVersionId,
@@ -129,16 +147,22 @@ class VersionRollbackHealerTest extends TestCase
                 ?NotificationDispatcher $notifier,
                 private readonly string $liveBytes,
                 private readonly bool $throwOnRestore,
+                array $excludeFolders,
+                ?IntegrityHealFingerprintService $healFingerprints,
             ) {
                 parent::__construct(
                     $checker,
-                    new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+                    $loopGuard,
                     $dispatcher,
                     $healLog,
                     new NullLogger(),
+                    $authorization,
                     $quarantine,
                     $onUnrecoverable,
                     $notifier,
+                    $excludeFolders,
+                    AssetProtection::DEFAULT_LOCK_PROPERTY,
+                    $healFingerprints,
                 );
             }
 
@@ -163,6 +187,13 @@ class VersionRollbackHealerTest extends TestCase
             protected function loadAsset(int $assetId): ?Asset
             {
                 return $this->assetsById[$assetId] ?? null;
+            }
+
+            protected function reloadAsset(Asset $asset): ?Asset
+            {
+                $assetId = (int) $asset->getId();
+
+                return array_key_exists($assetId, $this->assetsById) ? $this->assetsById[$assetId] : $asset;
             }
 
             protected function loadVersion(int $versionId): ?Version
@@ -198,6 +229,37 @@ class VersionRollbackHealerTest extends TestCase
         self::assertSame(2, $result->toVersion);
         self::assertSame([2], $restored->getArrayCopy());
         self::assertNull($result->reason, 'a cleanly committed heal carries no warning');
+    }
+
+    #[Test]
+    public function postHealObserverFailureDoesNotChangeTheCommittedHealAndLaterObserversRun(): void
+    {
+        $dispatcher = new EventDispatcher();
+        $laterObserverCalled = false;
+        $dispatcher->addListener(AssetPilotEvents::INTEGRITY_POST_HEAL, static fn (): never => throw new \RuntimeException('Observer failed.'), 10);
+        $dispatcher->addListener(AssetPilotEvents::INTEGRITY_POST_HEAL, static function () use (&$laterObserverCalled): void {
+            $laterObserverCalled = true;
+        });
+
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('beginHeal')->willReturn(55);
+        $healLog->method('commitHeal')->willReturn(true);
+        $restored = new \ArrayObject();
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $healLog,
+            $restored,
+            [$this->version(2)],
+            [2 => 'good'],
+            dispatcher: $dispatcher,
+        )->heal($this->asset());
+
+        self::assertTrue($laterObserverCalled);
+        self::assertSame(HealOutcome::Healed, $result->outcome);
+        self::assertSame([2], $restored->getArrayCopy());
+        self::assertNull($result->reason);
+        self::assertSame(['Integrity post-heal observer delivery failed.'], $result->observerWarnings);
     }
 
     #[Test]
@@ -361,6 +423,121 @@ class VersionRollbackHealerTest extends TestCase
     }
 
     #[Test]
+    public function previewByIdDoesNotDispatchHealEventsOrWriteAuditState(): void
+    {
+        $events = 0;
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::INTEGRITY_PRE_HEAL, static function () use (&$events): void {
+            ++$events;
+        });
+        $dispatcher->addListener(AssetPilotEvents::INTEGRITY_POST_HEAL, static function () use (&$events): void {
+            ++$events;
+        });
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->expects(self::never())->method('beginHeal');
+        $healLog->expects(self::never())->method('record');
+        $asset = $this->asset();
+        $restored = new \ArrayObject();
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $healLog,
+            $restored,
+            [$this->version(2)],
+            [2 => 'good'],
+            assetsById: [7 => $asset],
+            dispatcher: $dispatcher,
+        )->previewById(7);
+
+        self::assertSame(HealOutcome::Healed, $result->outcome);
+        self::assertTrue($result->dryRun);
+        self::assertSame(0, $events);
+        self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function staleLaterBatchTargetPreventsEveryEarlierMutationAndReleasesLocksInReverse(): void
+    {
+        $lockCalls = [];
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturnCallback(static function (int $assetId) use (&$lockCalls): bool {
+            $lockCalls[] = 'acquire:' . $assetId;
+
+            return true;
+        });
+        $loopGuard->method('releaseAsset')->willReturnCallback(static function (int $assetId) use (&$lockCalls): void {
+            $lockCalls[] = 'release:' . $assetId;
+        });
+        $fingerprints = $this->createMock(IntegrityHealFingerprintService::class);
+        $fingerprints->expects(self::exactly(2))->method('assertUnchanged')->willReturnCallback(
+            static function (int $assetId): void {
+                if ($assetId === 8) {
+                    throw new StaleApplyPlanException('later target changed');
+                }
+            },
+        );
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->expects(self::never())->method('beginHeal');
+        $healLog->expects(self::never())->method('record');
+        $restored = new \ArrayObject();
+
+        try {
+            $this->healer(
+                $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+                $healLog,
+                $restored,
+                [$this->version(2)],
+                [2 => 'good'],
+                assetsById: [7 => $this->asset(7), 8 => $this->asset(8)],
+                loopGuard: $loopGuard,
+                healFingerprints: $fingerprints,
+            )->healPlannedBatch([8, 7], ['asset:7' => 'first', 'asset:8' => 'second']);
+            self::fail('Expected the stale later target to abort the batch.');
+        } catch (StaleApplyPlanException) {
+        }
+
+        self::assertSame([], $restored->getArrayCopy());
+        self::assertSame(['acquire:7', 'acquire:8', 'release:8', 'release:7'], $lockCalls);
+    }
+
+    #[Test]
+    public function plannedHealRevalidatesTheForceReloadedAssetImmediatelyBeforeRestore(): void
+    {
+        $assertions = 0;
+        $fingerprints = $this->createMock(IntegrityHealFingerprintService::class);
+        $fingerprints->expects(self::exactly(3))->method('assertUnchanged')->willReturnCallback(
+            static function () use (&$assertions): void {
+                ++$assertions;
+                if ($assertions === 3) {
+                    throw new StaleApplyPlanException('asset changed before restore');
+                }
+            },
+        );
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->expects(self::once())->method('beginHeal')->willReturn(55);
+        $healLog->expects(self::once())->method('failHeal')->with(55);
+        $healLog->expects(self::never())->method('commitHeal');
+        $restored = new \ArrayObject();
+        $asset = $this->asset();
+
+        try {
+            $this->healer(
+                $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+                $healLog,
+                $restored,
+                [$this->version(2)],
+                [2 => 'good'],
+                assetsById: [7 => $asset],
+                healFingerprints: $fingerprints,
+            )->healPlannedBatch([7], ['asset:7' => 'expected']);
+            self::fail('Expected the final force-reloaded fingerprint check to abort the restore.');
+        } catch (StaleApplyPlanException) {
+        }
+
+        self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
     public function aCancelledPreHealSkipsTheWrite(): void
     {
         $healLog = $this->createMock(IntegrityHealLog::class);
@@ -378,6 +555,150 @@ class VersionRollbackHealerTest extends TestCase
 
         self::assertSame(HealOutcome::Skipped, $result->outcome);
         self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function healSkipsWhenAnotherWorkerHoldsTheAssetLock(): void
+    {
+        $store = new InMemoryStore();
+        $owner = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        $worker = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        self::assertTrue($owner->acquireAsset(7));
+
+        $restored = new \ArrayObject();
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $this->createMock(IntegrityHealLog::class),
+            $restored,
+            [$this->version(2)],
+            [2 => 'good'],
+            loopGuard: $worker,
+        )->heal($this->asset());
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function healSkipsWhenTheScopedActorCannotPublishTheAsset(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->expects(self::never())->method('beginHeal');
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $healLog,
+            new \ArrayObject(),
+            [$this->version(2)],
+            [2 => 'good'],
+            authorization: $this->authorization(false),
+        )->heal($this->asset());
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame('Not permitted to heal this asset.', $result->reason);
+    }
+
+    #[Test]
+    public function dryRunDoesNotClaimAHealWhenTheActorCannotApplyIt(): void
+    {
+        $asset = $this->asset();
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturnCallback(
+            static fn (Asset $candidate, string $permission): bool => $candidate === $asset && $permission === 'view',
+        );
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+            [$this->version(2)],
+            [2 => 'good'],
+            authorization: $authorization,
+        )->heal($asset, dryRun: true);
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame('Not permitted to heal this asset.', $result->reason);
+        self::assertTrue($result->dryRun);
+    }
+
+    #[Test]
+    public function dryRunChecksTheReloadedAsset(): void
+    {
+        $stale = $this->asset();
+        $current = $this->asset();
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturnCallback(
+            static fn (Asset $candidate): bool => $candidate === $current,
+        );
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken, ['good' => IntegrityStatus::Renderable]),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+            [$this->version(2)],
+            [2 => 'good'],
+            assetsById: [7 => $current],
+            authorization: $authorization,
+        )->heal($stale, dryRun: true);
+
+        self::assertSame(HealOutcome::Healed, $result->outcome);
+        self::assertTrue($result->dryRun);
+    }
+
+    #[Test]
+    public function dryRunSkipsAnAssetProtectedByTheLockProperty(): void
+    {
+        $asset = $this->asset();
+        $asset->method('hasProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+        $asset->method('getProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+        )->heal($asset, dryRun: true);
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame('Asset is locked.', $result->reason);
+        self::assertTrue($result->dryRun);
+    }
+
+    #[Test]
+    public function dryRunSkipsAnExcludedAsset(): void
+    {
+        $asset = $this->asset();
+        $asset->method('getRealFullPath')->willReturn('/protected/photo.jpg');
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+            excludeFolders: ['/protected'],
+        )->heal($asset, dryRun: true);
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame('Asset is in an excluded folder.', $result->reason);
+        self::assertTrue($result->dryRun);
+    }
+
+    #[Test]
+    public function dryRunSkipsWhenAnotherWorkerOwnsTheAssetLock(): void
+    {
+        $store = new InMemoryStore();
+        $owner = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        $worker = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        self::assertTrue($owner->acquireAsset(7));
+
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+            loopGuard: $worker,
+        )->heal($this->asset(), dryRun: true);
+
+        self::assertSame(HealOutcome::Skipped, $result->outcome);
+        self::assertSame('Asset is being processed by another job.', $result->reason);
+        self::assertTrue($result->dryRun);
     }
 
     #[Test]
@@ -402,7 +723,7 @@ class VersionRollbackHealerTest extends TestCase
     {
         $healLog = $this->createMock(IntegrityHealLog::class);
         $healLog->method('findUndoable')->with(7)->willReturn(['id' => 5, 'from_version' => 3, 'to_version' => 2]);
-        $healLog->expects(self::once())->method('markUndone')->with(5);
+        $healLog->expects(self::once())->method('markUndone')->with(5)->willReturn(true);
 
         $restored = new \ArrayObject();
         $undone = $this->healer(
@@ -416,6 +737,55 @@ class VersionRollbackHealerTest extends TestCase
         )->undo(7);
 
         self::assertTrue($undone);
+        self::assertSame([3], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function undoPreviewRunsTheFeasibilityChecksWithoutRestoring(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('findUndoable')->with(7)->willReturn(['id' => 5, 'from_version' => 3, 'to_version' => 2]);
+        $healLog->expects(self::never())->method('markUndone');
+
+        $restored = new \ArrayObject();
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $healLog,
+            $restored,
+            binaryByVersionId: [2 => 'healed-bytes'],
+            assetsById: [7 => $this->asset()],
+            versionsById: [3 => $this->version(3), 2 => $this->version(2)],
+            liveBinary: 'healed-bytes',
+        )->undoDetailed(7, dryRun: true);
+
+        self::assertTrue($result->isSuccessful());
+        self::assertSame(UndoHealOutcome::WouldReverse, $result->outcome);
+        self::assertTrue($result->dryRun);
+        self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function undoReportsWhenTheAuditRowCouldNotBeFinalised(): void
+    {
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->method('findUndoable')->willReturn(['id' => 5, 'from_version' => 3, 'to_version' => 2]);
+        $healLog->method('markUndone')->with(5)->willReturn(false);
+
+        $restored = new \ArrayObject();
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $healLog,
+            $restored,
+            binaryByVersionId: [2 => 'healed-bytes'],
+            assetsById: [7 => $this->asset()],
+            versionsById: [3 => $this->version(3), 2 => $this->version(2)],
+            liveBinary: 'healed-bytes',
+        )->undoDetailed(7);
+
+        self::assertFalse($result->isSuccessful());
+        self::assertSame(UndoHealOutcome::Failed, $result->outcome);
+        self::assertSame(UndoHealReason::LogUpdateFailed, $result->reasonCode);
+        self::assertSame('The asset was restored, but the integrity log could not be marked undone.', $result->reason);
         self::assertSame([3], $restored->getArrayCopy());
     }
 
@@ -453,6 +823,25 @@ class VersionRollbackHealerTest extends TestCase
         $restored = new \ArrayObject();
         self::assertFalse($this->healer($this->checker(IntegrityStatus::Broken), $healLog, $restored)->undo(7));
         self::assertSame([], $restored->getArrayCopy());
+    }
+
+    #[Test]
+    public function undoDoesNotReadAuditStateWhenAnotherWorkerHoldsTheAssetLock(): void
+    {
+        $store = new InMemoryStore();
+        $owner = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        $worker = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        self::assertTrue($owner->acquireAsset(7));
+
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->expects(self::never())->method('findUndoable');
+
+        self::assertFalse($this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $healLog,
+            new \ArrayObject(),
+            loopGuard: $worker,
+        )->undo(7));
     }
 
     #[Test]
@@ -513,10 +902,10 @@ class VersionRollbackHealerTest extends TestCase
      */
     private function restoreHealer(?LoopGuard $loopGuard = null): VersionRollbackHealer
     {
-        return new class ($this->checker(IntegrityStatus::Broken), $this->createMock(IntegrityHealLog::class), $loopGuard ?? new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()))) extends VersionRollbackHealer {
-            public function __construct(CompositeIntegrityChecker $checker, IntegrityHealLog $healLog, LoopGuard $loopGuard)
+        return new class ($this->checker(IntegrityStatus::Broken), $this->createMock(IntegrityHealLog::class), $loopGuard ?? new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), $this->authorization()) extends VersionRollbackHealer {
+            public function __construct(CompositeIntegrityChecker $checker, IntegrityHealLog $healLog, LoopGuard $loopGuard, ElementAuthorization $authorization)
             {
-                parent::__construct($checker, $loopGuard, new EventDispatcher(), $healLog, new NullLogger());
+                parent::__construct($checker, $loopGuard, new EventDispatcher(), $healLog, new NullLogger(), $authorization);
             }
 
             public function callRestore(Asset $asset, Version $version): void
@@ -533,5 +922,14 @@ class VersionRollbackHealerTest extends TestCase
                 return $stream;
             }
         };
+    }
+
+    private function authorization(bool $allowed = true): ElementAuthorization
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn(ActorContext::system());
+        $authorization->method('isAllowed')->willReturn($allowed);
+
+        return $authorization;
     }
 }

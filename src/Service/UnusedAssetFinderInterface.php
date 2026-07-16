@@ -24,25 +24,25 @@ interface UnusedAssetFinderInterface
      */
     public function previewMutation(int $id, string $action = 'delete'): ?string;
 
-    /** @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: array<int, array{type: string, count: int, total_size: int}>} */
+    /** @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, unknownSizeCount: int, byType: array<int, array{type: string, count: int, total_size: int, unknown_size_count: int}>} */
     public function getUnusedStats(): array;
 
     /**
      * Cached variant of getUnusedStats() for the web endpoint (the raw scan is too costly per request).
      *
-     * @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, byType: array<int, array{type: string, count: int, total_size: int}>}
+     * @return array{totalCount: int, totalSize: int, totalSizeFormatted: string, unknownSizeCount: int, byType: array<int, array{type: string, count: int, total_size: int, unknown_size_count: int}>}
      */
     public function getUnusedStatsCached(): array;
 
     /**
      * @param int[] $assetIds
-     * @return array{deleted: int, failed: int, errors: array<int, string>}
+     * @return array{deleted: int, failed: int, errors: array<int, string>, observerWarnings: list<string>}
      */
-    public function deleteAssets(array $assetIds): array;
+    public function deleteAssets(array $assetIds, ?array $expectedFingerprints = null): array;
 
     /**
      * @param int[] $assetIds
-     * @return array{moved: int, failed: int, errors: array<int, string>}
+     * @return array{moved: int, failed: int, errors: array<int, string>, observerWarnings: list<string>}
      */
-    public function moveAssets(array $assetIds, string $targetFolder): array;
+    public function moveAssets(array $assetIds, string $targetFolder, ?array $expectedFingerprints = null): array;
 }

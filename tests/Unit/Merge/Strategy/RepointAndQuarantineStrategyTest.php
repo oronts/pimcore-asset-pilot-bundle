@@ -48,6 +48,19 @@ class RepointAndQuarantineStrategyTest extends TestCase
     }
 
     #[Test]
+    public function recoversAQuarantineThatCommittedBeforeTheRunItemCompleted(): void
+    {
+        $quarantine = $this->createMock(QuarantineService::class);
+        $quarantine->expects(self::once())->method('recoverQuarantine')->with(9)->willReturn(true);
+
+        $disposition = (new RepointAndQuarantineStrategy($quarantine))
+            ->recoverDisposition(9, new RepointReport(9, 5, 2, []));
+
+        self::assertNotNull($disposition);
+        self::assertSame(DispositionOutcome::Quarantined, $disposition->outcome);
+    }
+
+    #[Test]
     public function reportsAnErrorWhenQuarantineDoesNotMoveTheCopy(): void
     {
         $quarantine = $this->createMock(QuarantineService::class);

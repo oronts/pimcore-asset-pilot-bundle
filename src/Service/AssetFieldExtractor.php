@@ -97,60 +97,48 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         }
 
         if ($value instanceof ImageGallery) {
-            $assets = [];
-
-            foreach ($value->getItems() as $item) {
-                if ($item instanceof Hotspotimage) {
-                    $image = $item->getImage();
-
-                    if ($image instanceof Asset) {
-                        $assets[] = $image;
-                    }
-                }
-            }
-
-            return $assets;
+            return $this->extractAssetsFromItems($value->getItems());
         }
 
-        // advancedMany*Relation fields wrap each target in ElementMetadata; unwrap to the element.
         if ($value instanceof ElementMetadata) {
             return $this->extractAssetsFromValue($value->getElement());
         }
-
-        // Block fields hold rows of BlockElement (one per sub-field); unwrap to the held value.
         if ($value instanceof BlockElement) {
             return $this->extractAssetsFromValue($value->getData());
         }
-
         if (is_array($value)) {
-            $assets = [];
-
-            foreach ($value as $item) {
-                $assets = [...$assets, ...$this->extractAssetsFromValue($item)];
-            }
-
-            return $assets;
+            return $this->extractAssetsFromItems($value);
         }
 
-        if (is_object($value)) {
-            if (method_exists($value, 'getImage')) {
-                $image = $value->getImage();
+        return is_object($value) ? $this->extractAssetsFromObject($value) : [];
+    }
 
-                return $image instanceof Asset ? [$image] : [];
-            }
-
-            if (method_exists($value, 'getItems')) {
-                $assets = [];
-
-                foreach ($value->getItems() as $item) {
-                    $assets = [...$assets, ...$this->extractAssetsFromValue($item)];
-                }
-
-                return $assets;
-            }
+    /** @return list<Asset> */
+    private function extractAssetsFromItems(iterable $items): array
+    {
+        $assets = [];
+        foreach ($items as $item) {
+            array_push($assets, ...$this->extractAssetsFromValue($item));
         }
 
-        return [];
+        return $assets;
+    }
+
+    /** @return list<Asset> */
+    private function extractAssetsFromObject(object $value): array
+    {
+        if (method_exists($value, 'getImage')) {
+            $image = $value->getImage();
+
+            return $image instanceof Asset ? [$image] : [];
+        }
+        if (!method_exists($value, 'getItems')) {
+            return [];
+        }
+
+        $items = $value->getItems();
+
+        return is_iterable($items) ? $this->extractAssetsFromItems($items) : [];
     }
 
     /**
@@ -310,16 +298,13 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
 
     protected function localizedFieldsOf(object $holder): ?Localizedfield
     {
-        foreach (['getLocalizedFields', 'getLocalizedfields'] as $method) {
-            if (method_exists($holder, $method)) {
-                $localized = $holder->$method();
-                if ($localized instanceof Localizedfield) {
-                    return $localized;
-                }
-            }
+        if (!method_exists($holder, 'getLocalizedfields')) {
+            return null;
         }
 
-        return null;
+        $localized = $holder->getLocalizedfields();
+
+        return $localized instanceof Localizedfield ? $localized : null;
     }
 
     protected function objectbrickDefinition(string $key): ?Objectbrick\Definition
