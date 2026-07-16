@@ -129,6 +129,7 @@ class AssetUploadListener
 
         // Check if the object is already being processed (loop prevention)
         if ($this->loopGuard->isProcessingObject($objectId)) {
+            $this->loopGuard->markObjectDirty($objectId);
             $this->logger->debug('AssetUploadListener: object {id} already being processed, skipping', [
                 'id' => $objectId,
             ]);
@@ -138,6 +139,7 @@ class AssetUploadListener
         if ($this->asyncEnabled) {
             // Dispatch deduplication: skip if a message was recently dispatched for this object
             if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
+                $this->loopGuard->markObjectDirty($objectId);
                 $this->logger->debug('AssetUploadListener: message recently dispatched for object {id}, skipping duplicate', [
                     'id' => $objectId,
                 ]);

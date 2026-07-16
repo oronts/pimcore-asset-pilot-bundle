@@ -128,6 +128,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(42);
 
         $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(true);
+        $this->loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
         $this->dispatcher->expects(self::never())->method('dispatchObject');
         $this->organizer->expects(self::never())->method('organize');
 
@@ -147,6 +148,22 @@ class DataObjectSaveListenerTest extends TestCase
         $this->dispatcher->expects(self::once())
             ->method('dispatchObject')
             ->with(42, TriggerType::ObjectSave);
+
+        $listener->onPostUpdate($this->createEvent($object));
+    }
+
+    #[Test]
+    public function marksObjectDirtyWhenARecentDispatchSuppressesAnotherSave(): void
+    {
+        $listener = $this->createListener(asyncEnabled: true);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getId')->willReturn(42);
+
+        $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(false);
+        $this->loopGuard->method('wasObjectRecentlyDispatched')->with(42)->willReturn(true);
+        $this->loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
+        $this->dispatcher->expects(self::never())->method('dispatchObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }

@@ -36,28 +36,17 @@ class DataObjectSaveListener
 
     protected function handleEvent(DataObjectEvent $event, TriggerType $triggerType): void
     {
-        if (!$this->enabled) {
-            return;
-        }
-
-        // Draft autosaves and version-only saves dispatch postUpdate but never persist the object; do
-        // not organize (which physically moves assets) for a draft the user has not committed.
-        if ($event->hasArgument('saveVersionOnly') && $event->getArgument('saveVersionOnly')) {
-            return;
-        }
-        if ($event->hasArgument('isAutoSave') && $event->getArgument('isAutoSave')) {
+        if ($this->shouldIgnore($event)) {
             return;
         }
 
         $object = $event->getObject();
-
         if (!$object instanceof Concrete) {
             return;
         }
 
         $className = $object->getClassName();
-
-        if ($this->allowedClasses !== [] && !in_array($className, $this->allowedClasses, true)) {
+        if (!$this->classIsAllowed($className)) {
             $this->logger->debug('DataObjectSaveListener: class {class} not in allowed list, skipping', [
                 'class' => $className,
             ]);
@@ -66,13 +55,9 @@ class DataObjectSaveListener
         }
 
         $objectId = (int) $object->getId();
-
-        // Loop prevention via Redis: skip if this object is currently being organized
         if ($this->loopGuard->isProcessingObject($objectId)) {
-            $this->logger->debug('DataObjectSaveListener: object {class}:{id} is being processed, skipping', [
-                'class' => $className,
-                'id' => $objectId,
-            ]);
+            $this->deferObject($objectId, $className, 'object is being processed');
+
             return;
         }
 
@@ -83,26 +68,54 @@ class DataObjectSaveListener
         ]);
 
         if ($this->asyncEnabled) {
-            // Dispatch deduplication: skip if a message was recently dispatched for this object
-            if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
-                $this->logger->debug('DataObjectSaveListener: message recently dispatched for {class}:{id}, skipping duplicate', [
-                    'class' => $className,
-                    'id' => $objectId,
-                ]);
-                return;
-            }
-
-            $this->dispatcher->dispatchObject($objectId, $triggerType);
-            $this->loopGuard->markObjectDispatched($objectId);
-
-            $this->logger->debug('DataObjectSaveListener: dispatched async message for {class}:{id}', [
-                'class' => $className,
-                'id' => $objectId,
-            ]);
+            $this->dispatchAsync($objectId, $className, $triggerType);
 
             return;
         }
 
+        $this->organizeSynchronously($object, $objectId, $className, $triggerType);
+    }
+
+    private function shouldIgnore(DataObjectEvent $event): bool
+    {
+        return !$this->enabled
+            || ($event->hasArgument('saveVersionOnly') && (bool) $event->getArgument('saveVersionOnly'))
+            || ($event->hasArgument('isAutoSave') && (bool) $event->getArgument('isAutoSave'));
+    }
+
+    private function classIsAllowed(string $className): bool
+    {
+        return $this->allowedClasses === [] || in_array($className, $this->allowedClasses, true);
+    }
+
+    private function deferObject(int $objectId, string $className, string $reason): void
+    {
+        $this->loopGuard->markObjectDirty($objectId);
+        $this->logger->debug('DataObjectSaveListener: {reason} for {class}:{id}, deferring', [
+            'reason' => $reason,
+            'class' => $className,
+            'id' => $objectId,
+        ]);
+    }
+
+    private function dispatchAsync(int $objectId, string $className, TriggerType $triggerType): void
+    {
+        if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
+            $this->deferObject($objectId, $className, 'message was recently dispatched');
+
+            return;
+        }
+
+        $this->dispatcher->dispatchObject($objectId, $triggerType);
+        $this->loopGuard->markObjectDispatched($objectId);
+        $this->logger->debug('DataObjectSaveListener: dispatched async message for {class}:{id}', [
+            'class' => $className,
+            'id' => $objectId,
+        ]);
+    }
+
+    private function organizeSynchronously(Concrete $object, int $objectId, string $className, TriggerType $triggerType): void
+    {
         try {
             $results = $this->organizer->organize($object, $triggerType);
 

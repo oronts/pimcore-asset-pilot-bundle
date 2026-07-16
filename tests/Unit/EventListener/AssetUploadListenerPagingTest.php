@@ -93,4 +93,41 @@ class AssetUploadListenerPagingTest extends TestCase
         self::assertSame(2, $listener->fetchCount);
         self::assertSame(103, $listener->processedCount);
     }
+
+    #[Test]
+    public function processingObjectIsMarkedDirtyInsteadOfLosingTheUpload(): void
+    {
+        $guard = $this->createMock(LoopGuard::class);
+        $guard->method('isProcessingObject')->with(42)->willReturn(true);
+        $guard->expects(self::once())->method('markObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::never())->method('dispatchObject');
+
+        $listener = $this->dependentListener($guard, $dispatcher);
+        $listener->runDependent(['type' => 'object', 'id' => 42]);
+    }
+
+    #[Test]
+    public function recentDispatchMarksObjectDirtyInsteadOfLosingTheUpload(): void
+    {
+        $guard = $this->createMock(LoopGuard::class);
+        $guard->method('isProcessingObject')->with(42)->willReturn(false);
+        $guard->method('wasObjectRecentlyDispatched')->with(42)->willReturn(true);
+        $guard->expects(self::once())->method('markObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::never())->method('dispatchObject');
+
+        $listener = $this->dependentListener($guard, $dispatcher);
+        $listener->runDependent(['type' => 'object', 'id' => 42]);
+    }
+
+    private function dependentListener(LoopGuard $guard, OrganizeDispatcher $dispatcher): object
+    {
+        return new class ($this->createMock(AssetOrganizer::class), $dispatcher, $guard, new NullLogger()) extends AssetUploadListener {
+            public function runDependent(array $dependency): void
+            {
+                $this->processDependent($dependency);
+            }
+        };
+    }
 }

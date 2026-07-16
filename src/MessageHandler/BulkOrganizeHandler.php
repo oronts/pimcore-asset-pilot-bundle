@@ -4,39 +4,330 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\MessageHandler;
 
+use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\BulkObjectResult;
+use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
+use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
+use Oronts\AssetPilotBundle\Service\RetryableInfrastructureFailure;
+use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 
 #[AsMessageHandler]
 class BulkOrganizeHandler
 {
     public function __construct(
         protected readonly AssetOrganizer $organizer,
+        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly ActorContextStore $actors,
+        protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
+        protected readonly OperationRunStoreInterface $runs,
+        protected readonly OrganizePlanFingerprint $planFingerprints,
     ) {}
 
     public function __invoke(BulkOrganizeMessage $message): void
     {
+        $this->process($message);
+    }
+
+    private function process(BulkOrganizeMessage $message): void
+    {
+        $actor = new ActorContext($message->actorType, $message->actorUserId);
+        if (!$this->resumeTrackedRun($message)) {
+            return;
+        }
+
         $this->logger->info('Asset Pilot: processing bulk organization for {count} objects (trigger: {trigger})', [
             'count' => count($message->objectIds),
             'trigger' => $message->triggerType->value,
         ]);
 
+        $activeItemKey = null;
+        $lockConflict = false;
         try {
-            $results = $this->organizer->organizeBulk($message->objectIds, $message->triggerType, null, $message->dispatchedAt);
+            $objectIds = $this->plannedObjectIds($message, $actor);
+            if ($message->expectedFingerprints !== [] && $objectIds === []) {
+                if ($message->runId !== null) {
+                    $this->runs->finish($message->runId);
+                }
 
-            $this->logger->info('Asset Pilot: bulk organization complete - {count} operations', [
-                'count' => count($results),
-            ]);
+                return;
+            }
+
+            $report = $this->organizeBatch($message, $actor, $objectIds, $activeItemKey, $lockConflict);
+
+            if ($message->runId === null) {
+                $this->requeueUntrackedDirtyObjects($message, $actor);
+            }
+            $this->recordReport($report);
+            if ($message->runId !== null) {
+                $this->runs->finish($message->runId);
+            }
+            if ($lockConflict) {
+                throw new RecoverableMessageHandlingException('An operation run item is already being processed.');
+            }
         } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: bulk organization failed: {error}', [
-                'error' => $e->getMessage(),
-                'exception' => $e,
-            ]);
+            if ($e instanceof RecoverableMessageHandlingException) {
+                throw $e;
+            }
+            if (RetryableInfrastructureFailure::matches($e)) {
+                throw $e;
+            }
 
-            throw $e;
+            $this->failBatch($message, $e);
+        } finally {
+            if ($message->runId !== null && $activeItemKey !== null) {
+                $this->loopGuard->releaseOperationRunItem($message->runId, $activeItemKey);
+            }
         }
+    }
+
+    private function resumeTrackedRun(BulkOrganizeMessage $message): bool
+    {
+        if ($message->runId === null) {
+            return true;
+        }
+
+        if ($this->runs->isCancellationRequested($message->runId)) {
+            $this->cancelOpenItems($message);
+
+            return false;
+        }
+        if (!$this->runs->resume($message->runId)) {
+            return false;
+        }
+        if ($this->runs->isCancellationRequested($message->runId)) {
+            $this->cancelOpenItems($message);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** @param list<int> $objectIds */
+    private function organizeBatch(
+        BulkOrganizeMessage $message,
+        ActorContext $actor,
+        array $objectIds,
+        ?string &$activeItemKey,
+        bool &$lockConflict,
+    ): BulkOrganizeReport {
+        return $this->actors->runAs(
+            $actor,
+            function () use ($objectIds, $message, $actor, &$activeItemKey, &$lockConflict): BulkOrganizeReport {
+                return $this->organizer->organizeBulkDetailed(
+                    $objectIds,
+                    $message->triggerType,
+                    dispatchedAt: $message->dispatchedAt,
+                    staleCallback: $message->expectedFingerprints === []
+                        ? fn (int $objectId) => $this->dispatcher->dispatchObject($objectId, $message->triggerType, $actor)
+                        : null,
+                    shouldCancel: $message->runId === null ? null : fn (): bool => $this->runs->isCancellationRequested($message->runId),
+                    beforeObject: $message->runId === null ? null : function (int $objectId) use ($message, &$activeItemKey, &$lockConflict): bool {
+                        return $this->beginItem($message, $objectId, $activeItemKey, $lockConflict);
+                    },
+                    expectedFingerprints: $message->expectedFingerprints,
+                    heartbeat: $message->runId === null ? null : fn (int $objectId) => $this->loopGuard->refreshOperationRunItem($message->runId, $this->itemKey($objectId)),
+                    afterObject: $message->runId === null ? null : function (BulkObjectResult $result) use ($message, $actor, &$activeItemKey): void {
+                        $this->completeAndReleaseItem($message, $actor, $result, $activeItemKey);
+                    },
+                );
+            },
+        );
+    }
+
+    private function beginItem(BulkOrganizeMessage $message, int $objectId, ?string &$activeItemKey, bool &$lockConflict): bool
+    {
+        $itemKey = $this->itemKey($objectId);
+        if (!$this->loopGuard->acquireOperationRunItem((string) $message->runId, $itemKey)) {
+            $lockConflict = true;
+
+            return false;
+        }
+        if (!$this->runs->resumeItem((string) $message->runId, $itemKey)) {
+            $this->loopGuard->releaseOperationRunItem((string) $message->runId, $itemKey);
+
+            return false;
+        }
+        $activeItemKey = $itemKey;
+
+        return true;
+    }
+    /** @param-out null $activeItemKey */
+
+    private function completeAndReleaseItem(BulkOrganizeMessage $message, ActorContext $actor, BulkObjectResult $result, ?string &$activeItemKey): void
+    {
+        try {
+            $this->requeueDirtyObject($message, $actor, $result->objectId);
+            $this->completeObjectResult((string) $message->runId, $result);
+        } finally {
+            if ($activeItemKey !== null) {
+                $this->loopGuard->releaseOperationRunItem((string) $message->runId, $activeItemKey);
+                $activeItemKey = null;
+            }
+        }
+    }
+
+    private function requeueDirtyObject(BulkOrganizeMessage $message, ActorContext $actor, int $objectId): void
+    {
+        if (isset($message->expectedFingerprints[$objectId]) || !$this->loopGuard->isObjectDirty($objectId)) {
+            return;
+        }
+
+        try {
+            $this->dispatcher->dispatchObject(
+                $objectId,
+                $message->triggerType,
+                $actor,
+            );
+        } catch (\Throwable $exception) {
+            throw new RetryableDispatchException('The latest object state could not be queued.', previous: $exception);
+        }
+        $this->loopGuard->clearObjectDirty($objectId);
+    }
+
+    private function requeueUntrackedDirtyObjects(BulkOrganizeMessage $message, ActorContext $actor): void
+    {
+        foreach ($message->objectIds as $objectId) {
+            $this->requeueDirtyObject($message, $actor, $objectId);
+        }
+    }
+
+    private function recordReport(BulkOrganizeReport $report): void
+    {
+        $this->logger->info('Asset Pilot: bulk organization complete - {succeeded} succeeded, {skipped} skipped, {failed} failed', [
+            'succeeded' => $report->succeededCount(),
+            'skipped' => $report->skippedCount(),
+            'failed' => $report->failedCount(),
+        ]);
+        foreach ($report->observerWarnings as $warning) {
+            $this->logger->warning('Asset Pilot: {warning}', ['warning' => $warning]);
+        }
+    }
+
+    private function failBatch(BulkOrganizeMessage $message, \Throwable $exception): void
+    {
+        $this->logger->error('Asset Pilot: bulk organization failed: {error}', [
+            'error' => $exception->getMessage(),
+            'exception' => $exception,
+        ]);
+
+        if ($message->runId === null) {
+            throw $exception;
+        }
+
+        foreach ($message->objectIds as $objectId) {
+            $this->runs->completeItem(
+                $message->runId,
+                $this->itemKey($objectId),
+                OperationRunItemStatus::Failed,
+                error: 'Bulk organization failed.',
+            );
+        }
+        $this->runs->finish($message->runId);
+    }
+
+    private function completeObjectResult(string $runId, BulkObjectResult $result): void
+    {
+        $this->runs->completeItem(
+            $runId,
+            $this->itemKey($result->objectId),
+            match ($result->status) {
+                BulkObjectStatus::Succeeded => OperationRunItemStatus::Completed,
+                BulkObjectStatus::Skipped => OperationRunItemStatus::Skipped,
+                BulkObjectStatus::Failed => OperationRunItemStatus::Failed,
+            },
+            ['operationCount' => $result->operationCount],
+            $result->reason,
+        );
+    }
+
+
+    private function cancelOpenItems(BulkOrganizeMessage $message): void
+    {
+        foreach ($message->objectIds as $objectId) {
+            $itemKey = $this->itemKey($objectId);
+            if (!$this->loopGuard->acquireOperationRunItem((string) $message->runId, $itemKey)) {
+                continue;
+            }
+            try {
+                $this->runs->completeItem(
+                    (string) $message->runId,
+                    $itemKey,
+                    OperationRunItemStatus::Cancelled,
+                    error: 'Cancellation was requested before processing.',
+                );
+            } finally {
+                $this->loopGuard->releaseOperationRunItem((string) $message->runId, $itemKey);
+            }
+        }
+        $this->runs->finish((string) $message->runId);
+    }
+
+    private function itemKey(int $objectId): string
+    {
+        return 'object:' . $objectId;
+    }
+
+    /** @return list<int> */
+    private function plannedObjectIds(BulkOrganizeMessage $message, ActorContext $actor): array
+    {
+        if ($message->expectedFingerprints === []) {
+            return $message->objectIds;
+        }
+
+        return $this->actors->runAs($actor, function () use ($message): array {
+            $eligible = [];
+            foreach ($message->objectIds as $objectId) {
+                $itemKey = $this->itemKey($objectId);
+                if ($message->runId !== null && !$this->loopGuard->acquireOperationRunItem($message->runId, $itemKey)) {
+                    throw new RecoverableMessageHandlingException('An operation run item is already being processed.');
+                }
+                try {
+                    $expected = $message->expectedFingerprints[$objectId] ?? null;
+                    $object = $this->loadObject($objectId);
+                    $operations = $object === null ? null : $this->organizer->dryRun($object, $message->triggerType);
+                    if ($expected !== null && $object !== null && hash_equals($expected, $this->planFingerprints->forOperations($object, $operations ?? []))) {
+                        $eligible[] = $objectId;
+                        continue;
+                    }
+
+                    $this->logger->info('Asset Pilot: skipping object {id} because it changed after immutable preview', [
+                        'id' => $objectId,
+                    ]);
+                    if ($message->runId !== null) {
+                        $this->runs->completeItem(
+                            $message->runId,
+                            $this->itemKey($objectId),
+                            OperationRunItemStatus::Skipped,
+                            error: 'Object changed after preview; the immutable plan was not applied.',
+                        );
+                    }
+                } finally {
+                    if ($message->runId !== null) {
+                        $this->loopGuard->releaseOperationRunItem($message->runId, $itemKey);
+                    }
+                }
+            }
+
+            return $eligible;
+        });
+    }
+
+    protected function loadObject(int $objectId): ?AbstractObject
+    {
+        return AbstractObject::getById($objectId, ['force' => true]);
     }
 }

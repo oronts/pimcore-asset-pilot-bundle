@@ -4,31 +4,98 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\MessageHandler;
 
+use Oronts\AssetPilotBundle\Enum\ActorType;
+use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\MessageHandler\BulkOrganizeHandler;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\BulkObjectResult;
+use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
+use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Security\ActorContextProvider;
+use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
+use Symfony\Component\Lock\Exception\LockStorageException;
+use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 
 #[CoversClass(BulkOrganizeHandler::class)]
 class BulkOrganizeHandlerTest extends TestCase
 {
+    private function handler(
+        AssetOrganizer $organizer,
+        ?OrganizeDispatcher $dispatcher = null,
+        ?LoopGuard $loopGuard = null,
+        ?OperationRunStoreInterface $runs = null,
+        array $objects = [],
+    ): BulkOrganizeHandler {
+        $provider = $this->createMock(ActorContextProvider::class);
+        $provider->method('current')->willReturn(ActorContext::system());
+        $actors = new ActorContextStore($provider);
+        if ($loopGuard === null) {
+            $loopGuard = $this->createMock(LoopGuard::class);
+            $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        }
+
+        return new class (
+            $organizer,
+            $dispatcher ?? $this->createMock(OrganizeDispatcher::class),
+            $actors,
+            $loopGuard,
+            new NullLogger(),
+            $runs ?? $this->createMock(OperationRunStoreInterface::class),
+            new OrganizePlanFingerprint(),
+            $objects,
+        ) extends BulkOrganizeHandler {
+            /** @param array<int, AbstractObject> $objects */
+            public function __construct(
+                AssetOrganizer $organizer,
+                OrganizeDispatcher $dispatcher,
+                ActorContextStore $actors,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                OperationRunStoreInterface $runs,
+                OrganizePlanFingerprint $fingerprints,
+                private readonly array $objects,
+            ) {
+                parent::__construct($organizer, $dispatcher, $actors, $loopGuard, $logger, $runs, $fingerprints);
+            }
+
+            protected function loadObject(int $objectId): ?AbstractObject
+            {
+                return $this->objects[$objectId] ?? null;
+            }
+        };
+    }
+
     #[Test]
     public function callsOrganizeBulkWithCorrectArgs(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::once())
-            ->method('organizeBulk')
-            ->with([1, 2, 3], TriggerType::BulkOperation)
-            ->willReturn([]);
+            ->method('organizeBulkDetailed')
+            ->with([1, 2, 3], TriggerType::BulkOperation, null, 0, self::isCallable(), null, null, [], null, null)
+            ->willReturn(new BulkOrganizeReport([], []));
 
-        $handler = new BulkOrganizeHandler($organizer, new NullLogger());
+        $handler = $this->handler($organizer);
         $message = new BulkOrganizeMessage(
             objectIds: [1, 2, 3],
             triggerType: TriggerType::BulkOperation,
+            actorType: ActorType::System,
         );
 
         $handler($message);
@@ -38,12 +105,13 @@ class BulkOrganizeHandlerTest extends TestCase
     public function rethrowsExceptionFromOrganizer(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->method('organizeBulk')->willThrowException(new \RuntimeException('bulk failed'));
+        $organizer->method('organizeBulkDetailed')->willThrowException(new \RuntimeException('bulk failed'));
 
-        $handler = new BulkOrganizeHandler($organizer, new NullLogger());
+        $handler = $this->handler($organizer);
         $message = new BulkOrganizeMessage(
             objectIds: [1],
             triggerType: TriggerType::BulkOperation,
+            actorType: ActorType::System,
         );
 
         $this->expectException(\RuntimeException::class);
@@ -56,7 +124,7 @@ class BulkOrganizeHandlerTest extends TestCase
     public function handlerIsCallable(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);
-        $handler = new BulkOrganizeHandler($organizer, new NullLogger());
+        $handler = $this->handler($organizer);
 
         self::assertIsCallable($handler);
     }
@@ -66,16 +134,236 @@ class BulkOrganizeHandlerTest extends TestCase
     {
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::once())
-            ->method('organizeBulk')
-            ->with([], TriggerType::Manual)
-            ->willReturn([]);
+            ->method('organizeBulkDetailed')
+            ->with([], TriggerType::Manual, null, 0, self::isCallable(), null, null, [], null, null)
+            ->willReturn(new BulkOrganizeReport([], []));
 
-        $handler = new BulkOrganizeHandler($organizer, new NullLogger());
+        $handler = $this->handler($organizer);
         $message = new BulkOrganizeMessage(
             objectIds: [],
             triggerType: TriggerType::Manual,
+            actorType: ActorType::System,
         );
 
         $handler($message);
+    }
+
+    #[Test]
+    public function requeuesObjectsSavedWhileTheBulkJobWasProcessing(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')->willReturn(new BulkOrganizeReport([], []));
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+            2,
+            TriggerType::BulkOperation,
+            self::callback(static fn (ActorContext $actor): bool => $actor->type === ActorType::System),
+        );
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->expects(self::exactly(3))
+            ->method('isObjectDirty')
+            ->willReturnMap([[1, false], [2, true], [3, false]]);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(2);
+
+        ($this->handler($organizer, $dispatcher, $loopGuard))(
+            new BulkOrganizeMessage(
+                objectIds: [1, 2, 3],
+                triggerType: TriggerType::BulkOperation,
+                actorType: ActorType::System,
+            ),
+        );
+    }
+
+    #[Test]
+    public function recordsPerObjectProgressForTrackedBatches(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::once())->method('organizeBulkDetailed')
+            ->willReturnCallback(static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $after): BulkOrganizeReport {
+                self::assertFalse($cancel());
+                self::assertTrue($before(42));
+                $heartbeat(42);
+                $result = new BulkObjectResult(42, BulkObjectStatus::Succeeded, operationCount: 2);
+                $after($result);
+
+                return new BulkOrganizeReport([], [$result]);
+            });
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::once())->method('resume')->with('run-1')->willReturn(true);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->expects(self::once())->method('resumeItem')->with('run-1', 'object:42')->willReturn(true);
+        $runs->expects(self::once())->method('completeItem')->with(
+            'run-1',
+            'object:42',
+            OperationRunItemStatus::Completed,
+            ['operationCount' => 2],
+            null,
+        )->willReturn(true);
+        $runs->expects(self::once())->method('finish')->with('run-1')->willReturn(OperationRunStatus::Completed);
+
+        ($this->handler($organizer, runs: $runs))(
+            new BulkOrganizeMessage([42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function latestStateDispatchFailureLeavesTrackedBulkItemResumable(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')
+            ->willReturnCallback(
+                static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $after): BulkOrganizeReport {
+                    self::assertTrue($before(42));
+                    $after(new BulkObjectResult(42, BulkObjectStatus::Succeeded, operationCount: 1));
+
+                    return new BulkOrganizeReport([], []);
+                },
+            );
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())
+            ->method('dispatchObject')
+            ->willThrowException(new \RuntimeException('broker unavailable'));
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(true);
+        $loopGuard->expects(self::never())->method('clearObjectDirty');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willReturn(true);
+        $runs->expects(self::never())->method('completeItem');
+        $runs->expects(self::never())->method('finish');
+
+        $this->expectException(RetryableDispatchException::class);
+
+        ($this->handler($organizer, $dispatcher, $loopGuard, $runs))(
+            new BulkOrganizeMessage([42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function retryableInfrastructureFailureLeavesBatchItemsResumable(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')->willThrowException(new LockStorageException('cache unavailable'));
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->expects(self::never())->method('completeItem');
+        $runs->expects(self::never())->method('finish');
+
+        $this->expectException(LockStorageException::class);
+
+        ($this->handler($organizer, runs: $runs))(
+            new BulkOrganizeMessage([42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function completedItemsStayTerminalWhenALaterItemNeedsRedelivery(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $after): never {
+                self::assertTrue($before(41));
+                $heartbeat(41);
+                $after(new BulkObjectResult(41, BulkObjectStatus::Succeeded, operationCount: 1));
+                self::assertTrue($before(42));
+
+                throw new LockStorageException('cache unavailable');
+            },
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->expects(self::exactly(2))->method('resumeItem')->willReturn(true);
+        $runs->expects(self::once())->method('completeItem')->with(
+            'run-1',
+            'object:41',
+            OperationRunItemStatus::Completed,
+            ['operationCount' => 1],
+            null,
+        )->willReturn(true);
+        $runs->expects(self::never())->method('finish');
+
+        $this->expectException(LockStorageException::class);
+
+        ($this->handler($organizer, runs: $runs))(
+            new BulkOrganizeMessage([41, 42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function concurrentItemDeliveryIsRetriedBeforeItemStateChanges(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(false);
+        $loopGuard->expects(self::never())->method('releaseOperationRunItem');
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::once())->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before): BulkOrganizeReport {
+                self::assertFalse($before(42));
+
+                return new BulkOrganizeReport([], []);
+            },
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->expects(self::once())->method('resume')->with('run-1')->willReturn(true);
+        $runs->expects(self::never())->method('resumeItem');
+        $runs->expects(self::never())->method('completeItem');
+        $runs->expects(self::once())->method('finish')->with('run-1')->willReturn(OperationRunStatus::Running);
+
+        $this->expectException(RecoverableMessageHandlingException::class);
+
+        ($this->handler($organizer, loopGuard: $loopGuard, runs: $runs))(
+            new BulkOrganizeMessage([42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function plannedBatchCarriesFingerprintsIntoTheLockedOrganizerPass(): void
+    {
+        $object = $this->createMock(Concrete::class);
+        $object->method('getId')->willReturn(42);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getRealFullPath')->willReturn('/products/42');
+        $object->method('getModificationDate')->willReturn(100);
+        $object->method('getType')->willReturn('object');
+        $object->method('getVersionCount')->willReturn(1);
+        $operation = new MoveOperation(
+            10,
+            '/incoming/a.jpg',
+            '/organized/a.jpg',
+            42,
+            'Product',
+            'product-assets',
+            OperationStatus::Pending,
+            TriggerType::Api,
+        );
+        $fingerprint = (new OrganizePlanFingerprint())->forOperations($object, [$operation]);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::once())->method('dryRun')->with($object, TriggerType::Api)->willReturn([$operation]);
+        $organizer->expects(self::once())->method('organizeBulkDetailed')->with(
+            [42],
+            TriggerType::Api,
+            null,
+            0,
+            null,
+            null,
+            null,
+            [42 => $fingerprint],
+            null,
+            null,
+        )->willReturn(new BulkOrganizeReport([], []));
+
+        ($this->handler($organizer, objects: [42 => $object]))(
+            new BulkOrganizeMessage(
+                [42],
+                TriggerType::Api,
+                actorType: ActorType::System,
+                expectedFingerprints: [42 => $fingerprint],
+            ),
+        );
     }
 }

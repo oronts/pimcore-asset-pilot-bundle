@@ -7,48 +7,96 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
-/**
- * The single place that queues an organize message and stamps its deduplication key. Centralised so
- * every producer (the save/upload listeners, the API, the CLI, reorganize and replay) shares one
- * key/TTL policy: if the key formula drifted between call sites, Messenger deduplication would
- * silently stop collapsing redundant jobs. Every message carries a dispatch timestamp so the handler
- * can skip a job for an object changed after it was queued (stale-job guard).
- */
 class OrganizeDispatcher
 {
-    private const float SINGLE_DEDUP_TTL = 30.0;
-    private const float BULK_DEDUP_TTL = 60.0;
-
     public function __construct(
         private readonly MessageBusInterface $messageBus,
+        private readonly ActorContextStore $actors,
+        private readonly OperationRunStoreInterface $runs,
     ) {}
 
-    public function dispatchObject(int $objectId, TriggerType $triggerType): void
-    {
+    public function dispatchObject(
+        int $objectId,
+        TriggerType $triggerType,
+        ?ActorContext $actor = null,
+        ?string $runId = null,
+        ?string $expectedFingerprint = null,
+    ): string {
+        $actor ??= $this->actors->current();
+        $runId ??= $this->createRun(
+            [$objectId],
+            $triggerType,
+            $actor,
+            $expectedFingerprint === null ? [] : [$objectId => $expectedFingerprint],
+        );
         $this->messageBus->dispatch(Envelope::wrap(
-            new OrganizeAssetsMessage($objectId, $triggerType, $this->now()),
-            [new DeduplicateStamp('asset_pilot_organize_' . $objectId, self::SINGLE_DEDUP_TTL)],
+            new OrganizeAssetsMessage($objectId, $triggerType, $this->now(), $actor->type, $actor->userId, $runId, $expectedFingerprint),
         ));
+
+        return $runId;
     }
 
     /**
-     * @param int[] $objectIds
+     * @param int[]              $objectIds
+     * @param array<int, string> $expectedFingerprints
      */
-    public function dispatchBulk(array $objectIds, TriggerType $triggerType): void
-    {
-        // Sort so the dedup key is independent of caller-side ordering: the same batch passed as
-        // [1,2] and [2,1] must collapse to one queued job.
+    public function dispatchBulk(
+        array $objectIds,
+        TriggerType $triggerType,
+        ?ActorContext $actor = null,
+        ?string $runId = null,
+        array $expectedFingerprints = [],
+    ): string {
         $objectIds = array_values($objectIds);
         sort($objectIds);
+        $actor ??= $this->actors->current();
+        $runId ??= $this->createRun($objectIds, $triggerType, $actor, $expectedFingerprints);
 
         $this->messageBus->dispatch(Envelope::wrap(
-            new BulkOrganizeMessage($objectIds, $triggerType, $this->now()),
-            [new DeduplicateStamp('asset_pilot_bulk_' . md5(implode(',', $objectIds)), self::BULK_DEDUP_TTL)],
+            new BulkOrganizeMessage($objectIds, $triggerType, $this->now(), $actor->type, $actor->userId, $runId, $expectedFingerprints),
         ));
+
+        return $runId;
+    }
+
+    /**
+     * @param list<int>          $objectIds
+     * @param array<int, string> $expectedFingerprints
+     */
+    public function createRun(
+        array $objectIds,
+        TriggerType $triggerType,
+        ?ActorContext $actor = null,
+        array $expectedFingerprints = [],
+        string $kind = 'organize',
+        array $request = [],
+    ): string {
+        if ($objectIds === []) {
+            throw new \InvalidArgumentException('An organize run requires at least one object ID.');
+        }
+        if ($kind === '') {
+            throw new \InvalidArgumentException('An organize run requires a kind.');
+        }
+
+        $actor ??= $this->actors->current();
+
+        return $this->runs->create(
+            $kind,
+            $actor,
+            array_map(static fn (int $objectId): array => [
+                'key' => 'object:' . $objectId,
+                'type' => 'data_object',
+                'id' => $objectId,
+                'fingerprint' => $expectedFingerprints[$objectId] ?? null,
+                'payload' => ['trigger' => $triggerType->value],
+            ], array_values(array_unique($objectIds))),
+            ['trigger' => $triggerType->value, ...$request],
+        );
     }
 
     protected function now(): int
