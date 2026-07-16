@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
+use Oronts\AssetPilotBundle\Command\Support\UsesReviewedApplyPlan;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\ApplyPlan;
+use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
+use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\NormalizeFilenamesService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,9 +26,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class NormalizeFilenamesCommand extends Command
 {
     use ValidatesCliBulkIds;
+    use UsesReviewedApplyPlan;
 
     public function __construct(
         private readonly NormalizeFilenamesService $normalizer,
+        private readonly ApplyPlanServiceInterface $applyPlans,
     ) {
         parent::__construct();
     }
@@ -35,32 +43,55 @@ class NormalizeFilenamesCommand extends Command
             ->addOption('type', null, InputOption::VALUE_REQUIRED, 'Restrict the scan to an asset type')
             ->addOption('extension', null, InputOption::VALUE_REQUIRED, 'Restrict the scan to a file extension')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max assets to scan', '100')
-            ->addOption('apply', null, InputOption::VALUE_NONE, 'Actually rename (default: preview only)');
+            ->addOption('apply', null, InputOption::VALUE_NONE, 'Rename the exact reviewed selection')
+            ->addOption('plan-token', null, InputOption::VALUE_REQUIRED, 'Signed, single-use token returned by the matching preview');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $io->title('Asset Pilot — Normalize Filenames');
-
-        $byIds = $input->getOption('by-ids');
-        if ($byIds !== null) {
-            $ids = $this->validatedCsvIds($io, (string) $byIds, '--by-ids');
-            if ($ids === null) {
-                return Command::INVALID;
-            }
-        } else {
-            $filters = array_filter([
-                'folder' => $input->getOption('folder'),
-                'type' => $input->getOption('type'),
-                'extension' => $input->getOption('extension'),
-            ], static fn ($value): bool => $value !== null);
-            $ids = $this->normalizer->findCandidates($filters, max(1, (int) $input->getOption('limit')));
+        $apply = (bool) $input->getOption('apply');
+        $planToken = $input->getOption('plan-token');
+        if (!$this->hasValidPlanControl($io, $apply, $planToken)) {
+            return Command::INVALID;
         }
 
-        $apply = (bool) $input->getOption('apply');
-        $result = $this->normalizer->normalize($ids, dryRun: !$apply);
+        $selection = $this->selection($input, $io);
+        if ($selection === null) {
+            return Command::INVALID;
+        }
 
+        $preview = $this->normalizer->normalize($selection['assetIds'], dryRun: true);
+        if ($selection['assetIds'] === []) {
+            if ($apply) {
+                $io->error('The reviewed filename selection is no longer current. Preview again.');
+
+                return Command::INVALID;
+            }
+
+            return $this->render($io, $preview, true);
+        }
+
+        $plan = $this->normalizationPlan($selection, $preview);
+        if (!$apply) {
+            $this->renderPlanToken($io, $this->applyPlans->issue($plan));
+
+            return $this->render($io, $preview, true);
+        }
+
+        if (!$this->claimPlan($io, (string) $planToken, $plan)) {
+            return Command::INVALID;
+        }
+
+        return $this->render($io, $this->normalizer->normalize($selection['assetIds'], dryRun: false), false);
+    }
+
+    /**
+     * @param array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>} $result
+     */
+    private function render(SymfonyStyle $io, array $result, bool $preview): int
+    {
         if ($result['changes'] !== []) {
             $io->table(
                 ['Asset', 'From', 'To'],
@@ -68,7 +99,6 @@ class NormalizeFilenamesCommand extends Command
             );
         }
 
-        // Show outcomes (ACL/content-ref skips matter in the preview too, not just on --apply).
         if ($result['failed'] > 0) {
             $io->warning(sprintf('%d asset(s) cannot be renamed:', $result['failed']));
             foreach (array_slice($result['errors'], 0, 20, true) as $id => $error) {
@@ -76,10 +106,10 @@ class NormalizeFilenamesCommand extends Command
             }
         }
 
-        if (!$apply) {
+        if ($preview) {
             $io->note($result['changes'] === []
                 ? 'No filenames need normalizing.'
-                : sprintf('%d filename(s) would be normalized. Re-run with --apply to rename.', count($result['changes'])));
+                : sprintf('%d filename(s) would be normalized.', count($result['changes'])));
 
             return $result['failed'] > 0 ? Command::FAILURE : Command::SUCCESS;
         }
@@ -88,4 +118,77 @@ class NormalizeFilenamesCommand extends Command
 
         return $result['failed'] > 0 ? Command::FAILURE : Command::SUCCESS;
     }
+
+    /** @return array{assetIds: list<int>, selector: array<string, mixed>}|null */
+    private function selection(InputInterface $input, SymfonyStyle $io): ?array
+    {
+        $byIds = $input->getOption('by-ids');
+        if ($byIds !== null) {
+            $assetIds = $this->validatedCsvIds($io, (string) $byIds, '--by-ids');
+            if ($assetIds === null) {
+                return null;
+            }
+            sort($assetIds, SORT_NUMERIC);
+
+            return ['assetIds' => $assetIds, 'selector' => ['assetIds' => $assetIds, 'mode' => 'asset_ids']];
+        }
+
+        $filters = array_filter([
+            'extension' => $input->getOption('extension'),
+            'folder' => $input->getOption('folder'),
+            'type' => $input->getOption('type'),
+        ], static fn ($value): bool => $value !== null);
+        $limit = BoundedIntegerOption::parse($input->getOption('limit'), 1, 1_000);
+        if ($limit === null) {
+            $io->error('--limit must be an integer between 1 and 1000.');
+
+            return null;
+        }
+        $assetIds = $this->normalizer->findCandidates($filters, $limit);
+        sort($assetIds, SORT_NUMERIC);
+
+        return [
+            'assetIds' => $assetIds,
+            'selector' => ['filters' => $filters, 'limit' => $limit, 'mode' => 'scan'],
+        ];
+    }
+
+    /**
+     * @param array{assetIds: list<int>, selector: array<string, mixed>} $selection
+     * @param array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>} $preview
+     */
+    private function normalizationPlan(array $selection, array $preview): ApplyPlan
+    {
+        return new ApplyPlan(
+            'normalize-filenames',
+            ActorContext::system(),
+            ['assetIds' => $selection['assetIds'], 'selector' => $selection['selector']],
+            ['version' => 1],
+            $this->normalizationTargets($selection['assetIds'], $preview),
+        );
+    }
+
+    /**
+     * @param list<int> $assetIds
+     * @param array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>} $preview
+     * @return list<ApplyPlanTarget>
+     */
+    private function normalizationTargets(array $assetIds, array $preview): array
+    {
+        $changes = [];
+        foreach ($preview['changes'] as $change) {
+            $changes[$change['id']] = $change;
+        }
+
+        return array_map(function (int $assetId) use ($changes, $preview): ApplyPlanTarget {
+            $descriptor = isset($changes[$assetId])
+                ? ['state' => 'planned', 'from' => $changes[$assetId]['from'], 'to' => $changes[$assetId]['to']]
+                : (isset($preview['errors'][$assetId])
+                    ? ['state' => 'failed', 'error' => $preview['errors'][$assetId]]
+                    : ['state' => 'skipped']);
+
+            return new ApplyPlanTarget('asset:' . $assetId, $this->descriptorFingerprint($descriptor));
+        }, $assetIds);
+    }
+
 }

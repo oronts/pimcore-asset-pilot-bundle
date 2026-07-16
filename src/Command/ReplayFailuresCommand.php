@@ -4,9 +4,15 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
+use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
-use Oronts\AssetPilotBundle\Model\ReplayResult;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -24,6 +30,8 @@ class ReplayFailuresCommand extends Command
 
     public function __construct(
         private readonly FailureReplayService $replay,
+        private readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
+        private readonly ReviewedSelectionConsolePresenter $presenter,
     ) {
         parent::__construct();
     }
@@ -36,7 +44,9 @@ class ReplayFailuresCommand extends Command
             ->addOption('rule', null, InputOption::VALUE_REQUIRED, 'Only failures from this rule')
             ->addOption('class', null, InputOption::VALUE_REQUIRED, 'Only failures for this object class')
             ->addOption('async', null, InputOption::VALUE_NONE, 'Queue re-organization via Messenger instead of running inline')
-            ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max distinct failed objects to replay', '100');
+            ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max distinct failed objects to replay', '100')
+            ->addOption('plan-token', null, InputOption::VALUE_REQUIRED, 'Signed token returned by the matching preview')
+            ->addOption('apply', null, InputOption::VALUE_NONE, 'Apply the replay; without this option the command only previews');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -45,15 +55,59 @@ class ReplayFailuresCommand extends Command
         $io->title('Asset Pilot — Replay Failures');
 
         $async = (bool) $input->getOption('async');
+        $apply = (bool) $input->getOption('apply');
+        $planToken = $input->getOption('plan-token');
+        if (!$this->hasValidPlanControl($io, $apply, $planToken)) {
+            return Command::INVALID;
+        }
 
+        $filters = $this->filters($input, $io);
+        if ($filters === false) {
+            return Command::INVALID;
+        }
+
+        $limit = BoundedIntegerOption::parse($input->getOption('limit'), 1, 1_000);
+        if ($limit === null) {
+            $io->error('--limit must be an integer between 1 and 1000.');
+
+            return Command::INVALID;
+        }
+        $objectIds = $this->replay->selectObjects($filters, $limit);
+        $result = $this->runReviewedSelection($io, $objectIds, $filters, $limit, $async, $apply, $planToken);
+        if (is_int($result)) {
+            return $result;
+        }
+
+        return $this->report($io, $result, count($objectIds), $async, $apply);
+    }
+
+    private function hasValidPlanControl(SymfonyStyle $io, bool $apply, mixed $planToken): bool
+    {
+        if ($apply && (!is_string($planToken) || trim($planToken) === '')) {
+            $io->error('Applying requires --plan-token from a matching preview.');
+
+            return false;
+        }
+        if (!$apply && is_string($planToken) && trim($planToken) !== '') {
+            $io->error('--plan-token is only valid together with --apply.');
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** @return array<string, mixed>|false */
+    private function filters(InputInterface $input, SymfonyStyle $io): array|false
+    {
         $objectIds = $input->getOption('object-id');
         if ($objectIds !== null) {
             $ids = $this->validatedCsvIds($io, (string) $objectIds, '--object-id');
             if ($ids === null) {
-                return Command::INVALID;
+                return false;
             }
-
-            return $this->report($io, $this->replay->replayObjects($ids, $async), $async);
+            sort($ids, SORT_NUMERIC);
+            $objectIds = $ids;
         }
 
         $since = $input->getOption('since');
@@ -62,31 +116,51 @@ class ReplayFailuresCommand extends Command
             if ($timestamp === false) {
                 $io->error(sprintf('Could not parse --since value "%s".', $since));
 
-                return Command::INVALID;
+                return false;
             }
             $since = date('Y-m-d H:i:s', $timestamp);
         }
 
-        $filters = array_filter([
+        return array_filter([
+            'object_ids' => $objectIds,
             'since' => $since,
             'rule_name' => $input->getOption('rule'),
             'object_class' => $input->getOption('class'),
         ], static fn ($value): bool => $value !== null);
-
-        $limit = max(1, (int) $input->getOption('limit'));
-
-        return $this->report($io, $this->replay->replay($filters, $async, $limit), $async);
     }
 
-    private function report(SymfonyStyle $io, ReplayResult $result, bool $async): int
+    /**
+     * @param list<int>            $objectIds
+     * @param array<string, mixed> $filters
+     */
+    private function runReviewedSelection(
+        SymfonyStyle $io,
+        array $objectIds,
+        array $filters,
+        int $limit,
+        bool $async,
+        bool $apply,
+        mixed $planToken,
+    ): ReviewedSelectionResult|int {
+        try {
+            return $this->reviewedOperations->execute(
+                'replay',
+                $objectIds,
+                ['filters' => $filters, 'limit' => $limit],
+                TriggerType::Manual,
+                !$apply,
+                $async,
+                $planToken,
+                ActorContext::system(),
+            );
+        } catch (ReviewedSelectionException $e) {
+            return $this->presenter->renderError($io, $e);
+        }
+    }
+
+    private function report(SymfonyStyle $io, ReviewedSelectionResult $result, int $candidates, bool $async, bool $apply): int
     {
-        $io->definitionList(
-            ['candidates' => (string) $result->candidates],
-            ['organized' => (string) $result->organized],
-            ['dispatched' => (string) $result->dispatched],
-            ['skipped' => (string) $result->skipped],
-            ['failed' => (string) $result->failed],
-        );
+        $this->presenter->render($io, $result, ['candidates' => $candidates]);
 
         if ($result->failed > 0) {
             $io->warning(sprintf('%d object(s) failed to re-organize; see the log.', $result->failed));
@@ -94,7 +168,7 @@ class ReplayFailuresCommand extends Command
             return Command::FAILURE;
         }
 
-        $io->success($async ? 'Replay queued.' : 'Replay complete.');
+        $io->success($apply ? ($async ? 'Replay queued.' : 'Replay complete.') : 'Preview complete; no assets were changed.');
 
         return Command::SUCCESS;
     }

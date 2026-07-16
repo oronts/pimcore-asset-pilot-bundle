@@ -5,17 +5,21 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\RulePreviewPlanStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\DriftItem;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleOverlap;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LocationDriftService;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
 use Oronts\AssetPilotBundle\Service\RulePortability;
+use Oronts\AssetPilotBundle\Service\RulePreviewPlanService;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -25,6 +29,8 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class RulesController
 {
+    use DecodesJsonObject;
+
     public function __construct(
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetOrganizer $assetOrganizer,
@@ -32,6 +38,8 @@ class RulesController
         protected readonly RulePortability $portability,
         protected readonly RuleOverlapAnalyzer $overlapAnalyzer,
         protected readonly LocationDriftService $driftService,
+        protected readonly RulePreviewPlanService $previewPlans,
+        protected readonly ElementAuthorization $authorization,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -55,6 +63,8 @@ class RulesController
                     'currentPath' => $item->currentPath,
                     'expectedPath' => $item->expectedPath,
                     'ruleName' => $item->ruleName,
+                    'eligibility' => $item->eligibility->value,
+                    'reason' => $item->reason,
                 ], $result['items']),
                 'objectsScanned' => $result['objectsScanned'],
                 'page' => $result['page'],
@@ -115,14 +125,9 @@ class RulesController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function diff(Request $request): JsonResponse
     {
-        try {
-            $artifact = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return new JsonResponse(['error' => 'Invalid JSON'], JsonResponse::HTTP_BAD_REQUEST);
-        }
-
-        if (!is_array($artifact)) {
-            return new JsonResponse(['error' => 'Expected a rule-set artifact object.'], JsonResponse::HTTP_BAD_REQUEST);
+        $artifact = $this->decodeJsonObject($request);
+        if ($artifact instanceof JsonResponse) {
+            return $artifact;
         }
 
         try {
@@ -230,6 +235,11 @@ class RulesController
     public function preview(string $name, Request $request): JsonResponse
     {
         try {
+            $rule = $this->findRule($name);
+            if ($rule === null) {
+                return new JsonResponse(['error' => sprintf('Rule "%s" not found.', $name)], JsonResponse::HTTP_NOT_FOUND);
+            }
+
             $objectId = $request->query->getInt('objectId');
             if ($objectId <= 0) {
                 return new JsonResponse(
@@ -238,12 +248,15 @@ class RulesController
                 );
             }
 
-            $object = AbstractObject::getById($objectId);
+            $object = $this->loadObject($objectId);
             if ($object === null) {
                 return new JsonResponse(
                     ['error' => sprintf('Object with ID %d not found.', $objectId)],
                     JsonResponse::HTTP_NOT_FOUND,
                 );
+            }
+            if (!$this->authorization->isAllowed($object, 'view')) {
+                return new JsonResponse(['error' => 'Object access is not permitted.'], JsonResponse::HTTP_FORBIDDEN);
             }
 
             $operations = $this->assetOrganizer->dryRun($object, TriggerType::Api, $name);
@@ -261,7 +274,10 @@ class RulesController
                 'count' => count($filtered),
             ]);
 
-            return new JsonResponse($filtered);
+            return new JsonResponse([
+                'operations' => $filtered,
+                'planToken' => $this->previewPlans->issue($rule, $object, $this->authorization->currentActor(), $operations),
+            ]);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to preview rule "{rule}".', [
                 'rule' => $name,
@@ -279,24 +295,51 @@ class RulesController
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function apply(string $name, Request $request): JsonResponse
     {
-        try {
-            $data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return new JsonResponse(['error' => 'Invalid JSON'], JsonResponse::HTTP_BAD_REQUEST);
+        $rule = $this->findRule($name);
+        if ($rule === null) {
+            return new JsonResponse(['error' => sprintf('Rule "%s" not found.', $name)], JsonResponse::HTTP_NOT_FOUND);
         }
 
-        if (!is_array($data) || (int) ($data['objectId'] ?? 0) <= 0) {
+        $data = $this->decodeJsonObject($request);
+        if ($data instanceof JsonResponse) {
+            return $data;
+        }
+
+        $objectId = (int) ($data['objectId'] ?? 0);
+        if ($objectId <= 0) {
             return new JsonResponse(['error' => 'objectId is required and must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
         }
 
-        $object = AbstractObject::getById((int) $data['objectId']);
-        if ($object === null) {
-            return new JsonResponse(['error' => sprintf('Object with ID %d not found.', (int) $data['objectId'])], JsonResponse::HTTP_NOT_FOUND);
+        $planToken = $data['planToken'] ?? null;
+        if (!is_string($planToken) || $planToken === '') {
+            return new JsonResponse(
+                ['error' => 'planToken is required and must be a valid preview token.'],
+                JsonResponse::HTTP_BAD_REQUEST,
+            );
         }
 
-        $known = array_filter($this->ruleEngine->getRules(), static fn (Rule $r): bool => $r->name === $name);
-        if ($known === []) {
-            return new JsonResponse(['error' => sprintf('Rule "%s" not found.', $name)], JsonResponse::HTTP_NOT_FOUND);
+        $object = $this->loadObject($objectId);
+        if ($object === null) {
+            return new JsonResponse(['error' => sprintf('Object with ID %d not found.', $objectId)], JsonResponse::HTTP_NOT_FOUND);
+        }
+        if (!$this->authorization->isAllowed($object, 'publish')) {
+            return new JsonResponse(['error' => 'Object mutation is not permitted.'], JsonResponse::HTTP_FORBIDDEN);
+        }
+
+        $actor = $this->authorization->currentActor();
+        $currentOperations = $this->assetOrganizer->dryRun($object, TriggerType::Api, $name);
+        $planStatus = $this->previewPlans->claim($planToken, $rule, $object, $actor, $currentOperations);
+        if ($planStatus === RulePreviewPlanStatus::Malformed) {
+            return new JsonResponse(
+                ['error' => 'planToken is required and must be a valid preview token.'],
+                JsonResponse::HTTP_BAD_REQUEST,
+            );
+        }
+        if ($planStatus !== RulePreviewPlanStatus::Valid) {
+            return new JsonResponse(
+                ['error' => 'The preview plan is stale or does not match this request. Run the preview again.'],
+                JsonResponse::HTTP_CONFLICT,
+            );
         }
 
         $results = $this->assetOrganizer->organize($object, TriggerType::Api, $name);
@@ -314,5 +357,21 @@ class RulesController
                 ] : null,
             ], $results),
         ]);
+    }
+
+    private function findRule(string $name): ?Rule
+    {
+        foreach ($this->ruleEngine->getRules() as $rule) {
+            if ($rule->name === $name) {
+                return $rule;
+            }
+        }
+
+        return null;
+    }
+
+    protected function loadObject(int $objectId): ?AbstractObject
+    {
+        return AbstractObject::getById($objectId);
     }
 }

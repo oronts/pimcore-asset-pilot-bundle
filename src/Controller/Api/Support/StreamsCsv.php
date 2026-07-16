@@ -41,14 +41,13 @@ trait StreamsCsv
     }
 
     /**
-     * A cell starting with = + - @ (or a control char) is executed as a formula by Excel/Sheets;
-     * prefix it with a quote to neutralise CSV formula injection.
+     * A leading formula marker, including one hidden behind whitespace, can be executed by spreadsheet software. A leading control byte is also neutralised.
      */
     protected function sanitizeCsvCell(mixed $value): string
     {
         $value = (string) $value;
 
-        if ($value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r", "\n"], true)) {
+        if ($value !== '' && preg_match('/^(?:[\x00-\x1F]|[ \t\r\n\f\v]*[=+@-])/', $value) === 1) {
             return "'" . $value;
         }
 

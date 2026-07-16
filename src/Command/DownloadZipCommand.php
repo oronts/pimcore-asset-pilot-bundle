@@ -43,60 +43,105 @@ class DownloadZipCommand extends Command
             ->addOption('non-recursive', null, InputOption::VALUE_NONE, 'With --folder-id, only direct children')
             ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Archive layout: flat, folder, type, or a custom strategy name')
             ->addOption('thumbnail', null, InputOption::VALUE_REQUIRED, 'Pack this image thumbnail config instead of the original')
-            ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Destination file path for the archive');
+            ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Destination file path for the archive')
+            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Replace an existing destination file');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-
-        $outputPath = (string) $input->getOption('output');
-        if ($outputPath === '') {
-            $io->error('--output is required.');
-
-            return Command::INVALID;
+        $destination = $this->destination($input, $io);
+        if (is_int($destination)) {
+            return $destination;
         }
 
         $options = new ZipBuildOptions(
             strategy: $this->stringOption($input, 'strategy'),
             thumbnail: $this->stringOption($input, 'thumbnail'),
         );
-
-        $sources = array_filter(['asset-ids', 'folder-id', 'object-ids'], static fn (string $o): bool => $input->getOption($o) !== null);
-        if (count($sources) !== 1) {
-            $io->error('Provide exactly one of --asset-ids, --folder-id or --object-ids.');
-
+        $source = $this->source($input, $io);
+        if ($source === false) {
             return Command::INVALID;
         }
-        $source = $sources[array_key_first($sources)];
 
-        $ids = [];
-        if ($source === 'asset-ids' || $source === 'object-ids') {
-            $validated = $this->validatedCsvIds($io, (string) $input->getOption($source), '--' . $source);
-            if ($validated === null) {
-                return Command::INVALID;
-            }
-            $ids = $validated;
+        $result = $this->buildArchive($input, $io, $source, $options);
+        if (is_int($result)) {
+            return $result;
         }
-
-        try {
-            $result = match ($source) {
-                'asset-ids' => $this->zipService->buildFromAssetIds($ids, $options),
-                'folder-id' => $this->zipService->buildFromFolder((int) $input->getOption('folder-id'), !$input->getOption('non-recursive'), $options),
-                default => $this->zipService->buildFromObjects($ids, $options),
-            };
-        } catch (\Throwable $e) {
-            $io->error('Failed to build the archive: ' . $e->getMessage());
-
-            return Command::FAILURE;
-        }
-
         if ($result['path'] === null || $result['added'] === 0) {
             $io->warning('No downloadable assets matched the selection.');
 
             return Command::FAILURE;
         }
 
+        return $this->writeArchive($io, $result, $destination);
+    }
+
+    private function destination(InputInterface $input, SymfonyStyle $io): string|int
+    {
+        $outputPath = (string) $input->getOption('output');
+        if ($outputPath === '') {
+            $io->error('--output is required.');
+
+            return Command::INVALID;
+        }
+        if (file_exists($outputPath) && !$input->getOption('force')) {
+            $io->error('The output file already exists. Re-run with --force to replace it.');
+
+            return Command::FAILURE;
+        }
+
+        return $outputPath;
+    }
+
+    /** @return array{source: string, ids: list<int>}|false */
+    private function source(InputInterface $input, SymfonyStyle $io): array|false
+    {
+        $sources = array_filter(['asset-ids', 'folder-id', 'object-ids'], static fn (string $option): bool => $input->getOption($option) !== null);
+        if (count($sources) !== 1) {
+            $io->error('Provide exactly one of --asset-ids, --folder-id or --object-ids.');
+
+            return false;
+        }
+
+        $source = $sources[array_key_first($sources)];
+        $ids = [];
+        if ($source === 'asset-ids' || $source === 'object-ids') {
+            $ids = $this->validatedCsvIds($io, (string) $input->getOption($source), '--' . $source);
+            if ($ids === null) {
+                return false;
+            }
+        }
+
+        return ['source' => $source, 'ids' => $ids];
+    }
+
+    /**
+     * @param array{source: string, ids: list<int>} $source
+     * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}|int
+     */
+    private function buildArchive(
+        InputInterface $input,
+        SymfonyStyle $io,
+        array $source,
+        ZipBuildOptions $options,
+    ): array|int {
+        try {
+            return match ($source['source']) {
+                'asset-ids' => $this->zipService->buildFromAssetIds($source['ids'], $options),
+                'folder-id' => $this->zipService->buildFromFolder((int) $input->getOption('folder-id'), !$input->getOption('non-recursive'), $options),
+                default => $this->zipService->buildFromObjects($source['ids'], $options),
+            };
+        } catch (\Throwable $e) {
+            $io->error('Failed to build the archive: ' . $e->getMessage());
+
+            return Command::FAILURE;
+        }
+    }
+
+    /** @param array{path: string, requested: int, added: int, skipped: int, truncated: false} $result */
+    private function writeArchive(SymfonyStyle $io, array $result, string $outputPath): int
+    {
         if (!@rename($result['path'], $outputPath) && !(@copy($result['path'], $outputPath) && @unlink($result['path']))) {
             @unlink($result['path']);
             $io->error('Could not write the archive to ' . $outputPath);
