@@ -17,12 +17,5 @@
         <include>
             <directory>src</directory>
         </include>
-        <exclude>
-            <directory>src/Command</directory>
-            <directory>src/Controller</directory>
-            <directory>src/DependencyInjection</directory>
-            <directory>src/Dto</directory>
-            <directory>src/Webpack</directory>
-        </exclude>
     </source>
 </phpunit>
