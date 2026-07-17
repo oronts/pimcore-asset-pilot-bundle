@@ -60,8 +60,13 @@ class Version20260714000000Test extends TestCase
         sort($tables);
 
         self::assertSame([
+            Installer::TABLE_APPLY_PLAN_CLAIM,
+            Installer::TABLE_ASSET_DELETION_FENCE,
             Installer::TABLE_AUDIT_LOG,
             Installer::TABLE_CHECKSUM,
+            Installer::TABLE_DEPENDENCY_EDGE,
+            Installer::TABLE_DEPENDENCY_FRESHNESS,
+            Installer::TABLE_DEPENDENCY_SOURCE,
             Installer::TABLE_INTEGRITY_LOG,
             Installer::TABLE_OPERATION_DELIVERY,
             Installer::TABLE_OPERATION_RUN,
@@ -110,7 +115,7 @@ class Version20260714000000Test extends TestCase
     }
 
     #[Test]
-    public function backfillsOnlyHistoricalCompletedAssetsWithoutAnExistingMarker(): void
+    public function backfillsHistoricalSuccessesBeforeActionFailuresAreConsolidated(): void
     {
         $migration = $this->migration();
 
@@ -124,31 +129,42 @@ class Version20260714000000Test extends TestCase
             'propertyName' => 'asset_pilot_first_assignment',
             'completedStatus' => 'completed',
             'completedWithObserverErrorStatus' => 'completed_with_observer_error',
+            'actionFailedStatus' => 'action_failed',
         ], $queries[0]->getParameters());
     }
 
     #[Test]
-    public function postUpConvertsHistoricalStorageRowsIntoCompletedRuns(): void
+    public function postUpAggregatesDuplicateHistoricalTypesIntoCompletedRuns(): void
     {
         $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
         $connection->executeStatement('CREATE TABLE asset_pilot_storage_run (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL, total_count INTEGER NOT NULL, total_size INTEGER NOT NULL, unknown_size_count INTEGER NOT NULL DEFAULT 0, error_message TEXT)');
         $connection->executeStatement('CREATE TABLE asset_pilot_storage_snapshot (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, captured_at TEXT NOT NULL, type TEXT NOT NULL, unused_count INTEGER NOT NULL, unused_size INTEGER NOT NULL, unknown_size_count INTEGER NOT NULL DEFAULT 0, UNIQUE(run_id, type))');
         $connection->insert(Installer::TABLE_STORAGE_SNAPSHOT, ['run_id' => null, 'captured_at' => '2026-06-17 00:00:00', 'type' => 'image', 'unused_count' => 1, 'unused_size' => 25, 'unknown_size_count' => 1]);
         $connection->insert(Installer::TABLE_STORAGE_SNAPSHOT, ['run_id' => null, 'captured_at' => '2026-06-18 00:00:00', 'type' => 'image', 'unused_count' => 2, 'unused_size' => 100, 'unknown_size_count' => 0]);
+        $canonicalImageId = (int) $connection->lastInsertId();
+        $connection->insert(Installer::TABLE_STORAGE_SNAPSHOT, ['run_id' => null, 'captured_at' => '2026-06-18 00:00:00', 'type' => 'image', 'unused_count' => 4, 'unused_size' => 20, 'unknown_size_count' => 2]);
         $connection->insert(Installer::TABLE_STORAGE_SNAPSHOT, ['run_id' => null, 'captured_at' => '2026-06-18 00:00:00', 'type' => 'video', 'unused_count' => 1, 'unused_size' => 50, 'unknown_size_count' => 0]);
 
-        (new Version20260714000000($connection, new NullLogger()))->postUp(new Schema());
+        $migration = new Version20260714000000($connection, new NullLogger());
+        $migration->postUp(new Schema());
+        $migration->postUp(new Schema());
 
         self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_run'));
         self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_snapshot WHERE run_id IS NULL'));
+        self::assertSame(3, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_snapshot'));
         self::assertSame(
-            [3, 150, 0],
+            [7, 170, 2],
             $connection->fetchNumeric("SELECT total_count, total_size, unknown_size_count FROM asset_pilot_storage_run WHERE completed_at = '2026-06-18 00:00:00'"),
         );
         self::assertSame(
             [1, 25, 1],
             $connection->fetchNumeric("SELECT total_count, total_size, unknown_size_count FROM asset_pilot_storage_run WHERE completed_at = '2026-06-17 00:00:00'"),
         );
+        self::assertSame(
+            [$canonicalImageId, 6, 120, 2],
+            $connection->fetchNumeric("SELECT id, unused_count, unused_size, unknown_size_count FROM asset_pilot_storage_snapshot WHERE captured_at = '2026-06-18 00:00:00' AND type = 'image'"),
+        );
+        self::assertSame(1, (int) $connection->fetchOne("SELECT COUNT(*) FROM asset_pilot_storage_snapshot WHERE captured_at = '2026-06-18 00:00:00' AND type = 'image'"));
     }
 
     #[Test]

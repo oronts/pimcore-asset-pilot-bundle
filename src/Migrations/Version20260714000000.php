@@ -27,7 +27,7 @@ class Version20260714000000 extends BundleAwareMigration
                 SELECT DISTINCT a.id, 'asset', SUBSTRING(CONCAT(a.path, a.filename), 1, 765), :propertyName, 'bool', '1', 0
                 FROM assets a
                 INNER JOIN asset_pilot_audit_log audit ON audit.asset_id = a.id
-                    AND audit.status IN (:completedStatus, :completedWithObserverErrorStatus)
+                    AND audit.status IN (:completedStatus, :completedWithObserverErrorStatus, :actionFailedStatus)
                 WHERE NOT EXISTS (
                     SELECT 1
                     FROM properties existing_property
@@ -40,6 +40,7 @@ class Version20260714000000 extends BundleAwareMigration
                 'propertyName' => FirstAssignmentStrategy::ASSIGNMENT_PROPERTY,
                 'completedStatus' => OperationStatus::Completed->value,
                 'completedWithObserverErrorStatus' => OperationStatus::CompletedWithObserverError->value,
+                'actionFailedStatus' => 'action_failed',
             ],
         );
     }
@@ -57,6 +58,8 @@ class Version20260714000000 extends BundleAwareMigration
             ->fetchFirstColumn();
 
         foreach ($capturedAtValues as $capturedAt) {
+            $this->collapseDuplicateSnapshots((string) $capturedAt);
+
             $totals = $this->connection->createQueryBuilder()
                 ->select(
                     'COALESCE(SUM(unused_count), 0) AS total_count',
@@ -76,7 +79,7 @@ class Version20260714000000 extends BundleAwareMigration
             $this->connection->insert(Installer::TABLE_STORAGE_RUN, [
                 'started_at' => $capturedAt,
                 'completed_at' => $capturedAt,
-                'status' => 'completed',
+                'status' => OperationStatus::Completed->value,
                 'total_count' => (int) $totals['total_count'],
                 'total_size' => (int) $totals['total_size'],
                 'unknown_size_count' => (int) $totals['unknown_size_count'],
@@ -90,6 +93,52 @@ class Version20260714000000 extends BundleAwareMigration
                 ->andWhere('captured_at = :capturedAt')
                 ->setParameter('runId', $runId)
                 ->setParameter('capturedAt', $capturedAt)
+                ->executeStatement();
+        }
+    }
+
+    private function collapseDuplicateSnapshots(string $capturedAt): void
+    {
+        $snapshots = $this->connection->createQueryBuilder()
+            ->select(
+                'MIN(id) AS canonical_id',
+                'type',
+                'COALESCE(SUM(unused_count), 0) AS unused_count',
+                'COALESCE(SUM(unused_size), 0) AS unused_size',
+                'COALESCE(SUM(unknown_size_count), 0) AS unknown_size_count',
+            )
+            ->from(Installer::TABLE_STORAGE_SNAPSHOT)
+            ->where('run_id IS NULL')
+            ->andWhere('captured_at = :capturedAt')
+            ->groupBy('type')
+            ->setParameter('capturedAt', $capturedAt)
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        foreach ($snapshots as $snapshot) {
+            $canonicalId = (int) $snapshot['canonical_id'];
+            $this->connection->createQueryBuilder()
+                ->update(Installer::TABLE_STORAGE_SNAPSHOT)
+                ->set('unused_count', ':unusedCount')
+                ->set('unused_size', ':unusedSize')
+                ->set('unknown_size_count', ':unknownSizeCount')
+                ->where('id = :canonicalId')
+                ->andWhere('run_id IS NULL')
+                ->setParameter('unusedCount', (int) $snapshot['unused_count'])
+                ->setParameter('unusedSize', (int) $snapshot['unused_size'])
+                ->setParameter('unknownSizeCount', (int) $snapshot['unknown_size_count'])
+                ->setParameter('canonicalId', $canonicalId)
+                ->executeStatement();
+
+            $this->connection->createQueryBuilder()
+                ->delete(Installer::TABLE_STORAGE_SNAPSHOT)
+                ->where('run_id IS NULL')
+                ->andWhere('captured_at = :capturedAt')
+                ->andWhere('type = :type')
+                ->andWhere('id <> :canonicalId')
+                ->setParameter('capturedAt', $capturedAt)
+                ->setParameter('type', (string) $snapshot['type'])
+                ->setParameter('canonicalId', $canonicalId)
                 ->executeStatement();
         }
     }

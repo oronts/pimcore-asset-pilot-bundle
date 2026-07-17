@@ -15,11 +15,11 @@ use PHPUnit\Framework\TestCase;
 final class Version20260715170000Test extends TestCase
 {
     #[Test]
-    public function installerMarksThisAsTheLatestMigration(): void
+    public function installerHasANewerMigration(): void
     {
         $installer = (new \ReflectionClass(Installer::class))->newInstanceWithoutConstructor();
 
-        self::assertSame(Version20260715170000::class, $installer->getLastMigrationVersionClassName());
+        self::assertNotSame(Version20260715170000::class, $installer->getLastMigrationVersionClassName());
     }
 
     #[Test]

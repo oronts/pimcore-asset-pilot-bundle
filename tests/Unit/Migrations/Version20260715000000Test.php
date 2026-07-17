@@ -33,7 +33,8 @@ final class Version20260715000000Test extends TestCase
         self::assertTrue($run->hasColumn('retry_of'));
         self::assertSame(['actor_type', 'actor_user_id', 'created_at'], $run->getIndex('idx_operation_run_actor_created')->getColumns());
         self::assertSame(['status', 'updated_at'], $run->getIndex('idx_operation_run_status_updated')->getColumns());
-        self::assertSame(['retry_of'], $run->getIndex('idx_operation_run_retry')->getColumns());
+        self::assertSame(['retry_of'], $run->getIndex('uniq_operation_run_retry')->getColumns());
+        self::assertTrue($run->getIndex('uniq_operation_run_retry')->isUnique());
 
         $item = $schema->getTable(Installer::TABLE_OPERATION_RUN_ITEM);
         self::assertSame(['id'], $item->getPrimaryKey()?->getColumns());
