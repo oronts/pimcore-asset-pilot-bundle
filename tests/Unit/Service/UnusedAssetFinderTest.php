@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Oronts\AssetPilotBundle\Cache\StatsCache;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -15,7 +16,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
 use Oronts\AssetPilotBundle\Service\ConfidenceScorer;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
-use Oronts\AssetPilotBundle\Service\DependencyUsageScannerInterface;
+use Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
@@ -380,7 +381,7 @@ class UnusedAssetFinderTest extends TestCase
     public function deleteAssetsSkipsAnAssetReferencedInContent(): void
     {
         $scanner = $this->createMock(ContentUsageScanner::class);
-        $scanner->method('isReferencedInContent')->willReturn(true);
+        $scanner->method('freshlyReferencedInContent')->willReturn(true);
 
         $result = $this->moveFinder([1 => $this->asset(true)], referenced: false, scanner: $scanner)->deleteAssets([1]);
 
@@ -393,7 +394,7 @@ class UnusedAssetFinderTest extends TestCase
     public function moveAssetsSkipsAnAssetReferencedInContent(): void
     {
         $scanner = $this->createMock(ContentUsageScanner::class);
-        $scanner->method('isReferencedInContent')->willReturn(true);
+        $scanner->method('freshlyReferencedInContent')->willReturn(true);
 
         $result = $this->moveFinder([1 => $this->asset(true)], referenced: false, scanner: $scanner)->moveAssets([1], '/Archive');
 
@@ -494,6 +495,9 @@ class UnusedAssetFinderTest extends TestCase
         ?EventDispatcher $eventDispatcher = null,
         ?AssetMutationFingerprintService $mutationFingerprints = null,
     ): UnusedAssetFinder {
+        foreach ($assetsById as $assetId => $asset) {
+            $asset->method('getId')->willReturn((int) $assetId);
+        }
         $folder = $this->createMock(Asset\Folder::class);
         $folder->method('isAllowed')->willReturn($folderAllowed);
         if ($contentEvidence) {
@@ -501,15 +505,15 @@ class UnusedAssetFinderTest extends TestCase
             $scanner->method('canVerify')->willReturn(true);
         }
 
-        $dependencyScanner = $this->createMock(DependencyUsageScannerInterface::class);
-        $dependencyScanner->method('isReferenced')->willReturn(false);
+        $dependencyVerifier = $this->createMock(DependencyUsageVerifierInterface::class);
+        $dependencyVerifier->method('verdict')->willReturn(DependencyUsageVerdict::Safe);
 
         $connection = $this->createMock(Connection::class);
         $dependencies = $this->mutationSafetyDependencies(
             $connection,
             contentScanner: $scanner,
             loopGuard: $loopGuard,
-            dependencyScanner: $dependencyScanner,
+            dependencyVerifier: $dependencyVerifier,
             fingerprints: $mutationFingerprints,
             contentEvidence: $contentEvidence,
         );
@@ -593,10 +597,10 @@ class UnusedAssetFinderTest extends TestCase
 
         $scanner = $this->createMock(ContentUsageScanner::class);
         $scanner->method('canVerify')->willReturn(true);
-        $dependencyScanner = $this->createMock(DependencyUsageScannerInterface::class);
-        $dependencyScanner->method('isReferenced')->willReturn(false);
+        $dependencyVerifier = $this->createMock(DependencyUsageVerifierInterface::class);
+        $dependencyVerifier->method('verdict')->willReturn(DependencyUsageVerdict::Safe);
         $connection = $this->createMock(Connection::class);
-        $dependencies = $this->mutationSafetyDependencies($connection, contentScanner: $scanner, dependencyScanner: $dependencyScanner);
+        $dependencies = $this->mutationSafetyDependencies($connection, contentScanner: $scanner, dependencyVerifier: $dependencyVerifier);
         $finder = new class ($connection, new NullLogger(), $this->createMock(ConfidenceScorer::class), new EventDispatcher(), new StatsCache(new ArrayAdapter()), $asset, $dependencies) extends UnusedAssetFinder {
             public int $computeCalls = 0;
 

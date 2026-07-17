@@ -10,12 +10,13 @@ use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Installer;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
@@ -39,12 +40,15 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         private readonly LoggerInterface $logger,
         private readonly ConfidenceScorerInterface $scorer,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly ContentUsageScanner $contentScanner,
+        private readonly ContentUsageScannerInterface $contentScanner,
         private readonly LoopGuard $loopGuard,
-        private readonly ElementAuthorization $authorization,
-        private readonly DependencyUsageScannerInterface $dependencyScanner,
+        private readonly ReviewedAssetLockCoordinator $reviewedLocks,
+        private readonly ElementAuthorizationInterface $authorization,
+        private readonly DependencyUsageVerifierInterface $dependencyVerifier,
         private readonly AssetWorkspaceQueryScope $workspaceScope,
         private readonly AssetMutationFingerprintService $mutationFingerprints,
+        private readonly LoopGuardedAssetSaver $assetSaver,
+        private readonly AssetDeletionFenceInterface $deletionFence,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
         private readonly ?StatsCache $statsCache = null,
         private readonly int $statsTtl = 0,
@@ -264,12 +268,11 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
      */
     public function deleteAssets(array $assetIds, ?array $expectedFingerprints = null): array
     {
-        $planLocks = $this->acquirePlanAssetLocks($assetIds, $expectedFingerprints);
-        try {
-            [$deletedIds, $failed, $errors] = $this->deleteAssetsLocked($assetIds, $planLocks);
-        } finally {
-            $this->releasePlanAssetLocks($planLocks);
-        }
+        [$deletedIds, $failed, $errors] = $this->withReviewedPlanLocks(
+            $assetIds,
+            $expectedFingerprints,
+            fn (array $lockedIds): array => $this->deleteAssetsLocked($assetIds, $lockedIds),
+        );
 
         $observerWarnings = [];
         if ($deletedIds !== []) {
@@ -310,23 +313,24 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Not permitted to move assets into the target folder'], 'observerWarnings' => []];
         }
 
-        $planLocks = $this->acquirePlanAssetLocks($assetIds, $expectedFingerprints);
-        try {
-            try {
-                $folder = $this->createTargetFolder($targetFolder);
-            } catch (\Throwable $e) {
-                $this->logger->error('Asset Pilot: failed to create unused-asset target folder', [
-                    'target_folder' => $targetFolder,
-                    'exception' => $e,
-                ]);
+        [$movedIds, $failed, $errors] = $this->withReviewedPlanLocks(
+            $assetIds,
+            $expectedFingerprints,
+            function (array $lockedIds) use ($assetIds, $targetFolder): array {
+                try {
+                    $folder = $this->createTargetFolder($targetFolder);
+                } catch (\Throwable $e) {
+                    $this->logger->error('Asset Pilot: failed to create unused-asset target folder', [
+                        'target_folder' => $targetFolder,
+                        'exception' => $e,
+                    ]);
 
-                return ['moved' => 0, 'failed' => count($assetIds), 'errors' => [-1 => 'Failed to create the target folder.'], 'observerWarnings' => []];
-            }
+                    return [[], count($assetIds), [-1 => 'Failed to create the target folder.']];
+                }
 
-            [$movedIds, $failed, $errors] = $this->moveAssetsLocked($assetIds, $targetFolder, $folder, $planLocks);
-        } finally {
-            $this->releasePlanAssetLocks($planLocks);
-        }
+                return $this->moveAssetsLocked($assetIds, $targetFolder, $folder, $lockedIds);
+            },
+        );
 
         $observerWarnings = [];
         if ($movedIds !== []) {
@@ -361,7 +365,15 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 continue;
             }
 
+            $fenceToken = null;
             try {
+                $fenceToken = $this->deletionFence->acquire($id, 'unused_delete');
+                if ($fenceToken === null) {
+                    $errors[$id] = 'Asset is already being deleted by another operation';
+                    ++$failed;
+                    continue;
+                }
+
                 [$asset, $error] = $this->guardMutation($id, 'delete', 'delete');
                 if ($asset === null) {
                     $errors[$id] = (string) $error;
@@ -370,6 +382,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 }
 
                 $this->loopGuard->refreshAsset($id);
+                $this->deletionFence->refreshOrFail($id, $fenceToken);
                 $asset->delete();
                 $deletedIds[] = $id;
 
@@ -385,6 +398,19 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                     'exception' => $e,
                 ]);
             } finally {
+                // Best-effort fence release: the fence and the LoopGuard share this finally, so a throwing
+                // fence DELETE must not strand the asset LoopGuard or abort the rest of the batch. A leaked
+                // fence row is reaped by the maintenance task (expiry or the missing-asset branch).
+                if ($fenceToken !== null) {
+                    try {
+                        $this->deletionFence->release($id, $fenceToken);
+                    } catch (\Throwable $e) {
+                        $this->logger->error('Asset Pilot: could not release the deletion fence for asset {id}; it will be reaped.', [
+                            'id' => $id,
+                            'exception' => $e,
+                        ]);
+                    }
+                }
                 if (!$lockedByPlan) {
                     $this->loopGuard->releaseAsset($id);
                 }
@@ -453,61 +479,44 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
     private function moveAsset(Asset $asset, Asset\Folder $folder, int $assetId, string $targetPath, string $targetFolder): void
     {
-        $asset->setParent($folder);
-        $this->loopGuard->markAssetProcessing($assetId);
-        try {
-            $this->loopGuard->refreshAsset($assetId);
-            $this->loopGuard->refreshTarget($targetPath);
-            $asset->save(['versionNote' => 'Asset Pilot: moved unused asset to ' . $targetFolder]);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
-        }
+        $this->assetSaver->save(
+            $asset,
+            static function (Asset $mutable) use ($folder): void {
+                $mutable->setParent($folder);
+            },
+            ['versionNote' => 'Asset Pilot: moved unused asset to ' . $targetFolder],
+            function () use ($targetPath): void {
+                $this->loopGuard->refreshTarget($targetPath);
+            },
+        );
 
         $this->logger->info('Asset Pilot: moved unused asset {id} to {path}', ['id' => $assetId, 'path' => $targetFolder]);
     }
 
-    /** @param int[] $assetIds @param array<string, string>|null $expectedFingerprints @return list<int> */
-    private function acquirePlanAssetLocks(array $assetIds, ?array $expectedFingerprints): array
+    /**
+     * @template TResult
+     * @param list<int> $assetIds
+     * @param array<string, string>|null $expectedFingerprints
+     * @param callable(list<int>): TResult $operation
+     * @return TResult
+     */
+    private function withReviewedPlanLocks(array $assetIds, ?array $expectedFingerprints, callable $operation): mixed
     {
         if ($expectedFingerprints === null) {
-            return [];
+            return $operation([]);
         }
 
-        $ids = array_values(array_unique(array_map('intval', $assetIds)));
-        sort($ids, SORT_NUMERIC);
-        $acquired = [];
-        try {
-            foreach ($ids as $id) {
-                if (!$this->loopGuard->acquireAsset($id)) {
-                    throw new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the operation again.', $id));
+        return $this->reviewedLocks->run(
+            $assetIds,
+            static fn (int $assetId): \Throwable => new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the operation again.', $assetId)),
+            function (array $lockedIds) use ($expectedFingerprints, $operation): mixed {
+                foreach ($lockedIds as $assetId) {
+                    $this->mutationFingerprints->assertUnchanged($assetId, $expectedFingerprints);
                 }
-                $acquired[] = $id;
-            }
-            foreach ($ids as $id) {
-                $this->assertMutationUnchanged($id, $expectedFingerprints);
-            }
-        } catch (\Throwable $e) {
-            $this->releasePlanAssetLocks($acquired);
 
-            throw $e;
-        }
-
-        return $acquired;
-    }
-
-    /** @param list<int> $assetIds */
-    private function releasePlanAssetLocks(array $assetIds): void
-    {
-        foreach (array_reverse($assetIds) as $assetId) {
-            $this->loopGuard->releaseAsset($assetId);
-        }
-    }
-
-    /** @param array<string, string> $expectedFingerprints */
-    private function assertMutationUnchanged(int $assetId, array $expectedFingerprints): void
-    {
-        $this->mutationFingerprints->assertUnchanged($assetId, $expectedFingerprints);
+                return $operation($lockedIds);
+            },
+        );
     }
 
     /**
@@ -534,7 +543,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
      */
     private function isReferencedInContent(Asset $asset): bool
     {
-        return $this->contentScanner->isReferencedInContent($asset);
+        return $this->contentScanner->freshlyReferencedInContent($asset);
     }
 
     /**
@@ -580,8 +589,12 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             return [null, 'Content-reference verification is not configured'];
         }
 
-        if ($this->dependencyScanner->isReferenced($asset)) {
-            return [null, 'Live dependency verification found a reference or could not prove safety'];
+        $dependencyVerdict = $this->dependencyVerifier->verdict($asset);
+        if ($dependencyVerdict === DependencyUsageVerdict::Referenced) {
+            return [null, 'Asset is referenced by a live Pimcore element dependency'];
+        }
+        if ($dependencyVerdict === DependencyUsageVerdict::Unknown) {
+            return [null, 'Dependency projection is not ready or contains dirty sources'];
         }
 
         if ($this->isReferencedInContent($asset)) {
@@ -679,7 +692,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             $conditions = [];
             foreach ($extensions as $i => $ext) {
                 $param = 'ext_' . $i;
-                $conditions[] = 'a.filename LIKE :' . $param;
+                $conditions[] = 'a.filename LIKE :' . $param . Like::CLAUSE;
                 $qb->setParameter($param, '%.' . Like::escape(ltrim(trim($ext), '.')));
             }
             $qb->andWhere('(' . implode(' OR ', $conditions) . ')');
@@ -704,7 +717,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         }
 
         if (!empty($filters['folder'])) {
-            $qb->andWhere('a.path LIKE :folder')
+            $qb->andWhere('a.path LIKE :folder' . Like::CLAUSE)
                 ->setParameter('folder', Like::escape(rtrim($filters['folder'], '/')) . '/%');
         }
 

@@ -234,4 +234,44 @@ class ContentUsageScannerTest extends TestCase
         $scanner->isReferencedInContent($this->asset('/p/a.jpg'));
         self::assertSame(['/p/a.jpg', '/p/b.jpg', '/p/a.jpg'], $calls->getArrayCopy());
     }
+
+    #[Test]
+    public function freshlyReferencedInContentReScansInsteadOfReusingAStaleNegativeCache(): void
+    {
+        $scans = new \ArrayObject();
+        /** @var \ArrayObject<string, bool> $results */
+        $results = new \ArrayObject(['/p/a.jpg' => false]);
+        $scanner = new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), new NullLogger(), $scans, $results) extends ContentUsageScanner {
+            /**
+             * @param \ArrayObject<int, string> $scans
+             * @param \ArrayObject<string, bool> $results
+             */
+            public function __construct(Connection $c, NullLogger $l, private readonly \ArrayObject $scans, private readonly \ArrayObject $results)
+            {
+                parent::__construct($c, $l, true);
+            }
+
+            protected function discoverGlobalContentColumns(): array
+            {
+                return [['object_store_P', ['body']]];
+            }
+
+            protected function matchesAny(string $table, array $columns, string $needle): bool
+            {
+                $this->scans->append($needle);
+
+                return $this->results[$needle] ?? false;
+            }
+        };
+
+        // A pre-fence caller (e.g. fingerprinting) caches a negative result.
+        self::assertFalse($scanner->isReferencedInContent($this->asset('/p/a.jpg')));
+
+        // A content reference is then committed between that cache population and the fenced re-read.
+        $results['/p/a.jpg'] = true;
+
+        self::assertFalse($scanner->isReferencedInContent($this->asset('/p/a.jpg')), 'the stale negative is still cached');
+        self::assertTrue($scanner->freshlyReferencedInContent($this->asset('/p/a.jpg')), 'the fresh re-read re-scans and observes the new reference');
+        self::assertSame(['/p/a.jpg', '/p/a.jpg'], $scans->getArrayCopy(), 'only the initial and the fresh read scan; the cached read does not');
+    }
 }

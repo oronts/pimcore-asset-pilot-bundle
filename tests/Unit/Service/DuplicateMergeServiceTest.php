@@ -15,6 +15,7 @@ use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
+use Oronts\AssetPilotBundle\Merge\MergeOutcome;
 use Oronts\AssetPilotBundle\Merge\ReferrerSnapshot;
 use Oronts\AssetPilotBundle\Merge\RepointPreflight;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
@@ -79,8 +80,10 @@ class DuplicateMergeServiceTest extends TestCase
         ?OperationRunStoreInterface $runs = null,
         ?EventDispatcherInterface $eventDispatcher = null,
         ?\Closure $preflight = null,
+        array $assets = [],
     ): DuplicateMergeService {
         $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE dependencies (targettype TEXT, targetid INTEGER, sourcetype TEXT, sourceid INTEGER)');
         $schema = new Schema();
         Installer::ensureCurrentSchema($schema);
         $manager = $connection->createSchemaManager();
@@ -108,6 +111,7 @@ class DuplicateMergeServiceTest extends TestCase
             $eventDispatcher,
             $liveChecksum,
             $isAuthorized,
+            $assets,
         ) extends DuplicateMergeService {
             public function __construct(
                 iterable $strategies,
@@ -120,6 +124,7 @@ class DuplicateMergeServiceTest extends TestCase
                 EventDispatcherInterface $eventDispatcher,
                 private readonly string $live,
                 private readonly bool $allowed,
+                private readonly array $assets,
             ) {
                 parent::__construct(
                     $strategies,
@@ -135,6 +140,11 @@ class DuplicateMergeServiceTest extends TestCase
                 );
             }
 
+            protected function loadAsset(int $assetId): ?\Pimcore\Model\Asset
+            {
+                return $this->assets[$assetId] ?? null;
+            }
+
             protected function liveChecksum(int $assetId): ?string
             {
                 return $this->live;
@@ -142,7 +152,12 @@ class DuplicateMergeServiceTest extends TestCase
 
             protected function assetIdentityFingerprint(int $assetId): string
             {
-                return hash('sha256', 'asset:' . $assetId . ':' . $this->live);
+                return hash('sha256', sprintf(
+                    'asset:%d:%s:%s',
+                    $assetId,
+                    $this->live,
+                    $this->assetIsProtected($assetId) ? 'protected' : 'mutable',
+                ));
             }
 
             protected function assetAllows(int $assetId, string $permission): bool
@@ -153,6 +168,137 @@ class DuplicateMergeServiceTest extends TestCase
             }
         };
     }
+
+    private function applyReviewed(
+        DuplicateMergeService $service,
+        DuplicateGroup $group,
+        ?int $canonicalId = null,
+        ?string $strategyName = null,
+    ): MergeOutcome {
+        $canonicalId ??= min($group->assetIds);
+
+        return $service->merge($group, $service->fingerprintMap($group, $canonicalId), $canonicalId, $strategyName);
+    }
+
+    #[Test]
+    public function protectionStateChangesTheReviewedFingerprint(): void
+    {
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $strategies = [$this->strategy('quarantine')];
+
+        $unlocked = $this->service($repointer, $strategies, assets: [
+            3 => $this->fingerprintAsset(3, false),
+            9 => $this->fingerprintAsset(9, false),
+        ])->fingerprintMap($group, 3);
+        $locked = $this->service($repointer, $strategies, assets: [
+            3 => $this->fingerprintAsset(3, false),
+            9 => $this->fingerprintAsset(9, true),
+        ])->fingerprintMap($group, 3);
+
+        self::assertSame($unlocked['asset:3'], $locked['asset:3']);
+        self::assertNotSame($unlocked['asset:9'], $locked['asset:9']);
+    }
+
+    #[Test]
+    public function referrerContentChangesTheReviewedCopyFingerprint(): void
+    {
+        $referrerFingerprint = 'object-v1';
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $service = $this->service(
+            $repointer,
+            [$this->strategy('quarantine')],
+            preflight: static function (int $from, int $to) use (&$referrerFingerprint): RepointPreflight {
+                return new RepointPreflight(
+                    $from,
+                    $to,
+                    [new ReferrerSnapshot('object', 41, $referrerFingerprint)],
+                );
+            },
+            assets: [
+                3 => $this->fingerprintAsset(3, false),
+                9 => $this->fingerprintAsset(9, false),
+            ],
+        );
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $before = $service->fingerprintMap($group, 3);
+
+        $referrerFingerprint = 'object-v2';
+        $after = $service->fingerprintMap($group, 3);
+
+        self::assertSame($before['asset:3'], $after['asset:3']);
+        self::assertNotSame($before['asset:9'], $after['asset:9']);
+    }
+
+    #[Test]
+    public function protectedCopyIsRejectedBeforeReferencesAreRepointed(): void
+    {
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $repointer->expects(self::never())->method('repoint');
+
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $service = $this->service($repointer, [$this->strategy('quarantine')], assets: [
+            3 => $this->fingerprintAsset(3, false),
+            9 => $this->fingerprintAsset(9, true),
+        ]);
+        $outcome = $this->applyReviewed($service, $group);
+
+        self::assertSame(DispositionOutcome::Blocked, $outcome->dispositions[0]->outcome);
+        self::assertStringContainsString('protected', (string) $outcome->dispositions[0]->reason);
+    }
+
+    #[Test]
+    public function changedGroupStateAfterEntryIsRejectedUnderLocksBeforeRepointing(): void
+    {
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $path = '/assets/9.jpg';
+        $preflightCalls = 0;
+        $copy = $this->createMock(\Pimcore\Model\Asset::class);
+        $copy->method('getId')->willReturn(9);
+        $copy->method('getChecksum')->willReturn('abc');
+        $copy->method('getModificationDate')->willReturn(1_000);
+        $copy->method('hasProperty')->willReturn(false);
+        $copy->method('getRealFullPath')->willReturnCallback(static function () use (&$path): string {
+            return $path;
+        });
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $repointer->expects(self::never())->method('repoint');
+        $service = $this->service(
+            $repointer,
+            [$this->strategy('quarantine')],
+            preflight: static function (int $from, int $to) use (&$path, &$preflightCalls): RepointPreflight {
+                if (++$preflightCalls === 4) {
+                    $path = '/changed/9.jpg';
+                }
+
+                return new RepointPreflight($from, $to, []);
+            },
+            assets: [
+                3 => $this->fingerprintAsset(3, false),
+                9 => $copy,
+            ],
+        );
+        $reviewedFingerprints = $service->fingerprintMap($group, 3);
+
+        $this->expectException(\Oronts\AssetPilotBundle\Exception\StaleApplyPlanException::class);
+        $this->expectExceptionMessage('changed after preview');
+
+        $service->merge($group, $reviewedFingerprints);
+    }
+
+    private function fingerprintAsset(int $id, bool $locked): \Pimcore\Model\Asset
+    {
+        $asset = $this->createMock(\Pimcore\Model\Asset::class);
+        $asset->method('getId')->willReturn($id);
+        $asset->method('getChecksum')->willReturn('abc');
+        $asset->method('getModificationDate')->willReturn(1_000);
+        $asset->method('getRealFullPath')->willReturn('/assets/' . $id . '.jpg');
+        $asset->method('hasProperty')->willReturn($locked);
+        $asset->method('getProperty')->willReturn($locked);
+
+        return $asset;
+    }
+
 
     /** @return array{OperationRunStore, Connection} */
     private function runStore(): array
@@ -177,12 +323,67 @@ class DuplicateMergeServiceTest extends TestCase
             ->willReturnCallback(static fn (int $from, int $to, bool $dry): RepointReport => new RepointReport($from, $to, 1, []));
 
         $group = new DuplicateGroup('abc', 100, 3, [7, 3, 9]);
-        $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)])->merge($group);
+        $outcome = $this->applyReviewed($this->service($repointer, [$this->strategy('quarantine', $disposed)]), $group);
 
         self::assertSame(3, $outcome->canonicalId);
         self::assertSame([7, 9], $disposed->getArrayCopy());
         self::assertCount(2, $outcome->dispositions);
         self::assertSame(DispositionOutcome::Quarantined, $outcome->dispositions[0]->outcome);
+    }
+
+    #[Test]
+    public function firstCopyDispositionDoesNotInvalidateLaterReviewedCopies(): void
+    {
+        $paths = new \ArrayObject([
+            7 => '/assets/7.jpg',
+            9 => '/assets/9.jpg',
+        ]);
+        $asset = function (int $id) use ($paths): \Pimcore\Model\Asset {
+            $value = $this->createMock(\Pimcore\Model\Asset::class);
+            $value->method('getId')->willReturn($id);
+            $value->method('getChecksum')->willReturn('abc');
+            $value->method('getModificationDate')->willReturn(1_000);
+            $value->method('getRealFullPath')->willReturnCallback(static fn (): string => (string) $paths[$id]);
+            $value->method('hasProperty')->willReturn(false);
+
+            return $value;
+        };
+        $strategy = new class ($paths) implements DuplicateMergeStrategyInterface {
+            public function __construct(private readonly \ArrayObject $paths) {}
+
+            public function name(): string
+            {
+                return 'quarantine';
+            }
+
+            public function repointsReferences(): bool
+            {
+                return true;
+            }
+
+            public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+            {
+                $this->paths[$copyId] = '/quarantine/' . $copyId . '.jpg';
+
+                return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
+            }
+        };
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $repointer->expects(self::exactly(2))->method('repoint')
+            ->willReturnCallback(static fn (int $from, int $to): RepointReport => new RepointReport($from, $to, 0, []));
+        $group = new DuplicateGroup('abc', 100, 3, [3, 7, 9]);
+        $service = $this->service($repointer, [$strategy], assets: [
+            3 => $this->fingerprintAsset(3, false),
+            7 => $asset(7),
+            9 => $asset(9),
+        ]);
+
+        $outcome = $this->applyReviewed($service, $group);
+
+        self::assertSame(
+            [DispositionOutcome::Quarantined, DispositionOutcome::Quarantined],
+            array_map(static fn (CopyDisposition $copy): DispositionOutcome => $copy->outcome, $outcome->dispositions),
+        );
     }
 
     #[Test]
@@ -194,7 +395,7 @@ class DuplicateMergeServiceTest extends TestCase
         $repointer->expects(self::never())->method('repoint');
 
         $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
-        $outcome = $this->service($repointer, [$this->strategy('isolate', $disposed, repoints: false)])->merge($group, strategyName: 'isolate');
+        $outcome = $this->applyReviewed($this->service($repointer, [$this->strategy('isolate', $disposed, repoints: false)]), $group, strategyName: 'isolate');
 
         self::assertSame([9], $disposed->getArrayCopy(), 'the copy is still handed to the strategy for disposal');
         self::assertSame(3, $outcome->canonicalId);
@@ -208,7 +409,7 @@ class DuplicateMergeServiceTest extends TestCase
         $repointer->method('repoint')->willReturnCallback(static fn (int $from, int $to, bool $dry): RepointReport => new RepointReport($from, $to, 0, []));
 
         $group = new DuplicateGroup('abc', 100, 3, [7, 3, 9]);
-        $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)])->merge($group, canonicalId: 9);
+        $outcome = $this->applyReviewed($this->service($repointer, [$this->strategy('quarantine', $disposed)]), $group, canonicalId: 9);
 
         self::assertSame(9, $outcome->canonicalId);
         self::assertSame([7, 3], $disposed->getArrayCopy());
@@ -222,7 +423,7 @@ class DuplicateMergeServiceTest extends TestCase
         $repointer->method('repoint')->willReturnCallback(static fn (int $from, int $to, bool $dry): RepointReport => new RepointReport($from, $to, 1, []));
 
         $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
-        $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)])->merge($group, dryRun: true);
+        $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)])->preview($group);
 
         self::assertSame([], $disposed->getArrayCopy(), 'a dry run must not dispose any copy');
         self::assertSame(DispositionOutcome::Skipped, $outcome->dispositions[0]->outcome);
@@ -236,7 +437,7 @@ class DuplicateMergeServiceTest extends TestCase
         $service = $this->service($repointer, [$this->strategy('quarantine')], isAuthorized: false);
 
         $this->expectException(NotPermittedException::class);
-        $service->merge(new DuplicateGroup('abc', 100, 2, [3, 9]));
+        $service->merge(new DuplicateGroup('abc', 100, 2, [3, 9]), []);
     }
 
     #[Test]
@@ -248,7 +449,7 @@ class DuplicateMergeServiceTest extends TestCase
         $repointer->expects(self::never())->method('repoint');
 
         $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
-        $outcome = $this->service($repointer, [$this->strategy('quarantine', $disposed)], liveChecksum: 'changed')->merge($group);
+        $outcome = $this->applyReviewed($this->service($repointer, [$this->strategy('quarantine', $disposed)], liveChecksum: 'changed'), $group);
 
         self::assertSame([], $disposed->getArrayCopy(), 'a stale copy must never be disposed');
         self::assertSame(DispositionOutcome::Blocked, $outcome->dispositions[0]->outcome);
@@ -261,7 +462,8 @@ class DuplicateMergeServiceTest extends TestCase
         $repointer = $this->createMock(DuplicateReferenceRepointer::class);
         $repointer->expects(self::never())->method('repoint');
 
-        $outcome = $this->service($repointer, [$this->strategy('quarantine')])->merge(new DuplicateGroup('abc', 100, 1, [5]));
+        $group = new DuplicateGroup('abc', 100, 1, [5]);
+        $outcome = $this->applyReviewed($this->service($repointer, [$this->strategy('quarantine')]), $group);
 
         self::assertSame(0, $outcome->canonicalId);
         self::assertSame([], $outcome->dispositions);
@@ -273,7 +475,7 @@ class DuplicateMergeServiceTest extends TestCase
         $service = $this->service($this->createMock(DuplicateReferenceRepointer::class), [$this->strategy('quarantine')]);
 
         $this->expectException(\InvalidArgumentException::class);
-        $service->merge(new DuplicateGroup('abc', 100, 2, [1, 2]), null, 'nope');
+        $service->merge(new DuplicateGroup('abc', 100, 2, [1, 2]), [], strategyName: 'nope');
     }
 
     #[Test]
@@ -284,7 +486,7 @@ class DuplicateMergeServiceTest extends TestCase
         $service = $this->service($repointer, [$this->strategy('quarantine')]);
 
         $this->expectException(\InvalidArgumentException::class);
-        $service->merge(new DuplicateGroup('abc', 100, 2, [3, 9]), canonicalId: 999);
+        $service->merge(new DuplicateGroup('abc', 100, 2, [3, 9]), [], canonicalId: 999);
     }
 
     #[Test]
@@ -344,8 +546,12 @@ class DuplicateMergeServiceTest extends TestCase
         });
         $repointer = $this->createMock(DuplicateReferenceRepointer::class);
         $repointer->method('repoint')->willReturn(new RepointReport(9, 3, 0, []));
-        $outcome = $this->service($repointer, [$strategy], eventDispatcher: $dispatcher)
-            ->merge(new DuplicateGroup('abc', 100, 2, [3, 9]), strategyName: 'fail');
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $outcome = $this->applyReviewed(
+            $this->service($repointer, [$strategy], eventDispatcher: $dispatcher),
+            $group,
+            strategyName: 'fail',
+        );
 
         self::assertSame(DispositionOutcome::LeftError, $outcome->dispositions[0]->outcome);
         self::assertSame(0, $events);
@@ -384,7 +590,8 @@ class DuplicateMergeServiceTest extends TestCase
             preflight: $preflight,
         );
 
-        $partial = $service->merge(new DuplicateGroup('abc', 100, 3, [3, 7, 9]));
+        $group = new DuplicateGroup('abc', 100, 3, [3, 7, 9]);
+        $partial = $this->applyReviewed($service, $group);
 
         self::assertSame(OperationRunStatus::Partial, $partial->status);
         self::assertSame([DispositionOutcome::Quarantined, DispositionOutcome::Blocked], array_map(
@@ -434,7 +641,7 @@ class DuplicateMergeServiceTest extends TestCase
                 return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
             }
         };
-        $identity = static fn (int $id): string => hash('sha256', 'asset:' . $id . ':abc');
+        $identity = static fn (int $id): string => hash('sha256', 'asset:' . $id . ':abc:mutable');
         $runId = $runs->create(DuplicateMergeService::RUN_KIND, ActorContext::system(), [[
             'key' => 'asset:9',
             'type' => 'duplicate_copy',
@@ -459,6 +666,10 @@ class DuplicateMergeServiceTest extends TestCase
             'canonicalId' => 3,
             'checksum' => 'abc',
             'strategy' => 'quarantine',
+            'reviewedFingerprints' => [
+                'asset:3' => hash('sha256', 'missing'),
+                'asset:9' => hash('sha256', 'missing'),
+            ],
         ]);
         $repointer = $this->createMock(DuplicateReferenceRepointer::class);
         $repointer->expects(self::never())->method('repoint');
@@ -500,7 +711,7 @@ class DuplicateMergeServiceTest extends TestCase
                 throw new \LogicException('A committed disposition must never run again.');
             }
         };
-        $identity = static fn (int $id): string => hash('sha256', 'asset:' . $id . ':abc');
+        $identity = static fn (int $id): string => hash('sha256', 'asset:' . $id . ':abc:mutable');
         $runId = $runs->create(DuplicateMergeService::RUN_KIND, ActorContext::system(), [[
             'key' => 'asset:9',
             'type' => 'duplicate_copy',
@@ -530,6 +741,10 @@ class DuplicateMergeServiceTest extends TestCase
             'canonicalId' => 3,
             'checksum' => 'abc',
             'strategy' => 'quarantine',
+            'reviewedFingerprints' => [
+                'asset:3' => hash('sha256', 'missing'),
+                'asset:9' => hash('sha256', 'missing'),
+            ],
         ]);
         $repointer = $this->createMock(DuplicateReferenceRepointer::class);
         $repointer->expects(self::never())->method('repoint');
@@ -545,7 +760,7 @@ class DuplicateMergeServiceTest extends TestCase
     public function resumesAnInterruptedRepointWithoutRewritingAlreadyRemovedReferrers(): void
     {
         [$runs] = $this->runStore();
-        $identity = static fn (int $id): string => hash('sha256', 'asset:' . $id . ':abc');
+        $identity = static fn (int $id): string => hash('sha256', 'asset:' . $id . ':abc:mutable');
         $runId = $runs->create(DuplicateMergeService::RUN_KIND, ActorContext::system(), [[
             'key' => 'asset:9',
             'type' => 'duplicate_copy',
@@ -565,6 +780,10 @@ class DuplicateMergeServiceTest extends TestCase
             'canonicalId' => 3,
             'checksum' => 'abc',
             'strategy' => 'quarantine',
+            'reviewedFingerprints' => [
+                'asset:3' => hash('sha256', 'missing'),
+                'asset:9' => hash('sha256', 'missing'),
+            ],
         ]);
         $repointer = $this->createMock(DuplicateReferenceRepointer::class);
         $repointer->expects(self::once())->method('repoint')
@@ -588,11 +807,12 @@ class DuplicateMergeServiceTest extends TestCase
         $repointer = $this->createMock(DuplicateReferenceRepointer::class);
         $repointer->expects(self::never())->method('repoint');
 
-        $outcome = $this->service(
+        $group = new DuplicateGroup('abc', 100, 2, [3, 9]);
+        $outcome = $this->applyReviewed($this->service(
             $repointer,
             [$this->strategy('quarantine')],
             loopGuard: $worker,
-        )->merge(new DuplicateGroup('abc', 100, 2, [3, 9]));
+        ), $group);
 
         self::assertSame(DispositionOutcome::Blocked, $outcome->dispositions[0]->outcome);
         self::assertStringContainsString('pending', (string) $outcome->dispositions[0]->reason);

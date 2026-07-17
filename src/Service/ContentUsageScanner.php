@@ -25,7 +25,7 @@ use Symfony\Contracts\Service\ResetInterface;
  * object stores, nested structures, documents, properties, and classification-store text columns.
  * A scan error fails closed so an unverifiable asset is never authorized for mutation.
  */
-class ContentUsageScanner implements ResetInterface
+class ContentUsageScanner implements ContentUsageScannerInterface, ResetInterface
 {
     /** @var list<array{0: string, 1: list<string>}>|null */
     private ?array $globalColumns = null;
@@ -55,23 +55,47 @@ class ContentUsageScanner implements ResetInterface
 
     public function isReferencedInContent(Asset $asset): bool
     {
-        if (!$this->canVerify() || $asset instanceof Asset\Folder) {
-            return false;
-        }
-
-        $needle = $asset->getRealFullPath();
-        if ($needle === '') {
+        $needle = $this->needle($asset);
+        if ($needle === null) {
             return false;
         }
         if (array_key_exists($needle, $this->referencesByPath)) {
             return $this->referencesByPath[$needle];
         }
 
+        return $this->referencesByPath[$needle] = $this->scan($needle);
+    }
+
+    public function freshlyReferencedInContent(Asset $asset): bool
+    {
+        $needle = $this->needle($asset);
+        if ($needle === null) {
+            return false;
+        }
+
+        // Ignore (and refresh) any result cached before a fenced safety re-read; a negative cached before
+        // the fence was acquired must not authorize a delete against a reference committed in that window.
+        return $this->referencesByPath[$needle] = $this->scan($needle);
+    }
+
+    private function needle(Asset $asset): ?string
+    {
+        if (!$this->canVerify() || $asset instanceof Asset\Folder) {
+            return null;
+        }
+        $needle = $asset->getRealFullPath();
+
+        return $needle === '' ? null : $needle;
+    }
+
+    /** The actual global content-table scan; fails closed (returns true) on any discovery/scan error. */
+    protected function scan(string $needle): bool
+    {
         try {
             $this->globalColumns ??= $this->discoverGlobalContentColumns();
             foreach ($this->globalColumns as [$table, $columns]) {
                 if ($columns !== [] && $this->matchesAny($table, $columns, $needle)) {
-                    return $this->referencesByPath[$needle] = true;
+                    return true;
                 }
             }
         } catch (\Throwable $e) {
@@ -79,10 +103,10 @@ class ContentUsageScanner implements ResetInterface
                 'exception' => $e,
             ]);
 
-            return $this->referencesByPath[$needle] = true;
+            return true;
         }
 
-        return $this->referencesByPath[$needle] = false;
+        return false;
     }
 
     /** @return list<array{0: string, 1: list<string>}> */
@@ -125,7 +149,7 @@ class ContentUsageScanner implements ResetInterface
     {
         try {
             $predicates = array_map(
-                fn (string $column): string => $this->connection->quoteIdentifier($column) . ' LIKE :needle',
+                fn (string $column): string => $this->connection->quoteIdentifier($column) . ' LIKE :needle' . Like::CLAUSE,
                 $columns,
             );
             $sql = sprintf(

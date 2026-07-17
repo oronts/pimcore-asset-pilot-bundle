@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Enum\DuplicateMergePhase;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\DuplicateMergeEvent;
@@ -25,15 +26,15 @@ use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
 use Oronts\AssetPilotBundle\Security\ActorContextStore;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Support\UniqueServiceMap;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-class DuplicateMergeService
+class DuplicateMergeService implements DuplicateMergeServiceInterface
 {
-    public const string RUN_KIND = 'duplicate-merge';
+    public const OperationRunKind RUN_KIND = OperationRunKind::DuplicateMerge;
 
     private const string ITEM_TYPE = 'duplicate_copy';
 
@@ -43,15 +44,16 @@ class DuplicateMergeService
     /** @param iterable<DuplicateMergeStrategyInterface> $strategies */
     public function __construct(
         iterable $strategies,
-        protected readonly DuplicateReferenceRepointer $repointer,
+        protected readonly DuplicateReferenceRepointerInterface $repointer,
         protected readonly LoggerInterface $logger,
         protected readonly Connection $connection,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly ActorContextStore $actors,
         protected readonly LoopGuard $loopGuard,
         protected readonly OperationRunStoreInterface $runs,
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly string $defaultStrategy = 'quarantine',
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {
         $this->strategies = UniqueServiceMap::from(
             $strategies,
@@ -71,13 +73,10 @@ class DuplicateMergeService
         return $this->defaultStrategy;
     }
 
-    /** @param array<string, string>|null $expectedFingerprints */
-    public function merge(
+    public function preview(
         DuplicateGroup $group,
         ?int $canonicalId = null,
         ?string $strategyName = null,
-        bool $dryRun = false,
-        ?array $expectedFingerprints = null,
     ): MergeOutcome {
         $strategy = $this->resolveStrategy($strategyName ?? $this->defaultStrategy);
         if (count($group->assetIds) < 2) {
@@ -89,19 +88,34 @@ class DuplicateMergeService
             $group->assetIds,
             static fn (int $assetId): bool => $assetId !== $canonicalId,
         ));
+        $this->assertGroupAuthorized($group->assetIds, 'view');
 
-        if ($dryRun) {
-            $this->assertGroupAuthorized($group->assetIds, 'view');
+        return $this->previewCopies($group, $canonicalId, $copyIds, $strategy);
+    }
 
-            return $this->preview($group, $canonicalId, $copyIds, $strategy);
+    /** @param array<string, string> $expectedFingerprints */
+    public function merge(
+        DuplicateGroup $group,
+        array $expectedFingerprints,
+        ?int $canonicalId = null,
+        ?string $strategyName = null,
+    ): MergeOutcome {
+        $strategy = $this->resolveStrategy($strategyName ?? $this->defaultStrategy);
+        if (count($group->assetIds) < 2) {
+            return new MergeOutcome($group->checksum, 0, []);
         }
 
+        $canonicalId = $this->pickCanonical($group, $canonicalId);
+        $copyIds = array_values(array_filter(
+            $group->assetIds,
+            static fn (int $assetId): bool => $assetId !== $canonicalId,
+        ));
         $this->assertGroupAuthorized($group->assetIds, 'publish');
-        if ($expectedFingerprints !== null && $this->fingerprintMap($group) !== $expectedFingerprints) {
+        if ($this->fingerprintMap($group, $canonicalId) !== $expectedFingerprints) {
             throw new StaleApplyPlanException('The duplicate group changed after preview. Preview it again before applying.');
         }
         $preflights = $this->preflightCopies($copyIds, $canonicalId, 'publish');
-        $runId = $this->createRun($group, $canonicalId, $strategy, $preflights);
+        $runId = $this->createRun($group, $canonicalId, $strategy, $preflights, $expectedFingerprints);
 
         return $this->executeRun($runId);
     }
@@ -109,7 +123,7 @@ class DuplicateMergeService
     public function resume(string $runId): MergeOutcome
     {
         $run = $this->runs->get($runId, $this->authorization->currentActor());
-        if ($run === null || ($run['kind'] ?? null) !== self::RUN_KIND) {
+        if ($run === null || ($run['kind'] ?? null) !== self::RUN_KIND->value) {
             throw new \InvalidArgumentException('Duplicate merge run not found.');
         }
 
@@ -124,9 +138,10 @@ class DuplicateMergeService
     }
 
     /** @return list<ApplyPlanTarget> */
-    public function planTargets(DuplicateGroup $group): array
+    public function planTargets(DuplicateGroup $group, int $canonicalId): array
     {
-        $fingerprints = $this->fingerprintMap($group);
+        $this->assertGroupAuthorized($group->assetIds, 'view');
+        $fingerprints = $this->fingerprintMap($group, $canonicalId);
 
         return array_map(
             static fn (string $id, string $fingerprint): ApplyPlanTarget => new ApplyPlanTarget($id, $fingerprint),
@@ -136,8 +151,9 @@ class DuplicateMergeService
     }
 
     /** @return array<string, string> */
-    public function fingerprintMap(DuplicateGroup $group): array
+    public function fingerprintMap(DuplicateGroup $group, int $canonicalId): array
     {
+        $canonicalId = $this->pickCanonical($group, $canonicalId);
         $fingerprints = [];
         foreach ($group->assetIds as $assetId) {
             $asset = $this->loadAsset($assetId);
@@ -149,11 +165,25 @@ class DuplicateMergeService
                 'SELECT sourcetype, sourceid FROM dependencies WHERE targettype = ? AND targetid = ? ORDER BY sourcetype ASC, sourceid ASC',
                 ['asset', $assetId],
             );
+            $referrers = [];
+            $blocked = [];
+            if ($assetId !== $canonicalId) {
+                $preflight = $this->repointer->preflight($assetId, $canonicalId, 'view');
+                $referrers = array_map(
+                    static fn (ReferrerSnapshot $snapshot): array => $snapshot->toArray(),
+                    array_values($preflight->referrersByKey()),
+                );
+                $blocked = $preflight->blocked;
+                sort($blocked, SORT_STRING);
+            }
             $fingerprints['asset:' . $assetId] = $this->hash([
                 'checksum' => $asset->getChecksum(),
                 'dependencies' => $dependencies,
+                'locked' => $this->assetIsProtected($assetId),
                 'modifiedAt' => $asset->getModificationDate(),
                 'path' => $asset->getRealFullPath(),
+                'referrers' => $referrers,
+                'blocked' => $blocked,
             ]);
         }
         ksort($fingerprints, SORT_STRING);
@@ -164,7 +194,7 @@ class DuplicateMergeService
     /**
      * @param list<int> $copyIds
      */
-    private function preview(
+    private function previewCopies(
         DuplicateGroup $group,
         int $canonicalId,
         array $copyIds,
@@ -200,12 +230,13 @@ class DuplicateMergeService
         return $preflights;
     }
 
-    /** @param array<int, RepointPreflight> $preflights */
+    /** @param array<int, RepointPreflight> $preflights @param array<string, string> $reviewedFingerprints */
     private function createRun(
         DuplicateGroup $group,
         int $canonicalId,
         DuplicateMergeStrategyInterface $strategy,
         array $preflights,
+        array $reviewedFingerprints,
     ): string {
         $canonicalFingerprint = $this->assetIdentityFingerprint($canonicalId);
         $items = [];
@@ -232,6 +263,7 @@ class DuplicateMergeService
             'canonicalId' => $canonicalId,
             'checksum' => $group->checksum,
             'strategy' => $strategy->name(),
+            'reviewedFingerprints' => $reviewedFingerprints,
         ]);
     }
 
@@ -239,7 +271,7 @@ class DuplicateMergeService
     {
         $actor = $this->authorization->currentActor();
         $run = $this->runs->get($runId, $actor);
-        if ($run === null || ($run['kind'] ?? null) !== self::RUN_KIND) {
+        if ($run === null || ($run['kind'] ?? null) !== self::RUN_KIND->value) {
             throw new \InvalidArgumentException('Duplicate merge run not found.');
         }
 
@@ -271,6 +303,7 @@ class DuplicateMergeService
         }
 
         try {
+            $this->assertInitialReviewedState($run, $request);
             if (!$this->runs->resume($runId)) {
                 if ($this->runs->isCancellationRequested($runId)) {
                     $this->cancelAvailableItems($runId, $openItems);
@@ -311,8 +344,33 @@ class DuplicateMergeService
     }
 
     /**
+     * @param array<string, mixed> $run
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
+     */
+    private function assertInitialReviewedState(array $run, array $request): void
+    {
+        if (($run['retry_of'] ?? null) !== null || array_any(
+            $run['items'],
+            fn (array $item): bool => ($item['status'] ?? null) !== OperationRunItemStatus::Queued->value
+                || $this->resumePhase($item) !== DuplicateMergePhase::Prepared,
+        )) {
+            return;
+        }
+
+        $group = new DuplicateGroup(
+            $request['checksum'],
+            0,
+            count($request['assetIds']),
+            $request['assetIds'],
+        );
+        if ($this->fingerprintMap($group, $request['canonicalId']) !== $request['reviewedFingerprints']) {
+            throw new StaleApplyPlanException('The duplicate group changed after preview. Preview it again before applying.');
+        }
+    }
+
+    /**
      * @param array<string, mixed> $item
-     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string} $request
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
      */
     private function processOpenItem(
         string $runId,
@@ -380,7 +438,7 @@ class DuplicateMergeService
 
     /**
      * @param array<string, mixed> $item
-     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string} $request
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
      */
     private function processItem(
         string $runId,
@@ -456,6 +514,7 @@ class DuplicateMergeService
 
         $this->assertDispositionSafe($item, $request, $strategy);
         $this->persistState($runId, $item, DuplicateMergePhase::Disposing, $report);
+        $this->loopGuard->refreshAsset($copyId);
         $disposition = $strategy->disposeCopy($copyId, $report);
         $terminalPhase = match ($this->itemStatus($disposition)) {
             OperationRunItemStatus::Completed => DuplicateMergePhase::Committed,
@@ -476,7 +535,7 @@ class DuplicateMergeService
 
     /**
      * @param array<string, mixed> $item
-     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string} $request
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
      */
     private function assertItemSafe(
         array $item,
@@ -488,6 +547,9 @@ class DuplicateMergeService
         $copyId = (int) $item['target_id'];
         $this->assertLiveChecksums([$request['canonicalId'], $copyId], $request['checksum']);
         $this->assertGroupAuthorized([$request['canonicalId'], $copyId], 'publish');
+        if ($this->assetIsProtected($copyId)) {
+            throw new StaleApplyPlanException(sprintf('Duplicate copy %d is protected from automated changes.', $copyId));
+        }
 
         $payload = is_array($item['payload'] ?? null) ? $item['payload'] : [];
         if (!hash_equals((string) ($payload['canonicalFingerprint'] ?? ''), $this->assetIdentityFingerprint($request['canonicalId']))) {
@@ -518,7 +580,7 @@ class DuplicateMergeService
 
     /**
      * @param array<string, mixed> $item
-     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string} $request
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
      */
     private function assertDispositionSafe(
         array $item,
@@ -542,7 +604,7 @@ class DuplicateMergeService
 
     /**
      * @param array<string, mixed> $item
-     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string} $request
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
      */
     private function completeItem(
         string $runId,
@@ -716,9 +778,17 @@ class DuplicateMergeService
 
         return $this->hash([
             'checksum' => $asset->getChecksum(),
+            'locked' => $this->assetIsProtected($assetId),
             'modifiedAt' => $asset->getModificationDate(),
             'path' => $asset->getRealFullPath(),
         ]);
+    }
+
+    protected function assetIsProtected(int $assetId): bool
+    {
+        $asset = $this->loadAsset($assetId);
+
+        return $asset !== null && AssetProtection::isLocked($asset, $this->lockProperty);
     }
 
     /** @param array<string, mixed> $item @return array<string, ReferrerSnapshot> */
@@ -854,7 +924,7 @@ class DuplicateMergeService
 
     /**
      * @param array<string, mixed> $run
-     * @return array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string}
+     * @return array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>}
      */
     private function requestFromRun(array $run): array
     {
@@ -866,7 +936,25 @@ class DuplicateMergeService
         $canonicalId = (int) ($request['canonicalId'] ?? 0);
         $checksum = (string) ($request['checksum'] ?? '');
         $strategy = (string) ($request['strategy'] ?? '');
-        if ($assetIds === [] || !in_array($canonicalId, $assetIds, true) || $checksum === '' || $strategy === '') {
+        $reviewedFingerprints = is_array($request['reviewedFingerprints'] ?? null)
+            ? $request['reviewedFingerprints']
+            : [];
+        $expectedFingerprintKeys = array_map($this->itemKey(...), $assetIds);
+        $reviewedFingerprintKeys = array_keys($reviewedFingerprints);
+        sort($expectedFingerprintKeys, SORT_STRING);
+        sort($reviewedFingerprintKeys, SORT_STRING);
+        $hasInvalidFingerprint = array_any(
+            $reviewedFingerprints,
+            static fn (mixed $fingerprint): bool => !is_string($fingerprint)
+                || preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1,
+        );
+        if ($assetIds === []
+            || !in_array($canonicalId, $assetIds, true)
+            || $checksum === ''
+            || $strategy === ''
+            || $hasInvalidFingerprint
+            || $reviewedFingerprintKeys !== $expectedFingerprintKeys
+        ) {
             throw new \RuntimeException('The persisted duplicate merge selector is invalid.');
         }
 
@@ -875,6 +963,7 @@ class DuplicateMergeService
             'canonicalId' => $canonicalId,
             'checksum' => $checksum,
             'strategy' => $strategy,
+            'reviewedFingerprints' => $reviewedFingerprints,
         ];
     }
 

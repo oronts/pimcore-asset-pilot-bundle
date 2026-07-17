@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Enum\QuarantineStatus;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
@@ -14,7 +15,7 @@ use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -28,21 +29,24 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  * LoopGuard-wrapped (the save must not re-enter the organize pipeline). The destructive hard-delete
  * of expired entries lives in a separate, explicitly-guarded purge.
  */
-class QuarantineService
+class QuarantineService implements QuarantineServiceInterface
 {
     private const int PURGE_BATCH = 1000;
 
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoopGuard $loopGuard,
+        protected readonly ReviewedAssetLockCoordinator $reviewedLocks,
         protected readonly UnusedAssetFinderInterface $unusedAssetFinder,
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly LoggerInterface $logger,
-        protected readonly ContentUsageScanner $contentScanner,
-        protected readonly ElementAuthorization $authorization,
-        protected readonly DependencyUsageScannerInterface $dependencyScanner,
+        protected readonly ContentUsageScannerInterface $contentScanner,
+        protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly DependencyUsageVerifierInterface $dependencyVerifier,
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
         protected readonly AssetMutationFingerprintService $mutationFingerprints,
+        protected readonly LoopGuardedAssetSaver $assetSaver,
+        protected readonly AssetDeletionFenceInterface $deletionFence,
         protected readonly string $quarantineFolder = '/Quarantine',
         protected readonly int $graceDays = 30,
         protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
@@ -77,12 +81,11 @@ class QuarantineService
         }
 
         $folder = null;
-        $planLocks = $this->acquirePlanAssetLocks($assetIds, $expectedFingerprints);
-        try {
-            [$quarantined, $failed, $errors] = $this->quarantineLocked($assetIds, $planLocks, $folder);
-        } finally {
-            $this->releasePlanAssetLocks($planLocks);
-        }
+        [$quarantined, $failed, $errors] = $this->withReviewedPlanLocks(
+            $assetIds,
+            $expectedFingerprints,
+            fn (array $lockedIds): array => $this->quarantineLocked($assetIds, $lockedIds, $folder),
+        );
 
         if ($quarantined !== []) {
             NonFatalEventDispatcher::dispatch(
@@ -187,8 +190,12 @@ class QuarantineService
         if ($this->isReferencedInContent($asset)) {
             return [null, 'Asset is referenced in object content (text/WYSIWYG)'];
         }
-        if ($this->dependencyScanner->isReferenced($asset)) {
-            return [null, 'Live dependency verification found a reference or could not prove safety'];
+        $dependencyVerdict = $this->dependencyVerifier->verdict($asset);
+        if ($dependencyVerdict === DependencyUsageVerdict::Referenced) {
+            return [null, 'Asset is referenced by a live Pimcore element dependency'];
+        }
+        if ($dependencyVerdict === DependencyUsageVerdict::Unknown) {
+            return [null, 'Dependency projection is not ready or contains dirty sources'];
         }
         if (!$this->isAllowed($asset, 'publish')) {
             return [null, 'Not permitted to move this asset'];
@@ -197,47 +204,30 @@ class QuarantineService
         return [$asset, null];
     }
 
-    /** @param array<string, string> $expectedFingerprints */
-    private function assertMutationUnchanged(int $assetId, array $expectedFingerprints): void
-    {
-        $this->mutationFingerprints->assertUnchanged($assetId, $expectedFingerprints);
-    }
-
-    /** @param int[] $assetIds @param array<string, string>|null $expectedFingerprints @return list<int> */
-    private function acquirePlanAssetLocks(array $assetIds, ?array $expectedFingerprints): array
+    /**
+     * @template TResult
+     * @param list<int> $assetIds
+     * @param array<string, string>|null $expectedFingerprints
+     * @param callable(list<int>): TResult $operation
+     * @return TResult
+     */
+    private function withReviewedPlanLocks(array $assetIds, ?array $expectedFingerprints, callable $operation): mixed
     {
         if ($expectedFingerprints === null) {
-            return [];
+            return $operation([]);
         }
 
-        $ids = array_values(array_unique(array_map('intval', $assetIds)));
-        sort($ids, SORT_NUMERIC);
-        $acquired = [];
-        try {
-            foreach ($ids as $id) {
-                if (!$this->loopGuard->acquireAsset($id)) {
-                    throw new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the operation again.', $id));
+        return $this->reviewedLocks->run(
+            $assetIds,
+            static fn (int $assetId): \Throwable => new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the operation again.', $assetId)),
+            function (array $lockedIds) use ($expectedFingerprints, $operation): mixed {
+                foreach ($lockedIds as $assetId) {
+                    $this->mutationFingerprints->assertUnchanged($assetId, $expectedFingerprints);
                 }
-                $acquired[] = $id;
-            }
-            foreach ($ids as $id) {
-                $this->assertMutationUnchanged($id, $expectedFingerprints);
-            }
-        } catch (\Throwable $e) {
-            $this->releasePlanAssetLocks($acquired);
 
-            throw $e;
-        }
-
-        return $acquired;
-    }
-
-    /** @param list<int> $assetIds */
-    private function releasePlanAssetLocks(array $assetIds): void
-    {
-        foreach (array_reverse($assetIds) as $assetId) {
-            $this->loopGuard->releaseAsset($assetId);
-        }
+                return $operation($lockedIds);
+            },
+        );
     }
 
     public function restore(int $assetId): bool
@@ -258,6 +248,9 @@ class QuarantineService
         $record = $this->findQuarantineRecord($assetId);
         $asset = $this->loadAsset($assetId);
         if ($record === null || $asset === null || !$this->isInQuarantine($asset)) {
+            return false;
+        }
+        if (AssetProtection::isLocked($asset, $this->lockProperty)) {
             return false;
         }
         if ($record['status'] === QuarantineStatus::Pending) {
@@ -446,16 +439,17 @@ class QuarantineService
         $graceDays = $this->effectiveGraceDays($graceDays);
         $assetIds = array_values(array_unique(array_map('intval', $assetIds)));
         sort($assetIds, SORT_NUMERIC);
-        $planLocks = $this->acquirePlanAssetLocks($assetIds, $expectedFingerprints);
-        try {
-            if ($this->expiredAssetIds($graceDays) !== $assetIds) {
-                throw new StaleApplyPlanException('The quarantine purge selection changed after preview. Preview again.');
-            }
+        return $this->withReviewedPlanLocks(
+            $assetIds,
+            $expectedFingerprints,
+            function (array $lockedIds) use ($assetIds, $graceDays): array {
+                if ($this->expiredAssetIds($graceDays) !== $assetIds) {
+                    throw new StaleApplyPlanException('The quarantine purge selection changed after preview. Preview again.');
+                }
 
-            return $this->purgeResult($graceDays, $this->purgeCandidates($assetIds, false, true));
-        } finally {
-            $this->releasePlanAssetLocks($planLocks);
-        }
+                return $this->purgeResult($graceDays, $this->purgeCandidates($lockedIds, false, true));
+            },
+        );
     }
 
     private function effectiveGraceDays(?int $graceDays): int
@@ -542,29 +536,67 @@ class QuarantineService
         if ($record === null || $record['status'] !== QuarantineStatus::Committed) {
             return ['purged' => false, 'deleted' => false];
         }
+
+        return $dryRun ? $this->dryRunPurge($assetId) : $this->livePurge($assetId);
+    }
+
+    /**
+     * Non-mutating dry-run assessment; fence-free because it commits no delete.
+     *
+     * @return array{purged: bool, deleted: bool}
+     */
+    protected function dryRunPurge(int $assetId): array
+    {
         if ($this->unusedAssetFinder->isReferenced($assetId)) {
             return ['purged' => $this->rejectPurge($assetId, 'is now referenced'), 'deleted' => false];
         }
-
         $asset = $this->loadAsset($assetId);
         if ($asset === null) {
-            if (!$dryRun) {
-                $this->deleteQuarantineRecord($assetId);
-            }
-
             return ['purged' => true, 'deleted' => false];
         }
         if (!$this->canPurge($asset, $assetId)) {
             return ['purged' => false, 'deleted' => false];
         }
-        if ($dryRun) {
-            return ['purged' => true, 'deleted' => false];
+
+        return ['purged' => true, 'deleted' => false];
+    }
+
+    /**
+     * Fenced live purge: the reference/protection re-reads and the hard delete run inside a deletion fence,
+     * refreshed immediately before the delete and always token-released.
+     *
+     * @return array{purged: bool, deleted: bool}
+     */
+    protected function livePurge(int $assetId): array
+    {
+        $fenceToken = $this->deletionFence->acquire($assetId, 'quarantine_purge');
+        if ($fenceToken === null) {
+            return ['purged' => $this->rejectPurge($assetId, 'is already being deleted by another operation'), 'deleted' => false];
         }
 
-        $this->deleteAsset($asset);
-        $this->deleteQuarantineRecord($assetId);
+        try {
+            if ($this->unusedAssetFinder->isReferenced($assetId)) {
+                return ['purged' => $this->rejectPurge($assetId, 'is now referenced'), 'deleted' => false];
+            }
+            $asset = $this->loadAsset($assetId);
+            if ($asset === null) {
+                $this->deleteQuarantineRecord($assetId);
 
-        return ['purged' => true, 'deleted' => true];
+                return ['purged' => true, 'deleted' => false];
+            }
+            if (!$this->canPurge($asset, $assetId)) {
+                return ['purged' => false, 'deleted' => false];
+            }
+
+            $this->loopGuard->refreshAsset($assetId);
+            $this->deletionFence->refreshOrFail($assetId, $fenceToken);
+            $this->deleteAsset($asset);
+            $this->deleteQuarantineRecord($assetId);
+
+            return ['purged' => true, 'deleted' => true];
+        } finally {
+            $this->deletionFence->release($assetId, $fenceToken);
+        }
     }
 
     private function canPurge(Asset $asset, int $assetId): bool
@@ -581,8 +613,12 @@ class QuarantineService
         if ($this->isReferencedInContent($asset)) {
             return $this->rejectPurge($assetId, 'is referenced in content');
         }
-        if ($this->dependencyScanner->isReferenced($asset)) {
-            return $this->rejectPurge($assetId, 'has live dependencies or safety could not be proven');
+        $dependencyVerdict = $this->dependencyVerifier->verdict($asset);
+        if ($dependencyVerdict === DependencyUsageVerdict::Referenced) {
+            return $this->rejectPurge($assetId, 'has a live Pimcore element dependency');
+        }
+        if ($dependencyVerdict === DependencyUsageVerdict::Unknown) {
+            return $this->rejectPurge($assetId, 'has an unverified dependency projection');
         }
 
         return $this->isAllowed($asset, 'delete');
@@ -604,7 +640,7 @@ class QuarantineService
      */
     private function isReferencedInContent(Asset $asset): bool
     {
-        return $this->contentScanner->isReferencedInContent($asset);
+        return $this->contentScanner->freshlyReferencedInContent($asset);
     }
 
     private function hasContentEvidence(): bool
@@ -614,18 +650,18 @@ class QuarantineService
 
     protected function moveGuarded(Asset $asset, int $assetId, callable $mutate, string $note, ?string $targetPath = null): void
     {
-        $this->loopGuard->markAssetProcessing($assetId);
-        try {
-            $mutate();
-            $this->loopGuard->refreshAsset($assetId);
-            if ($targetPath !== null) {
+        unset($assetId);
+        $this->assetSaver->save(
+            $asset,
+            static function (Asset $mutable) use ($mutate): void {
+                unset($mutable);
+                $mutate();
+            },
+            ['versionNote' => $note],
+            $targetPath === null ? null : function () use ($targetPath): void {
                 $this->loopGuard->refreshTarget($targetPath);
-            }
-            $asset->save(['versionNote' => $note]);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
-        }
+            },
+        );
     }
 
     protected function quarantineAsset(Asset $asset, int $assetId, Asset\Folder $folder): void

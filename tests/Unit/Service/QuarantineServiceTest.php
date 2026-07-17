@@ -6,18 +6,22 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Enum\QuarantineStatus;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Security\ActorContextProvider;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Service\AssetDeletionFenceInterface;
 use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
-use Oronts\AssetPilotBundle\Service\DependencyUsageScannerInterface;
+use Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Oronts\AssetPilotBundle\Tests\Unit\Support\MutationSafetyDependencies;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -54,6 +58,12 @@ class QuarantineServiceTest extends TestCase
             $originalPaths[$assetId] ??= '/Original/' . $assetId;
         }
 
+        foreach ($assetsById as $assetId => $asset) {
+            if ($asset !== null) {
+                $asset->method('getId')->willReturn((int) $assetId);
+            }
+        }
+
         $finder = $this->createMock(UnusedAssetFinderInterface::class);
         $finder->method('isReferenced')->willReturn($isReferenced);
         if ($loopGuard === null) {
@@ -65,14 +75,14 @@ class QuarantineServiceTest extends TestCase
             $contentScanner ??= $this->createMock(ContentUsageScanner::class);
             $contentScanner->method('canVerify')->willReturn(true);
         }
-        $dependencyScanner = $this->createMock(DependencyUsageScannerInterface::class);
-        $dependencyScanner->method('isReferenced')->willReturn(false);
+        $dependencyVerifier = $this->createMock(DependencyUsageVerifierInterface::class);
+        $dependencyVerifier->method('verdict')->willReturn(DependencyUsageVerdict::Safe);
         $connection = $this->createMock(Connection::class);
-        [$contentScanner, , $authorization, $dependencyScanner, $workspaceScope, $mutationFingerprints] = $this->mutationSafetyDependencies(
+        [$contentScanner, , $reviewedLocks, $authorization, $dependencyVerifier, $workspaceScope, $mutationFingerprints, , $deletionFence] = $this->mutationSafetyDependencies(
             $connection,
             contentScanner: $contentScanner,
             loopGuard: $loopGuard,
-            dependencyScanner: $dependencyScanner,
+            dependencyVerifier: $dependencyVerifier,
             fingerprints: $mutationFingerprints,
             contentEvidence: $contentEvidence,
         );
@@ -91,9 +101,10 @@ class QuarantineServiceTest extends TestCase
             $contentScanner,
             $assetsAtPath,
             $authorization,
-            $dependencyScanner,
+            $dependencyVerifier,
             $workspaceScope,
             $mutationFingerprints,
+            $deletionFence,
         ) extends QuarantineService {
             public array $recorded = [];
             public array $removed = [];
@@ -102,9 +113,9 @@ class QuarantineServiceTest extends TestCase
             public array $pending = [];
 
             /** @param array<int, ?Asset> $assetsById @param array<int, ?string> $originalPaths @param array<int, QuarantineStatus> $recordStatuses @param list<int> $expiredIds */
-            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private array $recordStatuses, private bool $allowCreate, private array $expiredIds, ContentUsageScanner $scanner, private array $assetsAtPath, ElementAuthorization $authorization, DependencyUsageScannerInterface $dependencyScanner, AssetWorkspaceQueryScope $workspaceScope, AssetMutationFingerprintService $mutationFingerprints)
+            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private array $recordStatuses, private bool $allowCreate, private array $expiredIds, ContentUsageScanner $scanner, private array $assetsAtPath, ElementAuthorization $authorization, DependencyUsageVerifierInterface $dependencyVerifier, AssetWorkspaceQueryScope $workspaceScope, AssetMutationFingerprintService $mutationFingerprints, AssetDeletionFenceInterface $deletionFence)
             {
-                parent::__construct($c, $lg, $f, $ed, $log, $scanner, $authorization, $dependencyScanner, $workspaceScope, $mutationFingerprints);
+                parent::__construct($c, $lg, new ReviewedAssetLockCoordinator($lg), $f, $ed, $log, $scanner, $authorization, $dependencyVerifier, $workspaceScope, $mutationFingerprints, new LoopGuardedAssetSaver($lg), $deletionFence);
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -187,11 +198,13 @@ class QuarantineServiceTest extends TestCase
             }
         };
     }
-    private function asset(string $path, bool $allowed = true): Asset
+    private function asset(string $path, bool $allowed = true, bool $locked = false): Asset
     {
         $asset = $this->createMock(Asset::class);
         $asset->method('getRealFullPath')->willReturn($path);
         $asset->method('isAllowed')->willReturn($allowed);
+        $asset->method('hasProperty')->willReturn($locked);
+        $asset->method('getProperty')->willReturn($locked);
 
         return $asset;
     }
@@ -397,7 +410,7 @@ class QuarantineServiceTest extends TestCase
     public function skipsAssetsReferencedInContent(): void
     {
         $scanner = $this->createMock(ContentUsageScanner::class);
-        $scanner->method('isReferencedInContent')->willReturn(true);
+        $scanner->method('freshlyReferencedInContent')->willReturn(true);
 
         $service = $this->service([1 => $this->asset('/Products/a.jpg')], contentScanner: $scanner);
 
@@ -412,7 +425,7 @@ class QuarantineServiceTest extends TestCase
     public function purgeSkipsAssetsReferencedInContent(): void
     {
         $scanner = $this->createMock(ContentUsageScanner::class);
-        $scanner->method('isReferencedInContent')->willReturn(true);
+        $scanner->method('freshlyReferencedInContent')->willReturn(true);
 
         $service = $this->service([1 => $this->asset('/Quarantine/a.jpg')], expiredIds: [1], contentScanner: $scanner);
 
@@ -469,6 +482,15 @@ class QuarantineServiceTest extends TestCase
         self::assertTrue($service->restore(5));
         self::assertSame([5], $service->removed);
     }
+    #[Test]
+    public function restoreRefusesAProtectedAsset(): void
+    {
+        $service = $this->service([5 => $this->asset('/Quarantine/a.jpg', locked: true)], [5 => '/Products/a.jpg']);
+
+        self::assertFalse($service->restore(5));
+        self::assertSame([], $service->removed);
+    }
+
 
     #[Test]
     public function restoreRecoversAPendingRecordForAnAlreadyMovedAsset(): void
@@ -697,18 +719,22 @@ class QuarantineServiceTest extends TestCase
         $connection->insert('assets', ['id' => 3, 'path' => '/Quarantine/', 'filename' => 'pending.jpg', 'type' => 'image', 'mimetype' => 'image/jpeg']);
         $connection->insert('asset_pilot_quarantine', ['asset_id' => 3, 'original_path' => '/Products/pending.jpg', 'quarantined_at' => '2024-01-01 10:00:00', 'status' => 'pending']);
 
-        [$contentScanner, , $authorization, $dependencyScanner, $workspaceScope, $fingerprints] = $this->mutationSafetyDependencies($connection);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        [$contentScanner, , $reviewedLocks, $authorization, $dependencyVerifier, $workspaceScope, $fingerprints, $assetSaver, $deletionFence] = $this->mutationSafetyDependencies($connection, loopGuard: $loopGuard);
         $service = new QuarantineService(
             $connection,
-            $this->createMock(LoopGuard::class),
+            $loopGuard,
+            $reviewedLocks,
             $this->createMock(UnusedAssetFinderInterface::class),
             new EventDispatcher(),
             new NullLogger(),
             $contentScanner,
             $authorization,
-            $dependencyScanner,
+            $dependencyVerifier,
             $workspaceScope,
             $fingerprints,
+            $assetSaver,
+            $deletionFence,
         );
 
         $allIds = array_column($service->listQuarantined()['items'], 'asset_id');
@@ -750,23 +776,28 @@ class QuarantineServiceTest extends TestCase
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn(ActorContext::user(42));
         $workspaceScope = new AssetWorkspaceQueryScope($connection, $authorization, $actors);
-        [$contentScanner, , , $dependencyScanner, , $fingerprints] = $this->mutationSafetyDependencies(
+        $loopGuard = $this->createMock(LoopGuard::class);
+        [$contentScanner, , $reviewedLocks, , $dependencyVerifier, , $fingerprints, $assetSaver, $deletionFence] = $this->mutationSafetyDependencies(
             $connection,
+            loopGuard: $loopGuard,
             authorization: $authorization,
             workspaceScope: $workspaceScope,
         );
 
         $service = new QuarantineService(
             $connection,
-            $this->createMock(LoopGuard::class),
+            $loopGuard,
+            $reviewedLocks,
             $this->createMock(UnusedAssetFinderInterface::class),
             new EventDispatcher(),
             new NullLogger(),
             $contentScanner,
             $authorization,
-            $dependencyScanner,
+            $dependencyVerifier,
             $workspaceScope,
             $fingerprints,
+            $assetSaver,
+            $deletionFence,
         );
 
         $result = $service->listQuarantined(limit: 1);
