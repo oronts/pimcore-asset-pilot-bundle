@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -13,7 +14,7 @@ use Pimcore\Model\Element\AbstractElement;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Service\ResetInterface;
 
-class DependencyUsageScanner implements DependencyUsageScannerInterface, ResetInterface
+class LiveDependencyUsageScanner implements ResetInterface
 {
     /** @var array<int, true>|null */
     private ?array $referencedAssetIds = null;
@@ -32,11 +33,16 @@ class DependencyUsageScanner implements DependencyUsageScannerInterface, ResetIn
         $this->scanFailed = false;
     }
 
-    public function isReferenced(Asset $asset): bool
+    public function verdict(Asset $asset): DependencyUsageVerdict
     {
         $this->buildIndex();
+        if ($this->scanFailed) {
+            return DependencyUsageVerdict::Unknown;
+        }
 
-        return $this->scanFailed || isset($this->referencedAssetIds[(int) $asset->getId()]);
+        return isset($this->referencedAssetIds[(int) $asset->getId()])
+            ? DependencyUsageVerdict::Referenced
+            : DependencyUsageVerdict::Safe;
     }
 
     private function buildIndex(): void
@@ -62,7 +68,7 @@ class DependencyUsageScanner implements DependencyUsageScannerInterface, ResetIn
         } catch (\Throwable $e) {
             $this->scanFailed = true;
             $this->referencedAssetIds = [];
-            $this->logger->error('Asset Pilot: live dependency verification failed; destructive actions remain blocked.', [
+            $this->logger->error('Asset Pilot: live dependency bootstrap verification failed; destructive actions remain blocked.', [
                 'exception' => $e,
             ]);
         }

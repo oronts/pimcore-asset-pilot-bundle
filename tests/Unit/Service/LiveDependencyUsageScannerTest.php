@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
-use Oronts\AssetPilotBundle\Service\DependencyUsageScanner;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
+use Oronts\AssetPilotBundle\Service\LiveDependencyUsageScanner;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -13,8 +14,8 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\Element\AbstractElement;
 use Psr\Log\NullLogger;
 
-#[CoversClass(DependencyUsageScanner::class)]
-class DependencyUsageScannerTest extends TestCase
+#[CoversClass(LiveDependencyUsageScanner::class)]
+class LiveDependencyUsageScannerTest extends TestCase
 {
     #[Test]
     public function resolvesCurrentPimcoreDependenciesInsteadOfTrustingTheIndex(): void
@@ -27,7 +28,7 @@ class DependencyUsageScannerTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $asset->method('getId')->willReturn(7);
 
-        self::assertTrue($this->scanner([$source])->isReferenced($asset));
+        self::assertSame(DependencyUsageVerdict::Referenced, $this->scanner([$source])->verdict($asset));
     }
 
     #[Test]
@@ -37,13 +38,13 @@ class DependencyUsageScannerTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $asset->method('getId')->willReturn(7);
 
-        self::assertTrue($this->scanner([$source, $source], 1)->isReferenced($asset));
+        self::assertSame(DependencyUsageVerdict::Unknown, $this->scanner([$source, $source], 1)->verdict($asset));
     }
 
     /** @param list<AbstractElement> $sources */
-    private function scanner(array $sources, int $maxSources = 10): DependencyUsageScanner
+    private function scanner(array $sources, int $maxSources = 10): LiveDependencyUsageScanner
     {
-        return new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), new NullLogger(), $maxSources, $sources) extends DependencyUsageScanner {
+        return new class ((new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor(), new NullLogger(), $maxSources, $sources) extends LiveDependencyUsageScanner {
             /** @param list<AbstractElement> $sources */
             public function __construct(Connection $connection, NullLogger $logger, int $maxSources, private readonly array $sources)
             {
