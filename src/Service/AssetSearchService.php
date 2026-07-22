@@ -9,6 +9,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\Query\IndexedAssetSize;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -21,34 +22,44 @@ class AssetSearchService implements AssetSearchServiceInterface
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
         private readonly AssetWorkspaceQueryScope $workspaceScope,
+        private readonly AuthorizedAssetPage $authorizedPage,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
      * @param array{q?: string, type?: string, folder?: string, objectId?: int, extension?: string, referenced?: string} $filters
-     * @return array{items: array, total: int, page: int, pages: int}
+     * @return array{items: array, total: ?int, page: int, pages: ?int, hasMore: bool}
      */
     public function search(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array
     {
-        $offset = ($page - 1) * $limit;
         [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
-            $qb = $this->createBaseQuery()->orderBy($sortColumn, $sortDir)->setFirstResult($offset)->setMaxResults($limit);
-            $countQb = $this->createCountQuery();
-            $this->applySearchFilters($qb, $filters);
-            $this->applySearchFilters($countQb, $filters);
-            $this->workspaceScope->applyView($qb, 'a', 'assetSearch');
-            $this->workspaceScope->applyView($countQb, 'a', 'assetSearchCount');
+            $result = $this->authorizedPage->paginate(
+                $page,
+                $limit,
+                exactTotal: function () use ($filters): int {
+                    $countQb = $this->createCountQuery();
+                    $this->applySearchFilters($countQb, $filters);
+                    $this->workspaceScope->applyView($countQb, 'a', 'assetSearchCount');
 
-            $total = (int) $countQb->executeQuery()->fetchOne();
-            $items = $this->hydrateItems($qb->executeQuery()->fetchAllAssociative());
+                    return (int) $countQb->executeQuery()->fetchOne();
+                },
+                window: function (int $offset, int $limit) use ($filters, $sortColumn, $sortDir): array {
+                    $qb = $this->createBaseQuery()->orderBy($sortColumn, $sortDir)->setFirstResult($offset)->setMaxResults($limit);
+                    $this->applySearchFilters($qb, $filters);
+                    $this->workspaceScope->applyView($qb, 'a', 'assetSearch');
 
-            return $this->paginatedResponse($items, $total, $page, $limit);
+                    return $this->hydrateItems($qb->executeQuery()->fetchAllAssociative());
+                },
+                assetIdOf: static fn (array $row): ?int => isset($row['id']) ? (int) $row['id'] : null,
+            );
+
+            return $this->paginatedResponse($result, $page, $limit);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: asset search failed: {error}', ['error' => $e->getMessage()]);
 
-            return $this->paginatedResponse([], 0, $page, $limit);
+            return $this->paginatedResponse(['items' => [], 'total' => 0, 'hasMore' => false], $page, $limit);
         }
     }
 
@@ -123,7 +134,7 @@ class AssetSearchService implements AssetSearchServiceInterface
     {
         $q = trim($filters['q'] ?? '');
         if ($q !== '') {
-            $qb->andWhere('(a.filename LIKE :q OR a.path LIKE :q)')
+            $qb->andWhere('(a.filename LIKE :q' . Like::CLAUSE . ' OR a.path LIKE :q' . Like::CLAUSE . ')')
                 ->setParameter('q', '%' . Like::escape($q) . '%');
         }
 
@@ -133,7 +144,7 @@ class AssetSearchService implements AssetSearchServiceInterface
 
         if (!empty($filters['folder'])) {
             $folderPath = Like::escape(rtrim($filters['folder'], '/')) . '/%';
-            $qb->andWhere('a.path LIKE :folder_path')->setParameter('folder_path', $folderPath);
+            $qb->andWhere('a.path LIKE :folder_path' . Like::CLAUSE)->setParameter('folder_path', $folderPath);
         }
 
         $objectId = (int) ($filters['objectId'] ?? 0);
@@ -145,7 +156,7 @@ class AssetSearchService implements AssetSearchServiceInterface
         }
 
         if (!empty($filters['extension'])) {
-            $qb->andWhere('a.filename LIKE :ext')
+            $qb->andWhere('a.filename LIKE :ext' . Like::CLAUSE)
                 ->setParameter('ext', '%.' . Like::escape(ltrim((string) $filters['extension'], '.')));
         }
 
@@ -169,8 +180,8 @@ class AssetSearchService implements AssetSearchServiceInterface
         foreach ($items as &$item) {
             $item['file_size'] = IndexedAssetSize::bytes($item);
             $item['size_known'] = $item['file_size'] !== null;
-            $item['created_at'] = $item['created_at'] ? date('Y-m-d H:i:s', (int) $item['created_at']) : null;
-            $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
+            $item['created_at'] = $item['created_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['created_at']) : null;
+            $item['modified_at'] = $item['modified_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['modified_at']) : null;
             $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
             $item['locked'] = (bool) ($item['locked'] ?? false);
             unset($item['indexed_file_size'], $item['indexed_size_known'], $item['size_indexed_at']);
@@ -179,13 +190,20 @@ class AssetSearchService implements AssetSearchServiceInterface
         return $items;
     }
 
-    private function paginatedResponse(array $items, int $total, int $page, int $limit): array
+    /**
+     * @param array{items: list<array<string, mixed>>, total: ?int, hasMore: bool} $result
+     * @return array{items: array, total: ?int, page: int, pages: ?int, hasMore: bool}
+     */
+    private function paginatedResponse(array $result, int $page, int $limit): array
     {
+        $total = $result['total'];
+
         return [
-            'items' => $items,
+            'items' => $result['items'],
             'total' => $total,
             'page' => $page,
-            'pages' => $limit > 0 ? (int) ceil($total / $limit) : 0,
+            'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / $limit) : 0),
+            'hasMore' => $result['hasMore'],
         ];
     }
 

@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
 
 use Pimcore\Model\Asset;
 
-final class AssetFolders
+class AssetFolders
 {
     /**
      * The nearest existing folder at or above $path. Used to check the workspace create ACL before

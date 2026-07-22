@@ -19,6 +19,7 @@ use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinder;
 use Oronts\AssetPilotBundle\Tests\Unit\Support\MutationSafetyDependencies;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -48,6 +49,23 @@ class UnusedAssetFinderTest extends TestCase
             new EventDispatcher(),
             ...$this->mutationSafetyDependencies($connection),
         );
+    }
+
+    #[Test]
+    public function hydrateRowsSerializesAssetTimestampsAsRfc3339Utc(): void
+    {
+        $connection = $this->createMock(Connection::class);
+        $scorer = $this->createMock(ConfidenceScorer::class);
+        $scorer->method('score')->willReturnArgument(0);
+        $finder = new UnusedAssetFinder($connection, new NullLogger(), $scorer, new EventDispatcher(), ...$this->mutationSafetyDependencies($connection));
+
+        $method = new \ReflectionMethod(UnusedAssetFinder::class, 'hydrateRows');
+        $rows = $method->invoke($finder, [
+            ['id' => 5, 'created_at' => 0, 'modified_at' => 2, 'path' => '/x/', 'filename' => 'a.png'],
+        ]);
+
+        self::assertSame('1970-01-01T00:00:02+00:00', $rows[0]['modified_at'], 'modificationDate unix 2 must serialize as RFC 3339 UTC');
+        self::assertNull($rows[0]['created_at'], 'a zero creationDate stays null rather than serializing the epoch');
     }
 
     #[Test]
@@ -111,7 +129,7 @@ class UnusedAssetFinderTest extends TestCase
     }
 
     #[Test]
-    public function workspacePaginationAndTotalsContainOnlyVisibleAssets(): void
+    public function scopedUserGetsNativelyAuthorizedUnusedRowsWithoutALeakingTotal(): void
     {
         $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
         $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, path TEXT, filename TEXT, type TEXT, mimetype TEXT, creationDate INTEGER, modificationDate INTEGER)');
@@ -136,8 +154,16 @@ class UnusedAssetFinderTest extends TestCase
         $actors->method('resolveUser')->willReturn($user);
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn(ActorContext::user(42));
+        $authorization->method('isAllowed')->willReturn(true);
         $scope = new AssetWorkspaceQueryScope($connection, $authorization, $actors);
         $dependencies = $this->mutationSafetyDependencies($connection, authorization: $authorization, workspaceScope: $scope);
+        $stubs = [];
+        foreach ([1, 2, 3] as $id) {
+            $stub = $this->createStub(Asset::class);
+            $stub->method('getId')->willReturn($id);
+            $stubs[$id] = $stub;
+        }
+        $dependencies[6] = new AuthorizedAssetPage($authorization, $scope, static fn (int $id): ?Asset => $stubs[$id] ?? null);
         $finder = new class ($connection, new NullLogger(), $scorer, new EventDispatcher(), $dependencies) extends UnusedAssetFinder {
             public function __construct(Connection $connection, NullLogger $logger, ConfidenceScorer $scorer, EventDispatcher $dispatcher, array $dependencies)
             {
@@ -152,10 +178,10 @@ class UnusedAssetFinderTest extends TestCase
 
         $result = $finder->findUnused(page: 2, limit: 1, sort: 'id', order: 'asc');
 
-        self::assertSame(2, $result['total']);
-        self::assertSame(2, $result['pages']);
+        self::assertNull($result['total'], 'a scoped user must not receive an SQL-count-derived total');
+        self::assertNull($result['pages']);
+        self::assertFalse($result['hasMore'], 'only assets 1 and 3 are workspace-visible, so page 2 (id 3) is the last');
         self::assertSame(3, $result['items'][0]['id']);
-        self::assertSame(2, $finder->countUnused());
     }
 
     #[Test]

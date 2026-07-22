@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
 
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 
-final class ConfidenceFilter
+class ConfidenceFilter
 {
     /**
      * Builds the WHERE conditions for a confidence bucket, mirroring ConfidenceScorer::classify so

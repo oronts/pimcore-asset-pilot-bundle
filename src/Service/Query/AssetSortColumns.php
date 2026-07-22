@@ -9,7 +9,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
  * so the unused-assets and asset-management tabs sort identically. file_size is intentionally
  * absent: it is not a DB column, so it cannot be sorted server-side and falls back to DEFAULT.
  */
-final class AssetSortColumns
+class AssetSortColumns
 {
     public const string DEFAULT = 'modified_at';
 

@@ -9,15 +9,28 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Security\ActorContextProvider;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 
-final class AssetWorkspaceQueryScope
+class AssetWorkspaceQueryScope
 {
     public function __construct(
         private readonly Connection $connection,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly ActorContextProvider $actors,
     ) {}
+
+    /**
+     * True only for the supervised System actor, which is the sole context allowed to skip native
+     * per-row authorization and trust the raw SQL total. An admin is deliberately excluded: Pimcore's
+     * {@see \Pimcore\Model\Element\AbstractElement::isAllowed()} evaluates workflow denial even for an
+     * admin (it grants admin only when the workflow did not deny the operation), so an admin's SQL count
+     * is not the native truth. Admin and scoped users both go through the authorized pager's native
+     * per-row filter, which is why the SQL total is withheld from them.
+     */
+    public function bypassesNativeAuthorization(): bool
+    {
+        return $this->authorization->currentActor()->type === ActorType::System;
+    }
 
     public function applyView(QueryBuilder $query, string $assetAlias = 'a', string $parameterPrefix = 'assetWorkspace'): void
     {

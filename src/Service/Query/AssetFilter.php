@@ -9,7 +9,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
  * by the integrity, duplicate, and normalize scans, so the (LIKE-escaped, bound) filter logic lives
  * in one tested place. Returns [conditionSql, params]; the condition is '' when no filter applies.
  */
-final class AssetFilter
+class AssetFilter
 {
     /**
      * @param array{type?: string, folder?: string, extension?: string} $filters
@@ -24,7 +24,7 @@ final class AssetFilter
             $conditions[] = "type != 'folder'";
         }
         if (!empty($filters['folder'])) {
-            $conditions[] = 'path LIKE ?';
+            $conditions[] = 'path LIKE ?' . Like::CLAUSE;
             $params[] = Like::escape(rtrim((string) $filters['folder'], '/') . '/') . '%';
         }
         if (!empty($filters['type'])) {
@@ -32,7 +32,7 @@ final class AssetFilter
             $params[] = (string) $filters['type'];
         }
         if (!empty($filters['extension'])) {
-            $conditions[] = 'filename LIKE ?';
+            $conditions[] = 'filename LIKE ?' . Like::CLAUSE;
             $params[] = '%.' . Like::escape(ltrim((string) $filters['extension'], '.'));
         }
 

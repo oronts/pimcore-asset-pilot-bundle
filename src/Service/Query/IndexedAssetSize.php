@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Installer;
 
-final class IndexedAssetSize
+class IndexedAssetSize
 {
     public static function join(QueryBuilder $query, string $assetAlias = 'a', string $sizeAlias = 'asset_size'): void
     {

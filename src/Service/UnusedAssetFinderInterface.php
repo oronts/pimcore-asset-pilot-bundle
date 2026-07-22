@@ -12,6 +12,15 @@ interface UnusedAssetFinderInterface
      */
     public function findUnused(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array;
 
+    /**
+     * Stream every natively-visible unused asset for a CSV export, to true exhaustion.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function iterateForExport(array $filters = [], ?string $sort = null, ?string $order = null): \Generator;
+
     /** @param array<string, mixed> $filters */
     public function countUnused(array $filters = []): int;
 

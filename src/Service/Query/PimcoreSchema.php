@@ -8,7 +8,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
  * Single source of truth for the Pimcore core table names and element-type discriminators this
  * bundle queries directly. Keeps the raw SQL in the services from drifting on these magic strings.
  */
-final class PimcoreSchema
+class PimcoreSchema
 {
     public const string TABLE_ASSETS = 'assets';
     public const string TABLE_OBJECTS = 'objects';
@@ -18,6 +18,7 @@ final class PimcoreSchema
 
     public const string ELEMENT_TYPE_ASSET = 'asset';
     public const string ELEMENT_TYPE_OBJECT = 'object';
+    public const string ELEMENT_TYPE_DOCUMENT = 'document';
 
     public const string ASSET_TYPE_FOLDER = 'folder';
 

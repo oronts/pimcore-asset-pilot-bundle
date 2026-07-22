@@ -20,6 +20,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use Oronts\AssetPilotBundle\Service\Query\DateFilters;
@@ -46,6 +47,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         private readonly ElementAuthorizationInterface $authorization,
         private readonly DependencyUsageVerifierInterface $dependencyVerifier,
         private readonly AssetWorkspaceQueryScope $workspaceScope,
+        private readonly AuthorizedAssetPage $authorizedPage,
         private readonly AssetMutationFingerprintService $mutationFingerprints,
         private readonly LoopGuardedAssetSaver $assetSaver,
         private readonly AssetDeletionFenceInterface $deletionFence,
@@ -72,12 +74,55 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         DateFilters::validate($filters);
         $this->validateConfidenceFilter($filters);
 
-        $page = max(1, $page);
-        $limit = max(1, $limit);
-        $offset = ($page - 1) * $limit;
         [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
         try {
+            $result = $this->authorizedPage->paginate(
+                $page,
+                $limit,
+                exactTotal: function () use ($filters): int {
+                    $countQb = $this->connection->createQueryBuilder()
+                        ->select('COUNT(*) as total')
+                        ->from(PimcoreSchema::TABLE_ASSETS, 'a');
+                    $this->applyUnusedPredicate($countQb);
+                    $this->applyFilters($countQb, $filters);
+                    $this->workspaceScope->applyView($countQb, 'a', 'unusedCount');
+
+                    return (int) $countQb->executeQuery()->fetchOne();
+                },
+                window: $this->unusedWindow($filters, $sortColumn, $sortDir),
+                assetIdOf: static fn (array $row): ?int => isset($row['id']) ? (int) $row['id'] : null,
+            );
+            $total = $result['total'];
+
+            return [
+                'items' => $result['items'],
+                'total' => $total,
+                'page' => max(1, $page),
+                'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / max(1, $limit)) : 0),
+                'hasMore' => $result['hasMore'],
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to find unused assets: {error}', [
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            return ['items' => [], 'total' => 0, 'page' => max(1, $page), 'pages' => 0, 'hasMore' => false];
+        }
+    }
+
+    /**
+     * The raw workspace-scoped unused-asset window (offset, limit), with a unique a.id tiebreak so offset
+     * paging is stable.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return callable(int, int): list<array<string, mixed>>
+     */
+    private function unusedWindow(array $filters, string $sortColumn, string $sortDir): callable
+    {
+        return function (int $offset, int $limit) use ($filters, $sortColumn, $sortDir): array {
             $qb = $this->connection->createQueryBuilder()
                 ->select('a.id, a.path, a.filename, a.type, a.mimetype, a.creationDate as created_at, a.modificationDate as modified_at')
                 ->addSelect('CASE WHEN lp.data = \'1\' THEN 1 ELSE 0 END as locked')
@@ -86,39 +131,36 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 ->setParameter('lock_ctype', PimcoreSchema::ELEMENT_TYPE_ASSET)
                 ->setParameter('lock_prop', $this->lockProperty)
                 ->orderBy($sortColumn, $sortDir)
+                ->addOrderBy('a.id', $sortDir)
                 ->setFirstResult($offset)
                 ->setMaxResults($limit);
             IndexedAssetSize::join($qb);
             $this->applyUnusedPredicate($qb);
-
-            $countQb = $this->connection->createQueryBuilder()
-                ->select('COUNT(*) as total')
-                ->from(PimcoreSchema::TABLE_ASSETS, 'a');
-            $this->applyUnusedPredicate($countQb);
-
             $this->applyFilters($qb, $filters);
-            $this->applyFilters($countQb, $filters);
             $this->workspaceScope->applyView($qb, 'a', 'unusedList');
-            $this->workspaceScope->applyView($countQb, 'a', 'unusedCount');
 
-            $total = (int) $countQb->executeQuery()->fetchOne();
-            $items = $qb->executeQuery()->fetchAllAssociative();
-            $items = $this->hydrateRows($items);
+            return $this->hydrateRows($qb->executeQuery()->fetchAllAssociative());
+        };
+    }
 
-            return [
-                'items' => $items,
-                'total' => $total,
-                'page' => $page,
-                'pages' => $limit > 0 ? (int) ceil($total / $limit) : 0,
-            ];
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: failed to find unused assets: {error}', [
-                'error' => $e->getMessage(),
-                'exception' => $e,
-            ]);
+    /**
+     * Stream every natively-visible unused asset for a CSV export, to exhaustion.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function iterateForExport(array $filters = [], ?string $sort = null, ?string $order = null): \Generator
+    {
+        $this->rejectUnsupportedSizeFilters($filters);
+        DateFilters::validate($filters);
+        $this->validateConfidenceFilter($filters);
+        [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
-            return ['items' => [], 'total' => 0, 'page' => $page, 'pages' => 0];
-        }
+        yield from $this->authorizedPage->iterateAuthorized(
+            $this->unusedWindow($filters, $sortColumn, $sortDir),
+            static fn (array $row): ?int => isset($row['id']) ? (int) $row['id'] : null,
+        );
     }
 
     /** @param list<array<string, mixed>> $items @return list<array<string, mixed>> */
@@ -127,8 +169,8 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         foreach ($items as &$item) {
             $item['file_size'] = IndexedAssetSize::bytes($item);
             $item['size_known'] = $item['file_size'] !== null;
-            $item['created_at'] = $item['created_at'] ? date('Y-m-d H:i:s', (int) $item['created_at']) : null;
-            $item['modified_at'] = $item['modified_at'] ? date('Y-m-d H:i:s', (int) $item['modified_at']) : null;
+            $item['created_at'] = $item['created_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['created_at']) : null;
+            $item['modified_at'] = $item['modified_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['modified_at']) : null;
             $item['full_path'] = rtrim((string) ($item['path'] ?? ''), '/') . '/' . ($item['filename'] ?? '');
             $item['locked'] = (bool) ($item['locked'] ?? false);
             unset($item['indexed_file_size'], $item['indexed_size_known'], $item['size_indexed_at']);
@@ -306,7 +348,8 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
         // Authorize before creating anything: createFolderByPath would create the whole target tree as
         // a side effect, so check the create ACL on the nearest existing ancestor first (Pimcore's
-        // workspace ACL for placing an element; isAllowed() returns true on CLI).
+        // workspace ACL for placing an element). The actor-aware check allows System actors
+        // (CLI/maintenance) and enforces the real workspace ACL for a resolved web user.
         $parent = $this->nearestExistingFolder($targetFolder);
         $targetAllowed = $parent === null || $this->authorization->isAllowed($parent, 'create');
         if (!$targetAllowed) {
@@ -569,7 +612,8 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         }
 
         // Per-asset Pimcore workspace ACL (defence in depth over the flat operate permission).
-        // isAllowed() resolves the current user itself and returns true on CLI.
+        // The actor-aware authorization allows System actors (CLI/maintenance) and checks a resolved
+        // web user against the workspace ACL.
         if (!$this->authorization->isAllowed($asset, $aclPermission)) {
             return [null, sprintf('Not permitted to %s this asset', $verb)];
         }

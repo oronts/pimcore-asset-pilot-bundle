@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service\Query;
 
-final class DateFilters
+class DateFilters
 {
     public static function validate(array $filters): void
     {

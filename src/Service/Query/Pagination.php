@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
 
 use Symfony\Component\HttpFoundation\Request;
 
-final class Pagination
+class Pagination
 {
     /**
      * Parse and clamp the ?page/?limit query params into [page, limit]: page is at least 1, limit is
