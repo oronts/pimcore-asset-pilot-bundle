@@ -1,0 +1,83 @@
+# Deployment-level end-to-end acceptance (see docs/e2e-acceptance.md).
+#
+# SCAFFOLDING: disabled by default (workflow_dispatch). Enabling it needs one operator decision — a
+# runner that can host a full Pimcore + MariaDB + a headless browser. The steps marked TODO(operator)
+# depend on the chosen Pimcore skeleton and the test-project seeding conventions.
+name: E2E acceptance (manual scaffold, not a gate)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Pimcore E2E (Admin/Operate/View + a11y)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: pimcore
+          MARIADB_DATABASE: pimcore
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+
+    steps:
+      - name: Checkout bundle
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, redis, gd, exif, intl, zip
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      # TODO(operator): create a Pimcore skeleton and require this checkout as a path repository.
+      # e.g. composer create-project pimcore/skeleton pimcore, then composer config repositories.bundle
+      # path ../, then composer require oronts/asset-pilot-bundle:@dev
+      - name: Install Pimcore application with the bundle
+        run: echo "TODO(operator): install Pimcore skeleton + require the bundle from this checkout"
+
+      - name: Migrate (empty + legacy fixture) and health-check
+        run: echo "TODO(operator): bin/console pimcore:migrations:migrate; bin/console asset-pilot:health"
+
+      - name: Seed Admin/Operate/View users on disjoint workspaces
+        run: echo "TODO(operator): seed the three users + disjoint asset workspaces (matrix rows 4-7)"
+
+      - name: Start Messenger consumers
+        run: echo "TODO(operator): run the asset_pilot + pimcore_maintenance consumers in the background"
+
+      - name: Build Studio frontend
+        run: npm --prefix assets/studio ci && npm --prefix assets/studio run build && npm --prefix assets/studio run prepare-release-build
+
+      - name: Install Playwright
+        run: |
+          cd assets/studio/e2e
+          npm install
+          npm run install-browsers
+
+      - name: Run acceptance matrix
+        env:
+          E2E_BASE_URL: http://127.0.0.1
+          # E2E_ADMIN_USER / E2E_ADMIN_PASS / E2E_OPERATE_* / E2E_VIEW_* provided by the seeding step.
+        run: npm --prefix assets/studio/e2e test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: assets/studio/playwright-report
+          retention-days: 7

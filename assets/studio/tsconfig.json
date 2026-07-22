@@ -4,14 +4,12 @@
     "target": "es2017",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
-    "types": ["reflect-metadata", "@types/webpack-env"],
+    "types": ["@types/webpack-env"],
     "strict": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "skipLibCheck": true
   },
   "include": [
