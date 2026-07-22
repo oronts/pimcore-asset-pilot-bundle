@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Command;
 
 use Oronts\AssetPilotBundle\Command\DownloadZipCommand;
-use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -20,7 +21,7 @@ class DownloadZipCommandTest extends TestCase
     public function refusesToReplaceAnExistingOutputWithoutForce(): void
     {
         $output = (string) tempnam(sys_get_temp_dir(), 'apz_output_');
-        $service = $this->createMock(AssetZipService::class);
+        $service = $this->createMock(AssetZipServiceInterface::class);
         $service->expects(self::never())->method('buildFromAssetIds');
         $tester = new CommandTester(new DownloadZipCommand($service));
 
@@ -41,17 +42,11 @@ class DownloadZipCommandTest extends TestCase
         $output = sys_get_temp_dir() . '/apz_output_' . bin2hex(random_bytes(8)) . '.zip';
         file_put_contents($archive, 'archive-content');
 
-        $service = $this->createMock(AssetZipService::class);
+        $service = $this->createMock(AssetZipServiceInterface::class);
         $service->expects(self::once())->method('buildFromObjects')->with(
             [7, 3],
             self::callback(static fn (ZipBuildOptions $options): bool => $options->strategy === 'folder' && $options->thumbnail === 'preview'),
-        )->willReturn([
-            'path' => $archive,
-            'requested' => 2,
-            'added' => 2,
-            'skipped' => 0,
-            'truncated' => false,
-        ]);
+        )->willReturn(new ZipBuildResult($archive, 2, 2, 0));
         $tester = new CommandTester(new DownloadZipCommand($service));
 
         try {

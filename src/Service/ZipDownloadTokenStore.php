@@ -8,11 +8,13 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Oronts\AssetPilotBundle\Zip\ZipDownloadPlan;
 use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Component\Lock\LockFactory;
 
-final class ZipDownloadTokenStore
+class ZipDownloadTokenStore implements ZipDownloadTokenStoreInterface
 {
     public function __construct(
         private readonly CacheItemPoolInterface $cache,
+        private readonly LockFactory $lockFactory,
         private readonly int $ttlSeconds = 300,
     ) {
         if ($this->ttlSeconds <= 0) {
@@ -40,26 +42,38 @@ final class ZipDownloadTokenStore
         return $token;
     }
 
-    public function resolve(string $token, ActorContext $actor): ?ZipDownloadPlan
+    public function claim(string $token, ActorContext $actor): ?ZipDownloadPlan
     {
         if (preg_match('/^[A-Za-z0-9_-]{43}$/D', $token) !== 1) {
             return null;
         }
 
-        $item = $this->cache->getItem($this->key($token));
-        if (!$item->isHit()) {
+        $lock = $this->lockFactory->createLock('asset_pilot_zip_download_' . hash('sha256', $token), 10.0);
+        if (!$lock->acquire()) {
             return null;
         }
 
-        $payload = $item->get();
-        if (!$this->isValidPayload($payload, $actor)) {
-            return null;
-        }
+        try {
+            $item = $this->cache->getItem($this->key($token));
+            if (!$item->isHit()) {
+                return null;
+            }
 
-        return new ZipDownloadPlan(
-            $payload['assetIds'],
-            new ZipBuildOptions($payload['strategy'], $payload['thumbnail']),
-        );
+            $payload = $item->get();
+            if (!$this->isValidPayload($payload, $actor)) {
+                return null;
+            }
+            if (!$this->cache->deleteItem($this->key($token))) {
+                throw new \RuntimeException('Could not consume the ZIP download token.');
+            }
+
+            return new ZipDownloadPlan(
+                $payload['assetIds'],
+                new ZipBuildOptions($payload['strategy'], $payload['thumbnail']),
+            );
+        } finally {
+            $lock->release();
+        }
     }
 
     private function key(string $token): string

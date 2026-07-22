@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
-use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -29,7 +30,7 @@ class DownloadZipCommand extends Command
     use ValidatesCliBulkIds;
 
     public function __construct(
-        private readonly AssetZipService $zipService,
+        private readonly AssetZipServiceInterface $zipService,
     ) {
         parent::__construct();
     }
@@ -68,7 +69,7 @@ class DownloadZipCommand extends Command
         if (is_int($result)) {
             return $result;
         }
-        if ($result['path'] === null || $result['added'] === 0) {
+        if (!$result->hasArchive()) {
             $io->warning('No downloadable assets matched the selection.');
 
             return Command::FAILURE;
@@ -118,14 +119,13 @@ class DownloadZipCommand extends Command
 
     /**
      * @param array{source: string, ids: list<int>} $source
-     * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}|int
      */
     private function buildArchive(
         InputInterface $input,
         SymfonyStyle $io,
         array $source,
         ZipBuildOptions $options,
-    ): array|int {
+    ): ZipBuildResult|int {
         try {
             return match ($source['source']) {
                 'asset-ids' => $this->zipService->buildFromAssetIds($source['ids'], $options),
@@ -139,17 +139,20 @@ class DownloadZipCommand extends Command
         }
     }
 
-    /** @param array{path: string, requested: int, added: int, skipped: int, truncated: false} $result */
-    private function writeArchive(SymfonyStyle $io, array $result, string $outputPath): int
+    private function writeArchive(SymfonyStyle $io, ZipBuildResult $result, string $outputPath): int
     {
-        if (!@rename($result['path'], $outputPath) && !(@copy($result['path'], $outputPath) && @unlink($result['path']))) {
-            @unlink($result['path']);
+        $sourcePath = $result->path;
+        if ($sourcePath === null) {
+            throw new \LogicException('Cannot write an empty ZIP build result.');
+        }
+        if (!@rename($sourcePath, $outputPath) && !(@copy($sourcePath, $outputPath) && @unlink($sourcePath))) {
+            @unlink($sourcePath);
             $io->error('Could not write the archive to ' . $outputPath);
 
             return Command::FAILURE;
         }
 
-        $io->success(sprintf('Wrote %d asset(s) (%d skipped) to %s', $result['added'], $result['skipped'], $outputPath));
+        $io->success(sprintf('Wrote %d asset(s) (%d skipped) to %s', $result->added, $result->skipped, $outputPath));
 
         return Command::SUCCESS;
     }

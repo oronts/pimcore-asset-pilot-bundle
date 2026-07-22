@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetZipService;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -153,11 +154,8 @@ class AssetZipServiceTest extends TestCase
                 return $this->uniqueName($entry, $used);
             }
 
-            /**
-             * @param Asset[] $assets
-             * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}
-             */
-            public function callBuild(array $assets, ?ZipBuildOptions $options = null): array
+            /** @param list<Asset> $assets */
+            public function callBuild(array $assets, ?ZipBuildOptions $options = null): ZipBuildResult
             {
                 return $this->build($assets, $options);
             }
@@ -198,14 +196,14 @@ class AssetZipServiceTest extends TestCase
         $result = $this->serviceWith([])->callBuild([$goodAsset, $emptyAsset]);
 
         try {
-            self::assertSame(1, $result['added'], 'only the non-empty asset is packed');
-            self::assertSame(1, $result['skipped'], 'the 0-byte asset is skipped, not packed empty');
-            self::assertSame(2, $result['requested']);
-            self::assertFalse($result['truncated']);
-            self::assertNotNull($result['path']);
+            self::assertSame(1, $result->added, 'only the non-empty asset is packed');
+            self::assertSame(1, $result->skipped, 'the 0-byte asset is skipped, not packed empty');
+            self::assertSame(2, $result->requested);
+            self::assertFalse($result->truncated);
+            self::assertNotNull($result->path);
         } finally {
-            if ($result['path'] !== null) {
-                @unlink($result['path']);
+            if ($result->path !== null) {
+                @unlink($result->path);
             }
             @unlink($good);
             @unlink($empty);
@@ -238,13 +236,10 @@ class AssetZipServiceTest extends TestCase
         $asset->method('getLocalFile')->willReturn($empty);
 
         try {
-            self::assertSame([
-                'path' => null,
-                'requested' => 1,
-                'added' => 0,
-                'skipped' => 1,
-                'truncated' => false,
-            ], $this->serviceWith([])->callBuild([$asset]));
+            self::assertEquals(
+                new ZipBuildResult(null, 1, 0, 1),
+                $this->serviceWith([])->callBuild([$asset]),
+            );
         } finally {
             @unlink($empty);
         }

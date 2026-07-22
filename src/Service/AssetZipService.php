@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Model\ActorContext;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Support\UniqueServiceMap;
 use Oronts\AssetPilotBundle\Zip\FlatZipStrategy;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject;
@@ -32,7 +34,7 @@ use Psr\Log\LoggerInterface;
  * Reusable standalone: call buildFromAssetIds()/buildFromFolder()/buildFromObjects() and stream the
  * returned path; register a ZipEntryStrategyInterface to add an archive layout.
  */
-class AssetZipService
+class AssetZipService implements AssetZipServiceInterface
 {
     /** @var array<string, ZipEntryStrategyInterface> */
     private array $strategies = [];
@@ -43,7 +45,7 @@ class AssetZipService
     public function __construct(
         protected readonly LoggerInterface $logger,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         iterable $strategies = [],
         protected readonly string $defaultStrategy = 'flat',
         protected readonly int $maxAssets = 1000,
@@ -52,22 +54,15 @@ class AssetZipService
         $this->strategies = UniqueServiceMap::from($strategies, static fn (ZipEntryStrategyInterface $strategy): string => $strategy->getName(), 'ZIP strategy');
     }
 
-    /**
-     * @param int[] $assetIds
-     *
-     * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}
-     */
-    public function buildFromAssetIds(array $assetIds, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): array
+    /** @param list<int> $assetIds */
+    public function buildFromAssetIds(array $assetIds, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): ZipBuildResult
     {
         $assetIds = array_values(array_unique(array_map('intval', $assetIds)));
 
         return $this->build($this->downloadableAssets($assetIds, $actor), $options, count($assetIds));
     }
 
-    /**
-     * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}
-     */
-    public function buildFromFolder(int $folderId, bool $recursive = true, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): array
+    public function buildFromFolder(int $folderId, bool $recursive = true, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): ZipBuildResult
     {
         $assets = $this->assetsInFolder($folderId, $recursive, $actor);
 
@@ -78,11 +73,9 @@ class AssetZipService
      * Zip every asset referenced by the given data objects (across all field types the extractor
      * supports: relations, bricks, field collections, localized and block fields).
      *
-     * @param int[] $objectIds
-     *
-     * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}
+     * @param list<int> $objectIds
      */
-    public function buildFromObjects(array $objectIds, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): array
+    public function buildFromObjects(array $objectIds, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): ZipBuildResult
     {
         $assets = [];
         foreach ($objectIds as $objectId) {
@@ -103,12 +96,8 @@ class AssetZipService
         return $this->build(array_values($assets), $options, count($assets));
     }
 
-    /**
-     * @param Asset[] $assets
-     *
-     * @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false}
-     */
-    protected function build(array $assets, ?ZipBuildOptions $options, ?int $requested = null): array
+    /** @param list<Asset> $assets */
+    protected function build(array $assets, ?ZipBuildOptions $options, ?int $requested = null): ZipBuildResult
     {
         $options ??= new ZipBuildOptions();
         $strategy = $this->resolveStrategy($options->strategy);
@@ -215,20 +204,18 @@ class AssetZipService
         @unlink($path);
     }
 
-    /** @return array{path: null, requested: int, added: 0, skipped: int, truncated: false} */
-    private function emptyBuildResult(int $requested, int $skipped): array
+    private function emptyBuildResult(int $requested, int $skipped): ZipBuildResult
     {
-        return ['path' => null, 'requested' => $requested, 'added' => 0, 'skipped' => $skipped, 'truncated' => false];
+        return new ZipBuildResult(null, $requested, 0, $skipped);
     }
 
-    /** @return array{path: ?string, requested: int, added: int, skipped: int, truncated: false} */
     private function buildResult(
         string $path,
         int $requested,
         int $added,
         int $skipped,
         ZipEntryStrategyInterface $strategy,
-    ): array {
+    ): ZipBuildResult {
         if ($added === 0) {
             @unlink($path);
 
@@ -241,9 +228,8 @@ class AssetZipService
             'strategy' => $strategy->getName(),
         ]);
 
-        return ['path' => $path, 'requested' => $requested, 'added' => $added, 'skipped' => $skipped, 'truncated' => false];
+        return new ZipBuildResult($path, $requested, $added, $skipped);
     }
-
 
     /**
      * @param int[] $assetIds
@@ -278,9 +264,9 @@ class AssetZipService
         $base = rtrim((string) $folder->getRealFullPath(), '/') . '/';
         $listing = $this->folderListing();
         $listing->setCondition(
-            'type != :folder AND path ' . ($recursive ? 'LIKE :path' : '= :exact'),
+            'type != :folder AND path ' . ($recursive ? 'LIKE :path' . Like::CLAUSE : '= :exact'),
             $recursive
-                ? ['folder' => 'folder', 'path' => str_replace(['%', '_'], ['\\%', '\\_'], $base) . '%']
+                ? ['folder' => 'folder', 'path' => Like::escape($base) . '%']
                 : ['folder' => 'folder', 'exact' => $base],
         );
         $listing->setLimit($this->maxAssets + 1);
