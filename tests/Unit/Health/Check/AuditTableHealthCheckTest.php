@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Health\Check;
 
 use Doctrine\DBAL\Connection;
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
 use Oronts\AssetPilotBundle\Enum\HealthStatus;
 use Oronts\AssetPilotBundle\Health\Check\AuditTableHealthCheck;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -16,36 +15,80 @@ use Psr\Log\NullLogger;
 #[CoversClass(AuditTableHealthCheck::class)]
 class AuditTableHealthCheckTest extends TestCase
 {
-    private function check(?bool $exists, bool $throws = false): AuditTableHealthCheck
+    /** @param list<string> $missing */
+    private function check(bool $current, array $missing = [], bool $throws = false): AuditTableHealthCheck
     {
-        $logger = $this->createMock(AuditLoggerInterface::class);
-        $logger->method('isEnabled')->willReturn(true);
-
-        return new class ($this->createMock(Connection::class), $logger, $exists, $throws) extends AuditTableHealthCheck {
-            public function __construct(Connection $c, AuditLoggerInterface $l, private ?bool $exists, private bool $throws)
+        return new class ($this->createMock(Connection::class), $current, $missing, $throws) extends AuditTableHealthCheck {
+            /** @param list<string> $missing */
+            public function __construct(Connection $connection, private bool $current, private array $missing, private bool $throws)
             {
-                parent::__construct($c, $l, new NullLogger());
+                parent::__construct($connection, new NullLogger());
             }
 
-            protected function tableExists(): bool
+            protected function schemaStatus(): array
             {
                 if ($this->throws) {
                     throw new \RuntimeException('schema introspection failed');
                 }
 
-                return (bool) $this->exists;
+                return ['current' => $this->current, 'missing' => $this->missing];
             }
         };
     }
 
     #[Test]
-    public function okWhenTheAuditTableExists(): void
+    public function okWhenTheOwnedSchemaIsCurrent(): void
     {
         self::assertSame(HealthStatus::Ok, $this->check(true)->run()->status);
     }
 
     #[Test]
-    public function criticalWhenTheAuditTableIsMissing(): void
+    public function criticalWhenAnOwnedTableIsMissing(): void
+    {
+        $result = $this->check(false, ['asset_pilot_checksum'])->run();
+
+        self::assertSame(HealthStatus::Critical, $result->status);
+        self::assertSame(['asset_pilot_checksum'], $result->details['missing_tables']);
+    }
+
+    #[Test]
+    public function criticalWhenTheStorageRunTableIsMissing(): void
+    {
+        $result = $this->check(false, ['asset_pilot_storage_run'])->run();
+
+        self::assertSame(HealthStatus::Critical, $result->status);
+        self::assertSame(['asset_pilot_storage_run'], $result->details['missing_tables']);
+    }
+
+    #[Test]
+    public function criticalWhenAnOperationRunTableIsMissing(): void
+    {
+        $result = $this->check(false, ['asset_pilot_operation_run_item'])->run();
+
+        self::assertSame(HealthStatus::Critical, $result->status);
+        self::assertSame(['asset_pilot_operation_run_item'], $result->details['missing_tables']);
+    }
+
+    #[Test]
+    public function criticalWhenTheOperationDeliveryTableIsMissing(): void
+    {
+        $result = $this->check(false, ['asset_pilot_operation_delivery'])->run();
+
+        self::assertSame(HealthStatus::Critical, $result->status);
+        self::assertSame(['asset_pilot_operation_delivery'], $result->details['missing_tables']);
+    }
+
+    #[Test]
+    public function criticalWhenADependencyProjectionTableIsMissing(): void
+    {
+        $result = $this->check(false, ['asset_pilot_dependency_edge'])->run();
+
+        self::assertSame(HealthStatus::Critical, $result->status);
+        self::assertSame(['asset_pilot_dependency_edge'], $result->details['missing_tables']);
+    }
+
+    #[Test]
+    public function criticalWhenColumnsOrIndexesDrift(): void
     {
         self::assertSame(HealthStatus::Critical, $this->check(false)->run()->status);
     }
@@ -53,22 +96,6 @@ class AuditTableHealthCheckTest extends TestCase
     #[Test]
     public function warningWhenTheTableCannotBeVerified(): void
     {
-        self::assertSame(HealthStatus::Warning, $this->check(null, throws: true)->run()->status);
-    }
-
-    #[Test]
-    public function okWhenAuditingIsDisabledRegardlessOfTable(): void
-    {
-        $logger = $this->createMock(AuditLoggerInterface::class);
-        $logger->method('isEnabled')->willReturn(false);
-
-        $check = new class ($this->createMock(Connection::class), $logger, new NullLogger()) extends AuditTableHealthCheck {
-            protected function tableExists(): bool
-            {
-                return false;
-            }
-        };
-
-        self::assertSame(HealthStatus::Ok, $check->run()->status);
+        self::assertSame(HealthStatus::Warning, $this->check(false, throws: true)->run()->status);
     }
 }

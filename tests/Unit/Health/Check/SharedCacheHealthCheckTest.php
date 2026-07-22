@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Health\Check;
 
 use Oronts\AssetPilotBundle\Enum\HealthStatus;
 use Oronts\AssetPilotBundle\Health\Check\SharedCacheHealthCheck;
+use Oronts\AssetPilotBundle\Health\WorkerHeartbeatRecorder;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -25,12 +26,38 @@ class SharedCacheHealthCheckTest extends TestCase
     }
 
     #[Test]
-    public function okWhenTheAdapterIsNotAKnownNonSharedStore(): void
+    public function warnsWhenTheAdapterCannotProveCrossWorkerVisibility(): void
     {
         // An unrecognized pool (e.g. a Redis-backed one) cannot be proven non-shared, so it passes
         // with the introspection caveat rather than a false warning.
         $pool = $this->createMock(CacheItemPoolInterface::class);
 
-        self::assertSame(HealthStatus::Ok, (new SharedCacheHealthCheck($pool))->run()->status);
+        self::assertSame(HealthStatus::Warning, (new SharedCacheHealthCheck($pool))->run()->status);
+    }
+
+    #[Test]
+    public function isOkWhenFreshHeartbeatsProveCrossProcessVisibility(): void
+    {
+        $pool = $this->createMock(CacheItemPoolInterface::class);
+        $values = ['asset_pilot' => 990, 'pimcore_maintenance' => 995];
+        $pool->method('getItem')->willReturnCallback(function (string $key) use ($values) {
+            $transport = str_replace('asset_pilot.worker_heartbeat.', '', $key);
+            $item = $this->createStub(\Psr\Cache\CacheItemInterface::class);
+            $item->method('isHit')->willReturn(isset($values[$transport]));
+            $item->method('get')->willReturn($values[$transport] ?? null);
+
+            return $item;
+        });
+        $check = new class ($pool, true, 120) extends SharedCacheHealthCheck {
+            protected function now(): int
+            {
+                return 1000;
+            }
+        };
+
+        $result = $check->run();
+
+        self::assertSame(HealthStatus::Ok, $result->status);
+        self::assertSame(WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS, $result->details['verified_by']);
     }
 }

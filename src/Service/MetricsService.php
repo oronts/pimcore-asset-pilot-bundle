@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 
 /**
@@ -12,10 +12,10 @@ use Oronts\AssetPilotBundle\Enum\OperationStatus;
  * and the duration aggregate over completed moves. Pure aggregation over the audit gateway (no new
  * scan), suitable for a monitoring poll.
  */
-class MetricsService
+class MetricsService implements MetricsServiceInterface
 {
     public function __construct(
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly AuditQueryInterface $auditLogger,
     ) {}
 
     /**

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Service\MetricsService;
-use Oronts\AssetPilotBundle\Service\PrometheusFormatter;
+use Oronts\AssetPilotBundle\Service\MetricsServiceInterface;
+use Oronts\AssetPilotBundle\Service\PrometheusFormatterInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -20,8 +20,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 class MetricsCommand extends Command
 {
     public function __construct(
-        private readonly MetricsService $metrics,
-        private readonly PrometheusFormatter $formatter,
+        private readonly MetricsServiceInterface $metrics,
+        private readonly PrometheusFormatterInterface $formatter,
     ) {
         parent::__construct();
     }

@@ -6,14 +6,10 @@ namespace Oronts\AssetPilotBundle\Health\Check;
 
 use Oronts\AssetPilotBundle\Enum\HealthStatus;
 use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
+use Oronts\AssetPilotBundle\Health\WorkerHeartbeatRecorder;
 use Oronts\AssetPilotBundle\Model\HealthCheckResult;
 use Psr\Cache\CacheItemPoolInterface;
 
-/**
- * LoopGuard idempotency (Decision #6 / P2-8) only holds when cache.app is shared across workers and
- * pods. This is a best-effort heuristic on the adapter class: a per-process adapter is flagged as a
- * Warning; anything else passes with the caveat that the backend could not be proven shared.
- */
 class SharedCacheHealthCheck implements HealthCheckInterface
 {
     /** Substrings of Symfony cache adapters that are not guaranteed shared across workers/pods. */
@@ -21,6 +17,8 @@ class SharedCacheHealthCheck implements HealthCheckInterface
 
     public function __construct(
         protected readonly CacheItemPoolInterface $cache,
+        protected readonly bool $asyncEnabled = true,
+        protected readonly int $heartbeatMaxAge = 120,
     ) {}
 
     public function name(): string
@@ -44,11 +42,47 @@ class SharedCacheHealthCheck implements HealthCheckInterface
             }
         }
 
+        $verifiedBy = $this->freshWorkerHeartbeats();
+        if ($verifiedBy !== []) {
+            return new HealthCheckResult(
+                $this->name(),
+                HealthStatus::Ok,
+                sprintf('Cross-process cache visibility is proven by fresh worker heartbeat(s): %s.', implode(', ', $verifiedBy)),
+                ['adapter' => $class, 'verified_by' => $verifiedBy],
+            );
+        }
+
         return new HealthCheckResult(
             $this->name(),
-            HealthStatus::Ok,
-            sprintf('cache.app (%s) is not a known per-process store; ensure it is shared (Redis) across workers.', $shortName),
+            HealthStatus::Warning,
+            sprintf('cache.app (%s) may be shared, but cross-worker visibility was not proven by this process.', $shortName),
             ['adapter' => $class],
         );
+    }
+
+    /** @return list<string> */
+    private function freshWorkerHeartbeats(): array
+    {
+        $required = $this->asyncEnabled ? WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS : ['pimcore_maintenance'];
+        $now = $this->now();
+        $fresh = [];
+        foreach ($required as $transportName) {
+            try {
+                $item = $this->cache->getItem(WorkerHeartbeatRecorder::cacheKey($transportName));
+                $timestamp = $item->isHit() ? $item->get() : null;
+                if (is_int($timestamp) && max(0, $now - $timestamp) <= $this->heartbeatMaxAge) {
+                    $fresh[] = $transportName;
+                }
+            } catch (\Throwable) {
+                return [];
+            }
+        }
+
+        return count($fresh) === count($required) ? $fresh : [];
+    }
+
+    protected function now(): int
+    {
+        return time();
     }
 }

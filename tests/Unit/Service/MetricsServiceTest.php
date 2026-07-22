@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Service\MetricsService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -19,7 +19,7 @@ class MetricsServiceTest extends TestCase
      */
     private function service(array $stats, array $duration): MetricsService
     {
-        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit = $this->createMock(AuditQueryInterface::class);
         $audit->method('getStats')->willReturn($stats);
         $audit->method('getDurationStats')->willReturn($duration);
 

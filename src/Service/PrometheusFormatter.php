@@ -10,7 +10,7 @@ namespace Oronts\AssetPilotBundle\Service;
  * Studio session); the idiomatic path is `asset-pilot:metrics --format=prometheus` written to a
  * node_exporter textfile collector or pushed to a pushgateway.
  */
-class PrometheusFormatter
+class PrometheusFormatter implements PrometheusFormatterInterface
 {
     private const string PREFIX = 'asset_pilot';
 
