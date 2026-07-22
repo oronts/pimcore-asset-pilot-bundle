@@ -13,7 +13,7 @@ readonly class FirstAssignmentStrategy implements SideEffectFreeConflictStrategy
 {
     public const string ASSIGNMENT_PROPERTY = 'asset_pilot_first_assignment';
 
-    public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+    public function resolve(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool
     {
         return $asset->getProperty(self::ASSIGNMENT_PROPERTY) !== true;
     }

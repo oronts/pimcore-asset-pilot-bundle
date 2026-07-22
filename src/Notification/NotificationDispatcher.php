@@ -13,7 +13,7 @@ use Psr\Log\LoggerInterface;
  * The opt-in gate lives here (not in each caller) so every notification path shares one switch.
  * Callers on a hot path can short-circuit cheaply via isEnabled() before assembling a message.
  */
-class NotificationDispatcher
+class NotificationDispatcher implements NotificationDispatcherInterface
 {
     /**
      * @param iterable<NotifierInterface> $notifiers
@@ -29,7 +29,7 @@ class NotificationDispatcher
         return $this->enabled;
     }
 
-    public function dispatch(string $title, string $message): void
+    public function dispatch(Notification $notification): void
     {
         if (!$this->enabled) {
             return;
@@ -38,7 +38,7 @@ class NotificationDispatcher
         try {
             foreach ($this->notifiers as $notifier) {
                 try {
-                    $notifier->notify($title, $message);
+                    $notifier->notify($notification);
                 } catch (\Throwable $e) {
                     $this->logger->warning('Asset Pilot: notifier {notifier} failed: {error}', [
                         'notifier' => $notifier::class,

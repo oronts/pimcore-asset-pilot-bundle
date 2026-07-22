@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Support;
 
-final class Regex
+class Regex
 {
     public static function matches(string $pattern, string $subject): bool
     {

@@ -16,7 +16,7 @@ readonly class AlwaysMoveStrategy implements SideEffectFreeConflictStrategyInter
         private LoggerInterface $logger,
     ) {}
 
-    public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+    public function resolve(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool
     {
         $this->logger->debug('AlwaysMoveStrategy: allowing move for asset {assetId} via rule "{rule}".', [
             'assetId' => $asset->getId(),

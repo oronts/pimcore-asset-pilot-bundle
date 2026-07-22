@@ -16,6 +16,7 @@ use Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use Pimcore\Model\Element\AbstractElement;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
@@ -32,6 +33,7 @@ trait MutationSafetyDependencies
      *     ElementAuthorization,
      *     DependencyUsageVerifierInterface,
      *     AssetWorkspaceQueryScope,
+     *     AuthorizedAssetPage,
      *     AssetMutationFingerprintService,
      *     LoopGuardedAssetSaver,
      *     AssetDeletionFenceInterface
@@ -80,6 +82,7 @@ trait MutationSafetyDependencies
             $authorization,
             $dependencyVerifier,
             $workspaceScope,
+            new AuthorizedAssetPage($authorization, $workspaceScope),
             $fingerprints,
             new LoopGuardedAssetSaver($loopGuard),
             $deletionFence,

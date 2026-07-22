@@ -34,7 +34,7 @@ class FirstAssignmentStrategyTest extends TestCase
         $asset->method('getProperty')->with(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY)->willReturn(null);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertTrue($strategy->resolve($asset, $object, $this->createRule()));
+        self::assertTrue($strategy->resolve($asset, $object, $this->createRule(), false));
     }
 
     #[Test]
@@ -46,7 +46,7 @@ class FirstAssignmentStrategyTest extends TestCase
         $asset->method('getProperty')->with(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY)->willReturn(true);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertFalse($strategy->resolve($asset, $object, $this->createRule()));
+        self::assertFalse($strategy->resolve($asset, $object, $this->createRule(), false));
     }
 
     #[Test]

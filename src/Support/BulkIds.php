@@ -12,7 +12,7 @@ namespace Oronts\AssetPilotBundle\Support;
  *
  * @internal Not a documented extension seam; relocate-safe.
  */
-final class BulkIds
+class BulkIds
 {
     public const int MAX = 1000;
 

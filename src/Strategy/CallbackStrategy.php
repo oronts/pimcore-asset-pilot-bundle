@@ -22,7 +22,7 @@ class CallbackStrategy implements ConflictStrategyInterface
         protected readonly LoggerInterface $logger,
     ) {}
 
-    public function resolve(Asset $asset, AbstractObject $currentObject, Rule $rule): bool
+    public function resolve(Asset $asset, AbstractObject $currentObject, Rule $rule, bool $dryRun): bool
     {
         if ($rule->callback === null) {
             $this->logger->warning('CallbackStrategy: no callback configured for rule "{rule}"', [
@@ -41,14 +41,14 @@ class CallbackStrategy implements ConflictStrategyInterface
 
         $callback = $this->callbacks->get($rule->callback);
 
-        // A custom strategy is a ConflictStrategyInterface service (resolve()); a plain callable is
-        // also accepted. The documented examples implement the interface, which is_callable() rejects.
-        if ($callback instanceof ConflictStrategyInterface) {
-            $result = $callback->resolve($asset, $currentObject, $rule);
+        // Plain callables remain useful for small project-local decisions; interface services provide
+        // the typed, auto-tagged extension contract.
+        if ($callback instanceof CallbackDecisionInterface) {
+            $result = $callback->decide($asset, $currentObject, $rule, $dryRun);
         } elseif (is_callable($callback)) {
-            $result = $callback($asset, $currentObject, $rule);
+            $result = $callback($asset, $currentObject, $rule, $dryRun);
         } else {
-            $this->logger->error('CallbackStrategy: service "{service}" must implement ConflictStrategyInterface or be callable', [
+            $this->logger->error('CallbackStrategy: service "{service}" must implement CallbackDecisionInterface or be callable', [
                 'service' => $rule->callback,
             ]);
             return false;

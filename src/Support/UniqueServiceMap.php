@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Support;
 
-final class UniqueServiceMap
+class UniqueServiceMap
 {
     /**
      * @template T of object
