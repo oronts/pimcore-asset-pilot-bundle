@@ -10,9 +10,9 @@
 
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License"></a>
-  <a href="https://www.pimcore.com/"><img src="https://img.shields.io/badge/pimcore-%5E12.0-purple" alt="Pimcore version"></a>
+  <a href="https://www.pimcore.com/"><img src="https://img.shields.io/badge/pimcore-%5E12.3.11-purple" alt="Pimcore version"></a>
   <a href="https://www.php.net/"><img src="https://img.shields.io/badge/php-%3E%3D8.4-blue" alt="PHP version"></a>
-  <a href="https://symfony.com/"><img src="https://img.shields.io/badge/symfony-%5E7.0-black" alt="Symfony version"></a>
+  <a href="https://symfony.com/"><img src="https://img.shields.io/badge/symfony-%5E7.3-black" alt="Symfony version"></a>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
 Asset Pilot automates how Pimcore assets are filed. When a DataObject is saved, it evaluates the
 object's asset fields against a priority-ordered rule set, resolves a target path from a Twig template,
 and moves the files into a structured folder hierarchy, handling localized fields, async processing,
-a full audit trail, and a Studio UI dashboard.
+a mandatory recoverable operation journal, durable observer delivery, and a Studio UI dashboard.
 
 ## Features
 
@@ -39,23 +39,34 @@ a full audit trail, and a Studio UI dashboard.
   conditions, and type/size/extension filters.
 - **Twig target paths** — full Twig templates with custom filters and functions, and per-locale paths
   for localized fields.
-- **Safe under async** — Symfony Messenger + Lock, a loop guard, transport deduplication, and an
-  already-at-target skip keep the move pipeline idempotent.
-- **Audit & revert** — every move is logged with source, target, duration, and trigger; CSV export and
-  a loop-guarded revert are built in.
-- **Unused-asset cleanup** — confidence-scored detection with bulk delete or archive, and per-asset or
-  per-folder protection.
+- **Async processing** — Symfony Messenger, renewable locks, actor context, coalescing stale jobs,
+  and already-at-target checks protect the move pipeline across workers.
+- **Audit & revert** — completed and attempted operations carry source, target, duration, actor, and
+  trigger data in the mandatory audit journal; CSV export and guarded revert are built in.
+- **Recovery & durable delivery** — move/revert intent is journaled before mutation; stale operations
+  are safely classified without repeating the mutation, while rule actions and operation events use
+  a database-backed outbox with retries, leases, dead-letter health, and exact actor restoration.
+- **Unused-asset cleanup** — confidence-scored detection with bulk delete or archive, signed
+  preview/apply plans for REST mutations, and per-asset or per-folder protection.
+- **Dependency safety** — an indexed, revision-fenced projection returns explicit safe, referenced,
+  or unknown verdicts; incomplete bootstrap and dirty sources block destructive operations.
+- **Integrity healing** — bounded broken-binary scans, previewable version rollback, and a separate
+  admin history that exposes Undo only while the recorded heal remains safely reversible.
 - **Studio UI** — a tabbed React dashboard (Dashboard, Rules, Operations, Audit, Unused, Duplicates,
   Integrity, Quarantine, Storage, Empty Folders, Drift, Asset Management) mounted in Pimcore Studio
   via Module Federation.
-- **Built to extend** — an interface behind every seam (a service tag or a replaceable alias), plus a
-  typed event on every mutation. See [Extending](docs/extending.md) and [Overriding](docs/overriding.md).
+- **Built to extend** — documented service tags, replaceable aliases, and typed events cover the
+  supported extension surfaces. See [Extending](docs/extending.md) and [Overriding](docs/overriding.md).
 
 ## Quick Start
 
 ```bash
 composer require oronts/asset-pilot-bundle
 ```
+
+Asset Pilot requires an installed Pimcore Studio. A bare Pimcore Classic skeleton must install and
+configure Generic Execution Engine, Generic Data Index, Studio Backend, and Studio UI first; see the
+[installation guide](docs/installation.md#fresh-installation) for the verified order.
 
 Enable the bundle in `config/bundles.php`:
 
@@ -66,21 +77,27 @@ return [
 ];
 ```
 
-Install the database table and permissions, then build the Studio UI:
+Install the database tables and permissions. The Composer package already contains a verified
+prebuilt Studio remote:
 
 ```bash
 bin/console pimcore:bundle:install OrontsAssetPilotBundle
-
-# Studio UI ships as source (Module Federation remote), not prebuilt
-npm --prefix assets/studio ci
-npm --prefix assets/studio run build
-
 bin/console assets:install
-bin/console cache:clear
+bin/console pimcore:cache:clear
+bin/console asset-pilot:rebuild-dependency-projection
+bin/console asset-pilot:health
 ```
 
-Full setup, including the required Messenger and Lock configuration for async deduplication, is in
+Rerun the bounded projection rebuild until it reports `ready` before enabling destructive cleanup.
+
+Full setup, including both required supervised Messenger consumers, failure transport, Lock, upgrades,
+and safe uninstall, is in
 [docs/installation.md](docs/installation.md).
+
+Operators can inspect stale mutation state with `asset-pilot:recover-operations` and apply only its
+signed reviewed classification. Recovery never repeats the original move or revert.
+Dead observer deliveries use the same preview/apply discipline through
+`asset-pilot:retry-deliveries`; retry preserves the operation and initiating actor.
 
 ## Example
 
@@ -101,11 +118,11 @@ oronts_asset_pilot:
                 extensions: [jpg, png, webp]
 ```
 
-Preview the moves, then run them:
+Preview the moves, then apply that exact reviewed plan before its token expires:
 
 ```bash
-bin/console asset-pilot:organize --class=Product --dry-run
-bin/console asset-pilot:organize --class=Product --async --batch-size=100
+bin/console asset-pilot:organize --class=Product --batch-size=100
+bin/console asset-pilot:organize --class=Product --batch-size=100 --apply --plan-token='v1...' --async
 ```
 
 More recipes (category hierarchies, multi-class setups, move strategies, asset protection, date-based
@@ -116,6 +133,7 @@ organization) are in [docs/scenarios.md](docs/scenarios.md).
 Everything lives in **[docs/](docs/index.md)**.
 
 - **Getting started** — [Installation](docs/installation.md) &middot; [Usage](docs/usage.md) &middot; [Configuration](docs/configuration.md) &middot; [Scenarios](docs/scenarios.md)
+- **Releases** — [Changelog](CHANGELOG.md) &middot; [Upgrade guide](UPGRADING.md)
 - **Reference** — [Reference](docs/reference.md) &middot; [Commands](docs/commands.md) &middot; [REST API](docs/rest-api.md) &middot; [Path Templates](docs/path-templates.md) &middot; [Conditions](docs/conditions.md) &middot; [Permissions](docs/permissions.md) &middot; [Studio UI](docs/studio-ui.md) &middot; [Architecture](docs/architecture.md)
 - **Extending & overriding** — [Developer Experience](docs/dx.md) &middot; [Extending](docs/extending.md) &middot; [Overriding](docs/overriding.md) &middot; [Testing](docs/testing.md)
 
@@ -124,8 +142,10 @@ Everything lives in **[docs/](docs/index.md)**.
 | Dependency | Version |
 |------------|---------|
 | PHP | >= 8.4 |
-| Pimcore | ^12.0 |
-| Symfony Expression Language | ^7.0 |
+| Pimcore | ^12.3.11 |
+| Pimcore Studio Backend | ^2025.4.7 |
+| Pimcore Studio UI | ^2025.4.8 |
+| Symfony components | ^7.3 |
 | Symfony Messenger | ^7.3 |
 | Symfony Lock | ^7.3 |
 
@@ -136,9 +156,11 @@ quality gates, and what a mergeable change looks like.
 
 ## License
 
-Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0), the same license as
-Pimcore. Use, modify, and distribute it in private and commercial projects; if you distribute a
-modified version or run it as a service, your modifications must be available under the same license.
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later). Pimcore and
+Studio dependencies have their own licenses. Review the licenses for your distribution and service
+model; AGPL section 13 applies when users interact remotely with a modified covered version. The
+prebuilt Studio dependency inventory and distributed license texts are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -153,9 +175,9 @@ modified version or run it as a service, your modifications must be available un
 Asset Pilot is built and maintained by **Oronts**, an AI-first software company in Munich. We design and
 run commerce platforms, PIM and DAM systems, and the data automation around them for mid-market and
 enterprise teams, with Pimcore experience spanning versions 10, 11, and 12. This bundle is the
-asset-filing engine we run on our own client platforms; it is hardened in production and released as
-open source under AGPL-3.0. Use it freely. When you want it shaped to your data model or backed by an
-SLA, that is the work we do.
+asset-filing engine we use on client platforms and release under AGPL-3.0-or-later. Validate it in a
+representative Pimcore environment before rollout. When you want it shaped to your data model or
+backed by an SLA, that is the work we do.
 
 **Where we help:**
 

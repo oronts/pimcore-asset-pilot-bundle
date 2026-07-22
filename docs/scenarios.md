@@ -169,7 +169,7 @@ oronts_asset_pilot:
 
 ### Callback Strategy with Custom Logic
 
-Delegate the move decision to a custom service. The service receives the asset, object, and rule, and returns `true` to proceed or `false` to skip.
+Delegate the move decision to a custom service. The service receives the asset, object, rule, and a `dryRun` flag, and returns `true` to proceed or `false` to skip.
 
 ```yaml
 oronts_asset_pilot:
@@ -178,15 +178,15 @@ oronts_asset_pilot:
             class: Product
             target_path: '/Products/{{ object.getItemNumber() }}/Images'
             strategy: callback
-            callback: App\AssetPilot\Strategy\ApprovalStrategy
+            callback: App\AssetPilot\Strategy\ApprovalDecision
             priority: 100
 ```
 
 ```php
-// src/AssetPilot/Strategy/ApprovalStrategy.php
-class ApprovalStrategy implements ConflictStrategyInterface
+// src/AssetPilot/Strategy/ApprovalDecision.php
+class ApprovalDecision implements CallbackDecisionInterface
 {
-    public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+    public function decide(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool
     {
         // Only move assets for published objects
         if ($object instanceof Concrete && !$object->isPublished()) {
@@ -197,26 +197,26 @@ class ApprovalStrategy implements ConflictStrategyInterface
         $hour = (int) date('H');
         return $hour >= 8 && $hour < 18;
     }
-
-    public function supports(MoveStrategy $strategy): bool
-    {
-        // Reached via the callback strategy; return false so it is not selected directly.
-        return false;
-    }
 }
 ```
 
-Tag the service so `CallbackStrategy` can resolve it from its scoped locator by id:
+The callback runs during both preview and apply. Keep it query-only and use `$dryRun` to suppress
+live-only diagnostics or integrations. Saving Pimcore elements or sending external work from this
+method violates the preview contract.
+
+The interface is auto-tagged, so `CallbackStrategy` resolves it from its scoped locator by id:
 
 ```yaml
 services:
-    App\AssetPilot\Strategy\ApprovalStrategy:
-        tags: ['oronts_asset_pilot.callback']
+    App\AssetPilot\Strategy\ApprovalDecision: ~
 ```
 
-### Sync Mode (No Messenger Queue)
+### Synchronous Organization
 
-Disable async processing to move assets immediately during the save request. Suitable for development environments or small catalogs where move operations are fast.
+Disable async organization to move assets immediately during the save request. This is suitable for
+development environments or small catalogs where moves are fast. The `asset_pilot` and
+`pimcore_maintenance` consumers are still required for durable operation events, rule actions, and
+database outbox polling.
 
 ```yaml
 oronts_asset_pilot:
@@ -322,4 +322,3 @@ oronts_asset_pilot:
             strategy: always
             priority: 1
 ```
-

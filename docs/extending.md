@@ -2,10 +2,12 @@
 
 # Extending
 
-Asset Pilot is built around interfaces. Swap out any component by implementing the interface and registering it as a service.
+Asset Pilot exposes supported interfaces, tags, and events for consumer customization. Add behavior through the seams below; replace or decorate the documented service aliases in [Overriding](overriding.md). Transaction, lock, crypto, and recovery internals are intentionally not inheritance APIs, with one exception: the projection marker connection policy (`ProjectionMarkerConnectionInterface`, default `ProjectionMarkerConnection`) is a supported, non-final seam for consumers that run asset-referencing saves inside their own database transaction (see [Overriding](overriding.md)).
 
-> The interface-based seams below (rule action, health check, integrity checker, notifier, duplicate
-> merge strategy, rule provider, zip strategy, context provider) are auto-tagged container-wide, so
+> The interface-based seams below (callback decision, rule action, health check, integrity checker,
+> notifier, duplicate merge strategy, rule provider, zip strategy, context provider, and durable
+> operation observer) are auto-tagged
+> container-wide, so
 > implementing the interface is enough as long as your service has `autoconfigure: true` (the Symfony
 > default). If you register the service with `autoconfigure: false`, add the seam's tag yourself (the
 > tag name is listed with each seam). Strategies (keyed by a tag `alias`), filters, and the Twig /
@@ -44,42 +46,35 @@ services:
 
 ### Custom Strategy
 
-Control when assets should be moved. Implement `ConflictStrategyInterface` (or provide a plain
-invokable service), tag it with `oronts_asset_pilot.callback`, and reference it through the built-in
+Control when assets should be moved. Implement `CallbackDecisionInterface` (auto-tagged), or provide a plain
+invokable service tagged `oronts_asset_pilot.callback`, and reference it through the built-in
 `callback` strategy: the rule sets `strategy: callback` and `callback: <your service id>`, and
 `CallbackStrategy` resolves it from a service locator scoped to the tagged callbacks (not the full
-container) and delegates the decision to your `resolve()`.
+container) and delegates the decision to `decide()`.
+Plain callable services receive the same four arguments: `Asset`, `AbstractObject`, `Rule`, and
+`bool $dryRun`.
 
 ```php
 namespace App\AssetPilot\Strategy;
 
-use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Model\Rule;
-use Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface;
+use Oronts\AssetPilotBundle\Strategy\CallbackDecisionInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 
-class BusinessHoursStrategy implements ConflictStrategyInterface
+class BusinessHoursDecision implements CallbackDecisionInterface
 {
-    public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+    public function decide(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool
     {
         $hour = (int) date('H');
         return $hour >= 9 && $hour < 17;
-    }
-
-    public function supports(MoveStrategy $strategy): bool
-    {
-        // Reached via the callback strategy, not by direct resolver selection. Returning a built-in
-        // value here would collide with the bundle's own CallbackStrategy, so return false.
-        return false;
     }
 }
 ```
 
 ```yaml
 services:
-    App\AssetPilot\Strategy\BusinessHoursStrategy:
-        tags: ['oronts_asset_pilot.callback']   # exposed to CallbackStrategy's locator by service id
+    App\AssetPilot\Strategy\BusinessHoursDecision: ~ # auto-tagged and exposed by service id
 ```
 
 Reference it in a rule config:
@@ -91,12 +86,22 @@ oronts_asset_pilot:
             class: Product
             target_path: '/Products/{{ object.getItemNumber() }}/Images'
             strategy: callback
-            callback: App\AssetPilot\Strategy\BusinessHoursStrategy
+            callback: App\AssetPilot\Strategy\BusinessHoursDecision
 ```
 
 > The three built-in strategy names (`always`, `first_assignment`, `callback`) are the only values
 > accepted by the rule `strategy` option. Custom logic plugs in through `callback`, as above; there
 > is no separate custom strategy name to register.
+
+`decide()` runs while building previews and again before apply. It must be query-only: do not save
+Pimcore elements, dispatch external work, or write to another system. `$dryRun` is `true` for preview
+and drift evaluation, so integrations can suppress live-only diagnostics. `PRE_MOVE` listeners follow
+the same rule when `AssetMoveEvent::isDryRun()` is true.
+
+Location-drift audits do not execute callback strategies. A directly registered strategy may also
+implement `SideEffectFreeConflictStrategyInterface` when its `resolve()` method only reads state;
+the drift audit can then report its known rejection reason. Strategies without that opt-in are
+reported as requiring an apply-time check.
 
 ### Add Twig Filters/Functions to Path Templates
 
@@ -217,6 +222,13 @@ class DatabasePathResolver implements PathResolverInterface
         );
         return $path ?: '/Fallback/' . $object->getKey();
     }
+
+    public function validateTemplate(string $template): void
+    {
+        if ($template === '' || !str_starts_with($template, '/')) {
+            throw new \InvalidArgumentException('Database resolver paths must be absolute.');
+        }
+    }
 }
 ```
 
@@ -258,6 +270,13 @@ class WorkflowConditionEvaluator implements ConditionEvaluatorInterface
 
         // Only proceed if the object's workflow state matches the condition
         return $object->getProperty('workflow_state') === $rule->condition;
+    }
+
+    public function validateSyntax(string $expression): void
+    {
+        if (trim($expression) === '') {
+            throw new \InvalidArgumentException('Workflow conditions cannot be empty.');
+        }
     }
 }
 ```
@@ -413,11 +432,15 @@ filters and strategies). Implement `IntegrityCheckerInterface`; the service is a
 `oronts_asset_pilot.integrity_checker`. Built-ins: `StreamExistsChecker` (priority 0, universal),
 `ImageIntegrityChecker` and `DocumentIntegrityChecker` (priority 20, Imagick-backed).
 
+To change the selection policy itself rather than add a checker, replace or decorate the
+`IntegrityCheckerResolverInterface` alias; all integrity scans and heal paths consume that contract.
+
 Return `IntegrityStatus::Unverifiable` (not `Broken`) when your tool is unavailable, so a missing
 binary never causes a checker outage to be read as a broken asset. `check()` inspects the live
-asset; `checkBinary()` inspects a candidate binary in memory (used by a future version-rollback heal,
-and the natural place to share the verdict logic). Extending `AbstractBinaryIntegrityChecker` gives
-you the stream-to-string bridge so you implement `checkBinary()` plus `supports()`/`priority()`/`name()`.
+asset; `checkBinary()` inspects a candidate binary in memory. `VersionRollbackHealer` uses it to find
+the newest renderable version before previewing or applying a rollback. Extending
+`AbstractBinaryIntegrityChecker` gives you the stream-to-string bridge so you implement
+`checkBinary()` plus `supports()`/`priority()`/`name()`.
 
 ```php
 namespace App\AssetPilot;
@@ -462,34 +485,43 @@ No service config is needed beyond autowiring; the interface tag is applied auto
 
 When a bulk run's failure rate crosses `notifications.failure_rate_threshold`, the bundle dispatches
 an alert to every tagged notifier. The built-in `PimcoreNotificationNotifier` sends a Pimcore in-app
-("bell") notification to the configured user/group. Add email, Slack, or a webhook by implementing
-`NotifierInterface`; it is auto-tagged `oronts_asset_pilot.notifier` and receives every alert.
+notification to the configured users and groups. Add email, Slack, or a webhook by implementing
+`NotifierInterface`; it is auto-tagged `oronts_asset_pilot.notifier` and receives every alert as one
+immutable `Notification` value.
 
 ```php
 namespace App\AssetPilot;
 
+use Oronts\AssetPilotBundle\Notification\Notification;
 use Oronts\AssetPilotBundle\Notification\NotifierInterface;
 
 class SlackNotifier implements NotifierInterface
 {
-    public function notify(string $title, string $message): void
+    public function notify(Notification $notification): void
     {
-        // POST to your Slack webhook, send mail, etc.
+        $this->slack->send($notification->severity, $notification->kind, $notification->context);
     }
 }
 ```
 
-A notifier that throws is isolated and logged by the dispatcher, so a failing transport never blocks
+`kind` is a stable, extensible routing identifier; `severity` is a typed enum; and `context` contains
+safe scalar routing data, so transports never need to parse the title or message. Built-in producers do
+not put paths, exception messages, actor data, tokens, or credentials in context. Custom producers must
+preserve that boundary. A notifier that throws is isolated and logged by the dispatcher, so a failing
+transport never blocks the operation or the other notifiers.
 the others or the operation that triggered the alert.
 
 ### Rule Actions (do more than move)
 
 A rule can run post-move actions on the organized asset via its `actions` config. Each entry has a
 `type` resolved to a tagged `oronts_asset_pilot.rule_action` service, plus that action's own keys.
-Actions run only after a successful move, never in dry-run; a failing action is logged and isolated
-(it never undoes the move or aborts the others). A failure is also recorded in the audit log under
-the `action_failed` status, so it surfaces in the audit trail and the metrics endpoint; it is kept
-out of the move failure rate, because the move itself succeeded.
+Action inputs are prepared before the move and persisted with the operation. Delivery starts only
+after the journal records a committed move, restores the initiating actor, rechecks publish access,
+and holds the shared asset lock. Delivery is at least once: implementations must make
+`applyPrepared()` idempotent. A failing action is retried with bounded backoff and never undoes the
+move or blocks other actions. Exhausted delivery changes an otherwise committed audit row to
+`completed_with_observer_error`; it never rewrites a failed operation, and dead-delivery health
+still reports the observer failure.
 
 The built-in `set_property` action sets an asset property from a static `value` or, for
 object-derived metadata, from the owning object via a `from` getter:
@@ -512,6 +544,7 @@ implementing `RuleActionInterface`; it is auto-tagged and selected by `getType()
 namespace App\AssetPilot;
 
 use Oronts\AssetPilotBundle\Action\RuleActionInterface;
+use Oronts\AssetPilotBundle\Action\RuleActionDeliveryContextInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 
@@ -522,17 +555,55 @@ class AssignReviewTagAction implements RuleActionInterface
         return 'assign_review_tag';
     }
 
-    public function apply(Asset $asset, AbstractObject $object, array $config): void
+    public function prepare(Asset $asset, AbstractObject $object, array $config): array
     {
-        // $config carries this action's keys; $object is the owning DataObject for derived values.
-        // ... assign a tag / write metadata / notify ...
+        return ['tag' => (string) ($config['tag'] ?? 'review')];
+    }
+
+    public function applyPrepared(Asset $asset, array $payload, RuleActionDeliveryContextInterface $delivery): void
+    {
+        $idempotencyKey = $delivery->deliveryId();
+        $delivery->heartbeat();
+
+        // Skip work already recorded for this idempotency key, then assign the tag.
     }
 }
 ```
 
-Then reference it: `actions: [{ type: assign_review_tag }]`. An action that saves the asset must do
-so loop-safely (see [Architecture](architecture.md)); the built-in `set_property` writes the
-property directly, so it never re-enters the pipeline.
+Then reference it: `actions: [{ type: assign_review_tag }]`. Delivery is at least once. Use `deliveryId()` as the stable idempotency key across retries; `attempt()`
+is diagnostic only. Long actions must call `heartbeat()` more frequently than
+`operation_journal.lease_seconds` and immediately before irreversible work. If heartbeat throws, the
+lease was lost and the action must stop. Delivery already owns the bundle's processing marker and
+shared asset lock. The built-in `set_property` skips an already-matching property before saving.
+
+An action can also implement `RuleActionConfigValidatorInterface`. Its `validateConfig()` errors are
+reported by `asset-pilot:validate-config`, so consumer action configuration can fail validation
+before a post-move execution reaches production.
+
+### Durable operation observers
+
+Implement `DurableOperationObserverInterface` for integration work that must survive process or
+broker failure. It is auto-tagged as `oronts_asset_pilot.operation_observer`. `prepare()` runs before
+the asset mutation and must only return serializable `PreparedDelivery` values; it must not change
+external state. `deliver()` receives the stored `DeliveryEnvelope` after the selected success or
+failure outcome is committed. Delivery restores the initiating actor, is leased, retried, and at
+least once, so the delivery key and handler must be idempotent.
+
+The processor renews the claim immediately before and after `deliver()`. An observer whose work can
+approach the configured lease must also call `$delivery->heartbeat()` periodically and immediately
+before each irreversible unit of work. The heartbeat is fenced by the current claim token and throws
+when the lease expired or another worker reclaimed it; the observer must then stop.
+
+Implement `requiredAssetPermission()` as part of the delivery contract. Return a Pimcore asset
+permission such as `publish` when delivery loads or changes the asset. The processor then reloads
+the asset, rechecks that permission under the restored actor, and holds the shared asset lock while
+calling `deliver()`. Return `null` only when delivery uses persisted envelope metadata and does not
+load or mutate the asset; metadata-only delivery intentionally avoids the asset lookup and lock.
+
+The built-in observers implement durable rule actions and dispatch
+`oronts_asset_pilot.operation_succeeded` / `oronts_asset_pilot.operation_failed`. Use these durable
+events for integration side effects; the richer synchronous move events remain suitable for
+in-process vetoes and diagnostics.
 
 ### Duplicate Merge Strategies
 
@@ -565,6 +636,11 @@ class TagForReviewStrategy implements DuplicateMergeStrategyInterface
         return 'tag_for_review';
     }
 
+    public function repointsReferences(): bool
+    {
+        return true;
+    }
+
     public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
     {
         // A strategy MUST NOT destroy a copy whose references were not fully repointed.
@@ -580,8 +656,13 @@ class TagForReviewStrategy implements DuplicateMergeStrategyInterface
 
 No service config is needed beyond autowiring. Then select it: `duplicates: { merge_strategy: tag_for_review }`.
 
+A strategy that can be interrupted after an external or destructive side effect must implement
+`ResumableDuplicateMergeStrategyInterface` and make `recoverDisposition()` recognize its committed
+state. Non-resumable strategies are blocked during recovery rather than executed twice.
+
 > Strategies are selected by **name**, not by asset type (there is no `supports()` filter): a strategy
-> that should only handle certain types must check inside `disposeCopy()`. The v1 repointer rewrites
+> that should only handle certain types must check inside `disposeCopy()`. The bundled
+> `RepointAndDeleteStrategy` rewrites
 > top-level asset relations (image / many-to-one / many-to-many) and hard-coded asset paths/ids in
 > WYSIWYG fields; references inside documents, nested bricks/blocks/fieldcollections or advanced/metadata
 > relations are reported as blocked and that copy is left untouched (never silently merged).
@@ -664,8 +745,8 @@ Bulk events (`BulkOrganizeEvent`, carrying `objectIds`/`triggerType`/`results`):
 | `oronts_asset_pilot.bulk_started` | `AssetPilotEvents::BULK_STARTED` | Before a bulk organize run |
 | `oronts_asset_pilot.bulk_completed` | `AssetPilotEvents::BULK_COMPLETED` | After a bulk organize run; `results` populated |
 
-Mutation events (`AssetMutationEvent`, carrying `assetIds`/`mutation`/`context`) — for hooking every
-asset change outside the move pipeline (CDN purge, search reindex, DAM sync):
+Mutation events (`AssetMutationEvent`, carrying `assetIds`/`mutation`/`context`) cover the supported
+interactive asset changes outside the move pipeline (CDN purge, search reindex, DAM sync):
 
 | Event | Constant | Description |
 |-------|----------|-------------|
@@ -678,6 +759,13 @@ asset change outside the move pipeline (CDN purge, search reindex, DAM sync):
 | `oronts_asset_pilot.reverted` | `AssetPilotEvents::REVERTED` | A move was reverted |
 | `oronts_asset_pilot.quarantined` | `AssetPilotEvents::QUARANTINED` | Unused assets were quarantined (soft-deleted) |
 | `oronts_asset_pilot.restored` | `AssetPilotEvents::RESTORED` | An asset was restored from quarantine |
+
+Duplicate merge events (`DuplicateMergeEvent`) are emitted only after a copy's persisted merge
+phase commits:
+
+| Event | Constant | Description |
+|-------|----------|-------------|
+| `oronts_asset_pilot.duplicate_merge_committed` | `AssetPilotEvents::DUPLICATE_MERGE_COMMITTED` | A copy's reference repoint and disposition committed; carries run, checksum, canonical, strategy, disposition, repoint report, and item status |
 
 Integrity heal events (`AssetHealEvent`, carrying `asset`/`targetVersion`/`outcome`) — for vetoing or
 observing a version-rollback self-heal:
@@ -701,9 +789,20 @@ records relation references regardless of where they are nested.
 - **Classificationstore-held assets.** Assets referenced through a classification-store key are not
   picked up by the organizer (they are uncommon; the dependency table still records them, so unused
   detection stays correct). Add a `context_provider` or a custom extractor if you store assets there.
-- **Content-reference scan field types.** The opt-in delete/move guard (`content_scan`) scans only the
-  top-level `wysiwyg`, `textarea` and `input` fields of the configured classes for a hard-coded asset
-  path. References inside nested bricks/blocks/fieldcollections, or in a custom field type that stores a
-  path, are not scanned — treat it as a heuristic safety net, not a guarantee.
+- **Content-reference scan storage formats.** The opt-in delete/move guard (`content_scan`)
+  dynamically scans string, text, and JSON columns in Pimcore `properties`, `object_*`,
+  `documents_*`, and `classificationstore_*` tables. Custom content stored outside those tables or
+  in non-text columns is not covered. Element dependencies are resolved into the indexed projection
+  at save time; incomplete bootstrap, dirty sources, or rebuild failures return `unknown` and block
+  mutation.
 - **Merge strategy selection.** Merge strategies are chosen by `name()`, not by asset type (there is no
   `supports()` filter); type-specific behaviour must live inside `disposeCopy()`.
+- **Consumer-owned database transactions.** An asset-referencing element save may run inside your own
+  outer transaction; the projection publishes its dirty marker, edge, and deletion-fence read on a
+  dedicated autocommit connection (`ProjectionMarkerConnectionInterface`, see [Overriding](overriding.md)).
+  Two limitations follow: (1) creating an asset and an element that references it in the *same*
+  transaction is unsupported (the still-uncommitted asset is invisible to the sidecar connection); and
+  (2) if you roll back an otherwise-successful save, the already-committed dependency edge remains as a
+  phantom, so a later delete of that asset is conservatively blocked (fail-safe over-block) until the
+  source is re-saved or the projection is rebuilt with `asset-pilot:rebuild-dependency-projection`. The
+  asset delete path itself still cannot run inside an ambient transaction.

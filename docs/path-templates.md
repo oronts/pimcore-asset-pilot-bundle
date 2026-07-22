@@ -12,7 +12,12 @@ Target paths use Twig syntax. The resolver provides these context variables:
 | `date` | `DateTimeImmutable` | Current date/time |
 | `className` | `string` | DataObject class name |
 
-You can call any method on the `object` and `asset` variables directly in the template. The resolver handles null values gracefully and falls back to `'unknown'` for empty segments.
+You can call any method on the `object` and `asset` variables directly in the template. Empty path segments are dropped. If a template renders to nothing usable (empty, or all `unknown`) it falls back to `/Assets/<object key>`, never the asset root, and a template whose accessor throws at render time fails closed with a `PathResolutionException` so the asset is not misfiled to a generic destination.
+
+> **Trust boundary.** Path templates are trusted deployment code, not end-user input. The Twig
+> environment is not sandboxed and `object` and `asset` are live Pimcore models, so a template can
+> invoke any method on them. Restrict who may edit path templates to the operators who are already
+> allowed to deploy code.
 
 ### Custom Filters
 
