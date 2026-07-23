@@ -1,0 +1,14 @@
+{
+  "name": "asset-pilot-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Deployment-level acceptance suite (Playwright + axe). Self-contained so it never touches the Studio build dependencies. See docs/e2e-acceptance.md.",
+  "scripts": {
+    "test": "playwright test",
+    "install-browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@playwright/test": "^1.48.2"
+  }
+}
