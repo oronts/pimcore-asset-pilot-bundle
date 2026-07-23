@@ -17,19 +17,26 @@
         }
     ],
     "require": {
-        "ext-zip": "*",
         "php": ">=8.4",
+        "ext-ctype": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-zip": "*",
         "doctrine/dbal": "^4.0",
+        "league/flysystem": "^3.0",
         "pimcore/pimcore": "^12.3.11",
+        "pimcore/static-resolver-bundle": "^3.6",
         "pimcore/studio-backend-bundle": "^2025.4.7",
         "pimcore/studio-ui-bundle": "^2025.4.8",
         "psr/cache": "^3.0",
         "psr/container": "^2.0",
+        "psr/event-dispatcher": "^1.0",
         "psr/log": "^3.0",
         "symfony/cache-contracts": "^3.5",
         "symfony/config": "^7.3",
         "symfony/console": "^7.3",
         "symfony/dependency-injection": "^7.3",
+        "symfony/event-dispatcher": "^7.3",
         "symfony/event-dispatcher-contracts": "^3.5",
         "symfony/expression-language": "^7.3",
         "symfony/http-foundation": "^7.3",
@@ -40,7 +47,8 @@
         "symfony/security-http": "^7.3",
         "symfony/service-contracts": "^3.5",
         "symfony/yaml": "^7.3",
-        "twig/twig": "^3.26.1"
+        "twig/twig": "^3.26.1",
+        "zircote/swagger-php": "^5.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.50",
@@ -74,6 +82,7 @@
         "exclude": [
             "/.*",
             "/node_modules",
+            "/assets/studio/e2e",
             "/assets/studio/node_modules",
             "/public/studio/build/.active-*.json",
             "/public/studio/build/.staging",
