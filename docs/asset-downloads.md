@@ -17,14 +17,19 @@ Body:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `assetIds` | int[] | Assets to pack (validated and bounded by `zip.max_assets`, default 1000). |
+| `assetIds` | int[] | Assets to pack. Hard-capped at 1000 ids per request (`400` beyond that), independent of `zip.max_assets`; raising `zip.max_assets` past 1000 lifts only the folder and object sources, which resolve their assets internally. |
 | `strategy` | string? | Archive layout: `flat` (default), `folder`, `type`, or a custom strategy name. |
 | `thumbnail` | string? | For image assets, a Pimcore thumbnail config name to pack instead of the original. |
 
-Responses: `200` streams the `application/zip` (filename `assets.zip`); `422` when none of the selected
-assets are downloadable (all missing, folders, or outside the user's workspace); `400` on invalid JSON
-or id list. Every asset is re-checked against the caller's Pimcore workspace ACL (`view`) before it is
-added, so a selection can never leak an asset the user may not see.
+Responses: `200` streams the `application/zip` (filename `assets.zip`); `422` when the archive cannot be produced: none of the selected
+assets are downloadable (all missing, folders, or outside the user's workspace), the selection exceeds
+`zip.max_assets` or `zip.max_uncompressed_bytes`, or an unknown `strategy` name was supplied; `400` on
+invalid JSON or id list. Every asset is re-checked against the caller's Pimcore workspace ACL (`view`)
+before it is added, so a selection can never leak an asset the user may not see.
+
+The `200` response carries four build-contract headers: `X-Asset-Pilot-Requested`, `X-Asset-Pilot-Added`,
+and `X-Asset-Pilot-Skipped` (the requested / added / skipped asset counts), plus `X-Asset-Pilot-Truncated`
+(`true`/`false`, whether the archive is a partial build).
 
 Studio uses a two-step native download: `POST /assets/download-zip/prepare` stores the validated plan
 under a random, short-lived, single-use token bound to the current user, then a browser navigation to

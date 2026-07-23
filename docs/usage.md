@@ -50,6 +50,20 @@ bin/console asset-pilot:retry-deliveries --limit=100 --apply --plan-token='v1...
 The durable delivery keeps its original operation and actor. Requeueing does not repeat the asset
 move or revert.
 
+Re-run the objects whose organization failed, read from the audit log, with the same reviewed apply
+contract:
+
+```bash
+# Preview the failed objects that would be re-organized
+bin/console asset-pilot:replay-failures --since='-7 days' --limit=100
+
+# Re-organize the reviewed selection with the token printed by the preview
+bin/console asset-pilot:replay-failures --since='-7 days' --limit=100 --apply --plan-token='v1...' --async
+```
+
+Narrow the failures with `--object-id`, `--rule`, or `--class`. Replay previews unless `--apply` is
+present and re-runs organization for those objects; it does not repeat a recorded move.
+
 ## Organizing on demand
 
 You do not have to wait for a save. Run a rule set across existing objects from the CLI:
@@ -65,6 +79,19 @@ bin/console asset-pilot:organize --class=Product --batch-size=100 --apply --plan
 bin/console asset-pilot:organize --object-id=1234
 bin/console asset-pilot:organize --object-id=1234 --apply --plan-token='v1...'
 ```
+
+To re-organize from the asset side instead of the class side, for example after a bulk import into a
+staging folder, scan a folder and re-run the objects that own those assets:
+
+```bash
+# Preview the owners of every asset under /Staging
+bin/console asset-pilot:reorganize-assets --folder=/Staging --limit=100
+
+# Queue the reviewed owners with the token printed by the preview
+bin/console asset-pilot:reorganize-assets --folder=/Staging --limit=100 --apply --plan-token='v1...' --async
+```
+
+`--by-ids` re-organizes the owners of an explicit asset id list instead of scanning a folder.
 
 The same preview and run are available from the Operations tab in the Studio UI and over the
 [REST API](rest-api.md#operations). The full command surface is in [Commands](commands.md).
@@ -134,16 +161,92 @@ Other destructive maintenance commands use the same preview-token-apply contract
 bin/console asset-pilot:merge-duplicates --checksum=<hash> --canonical=123 --strategy=delete
 bin/console asset-pilot:sweep-empty-folders --folder=/Products
 bin/console asset-pilot:quarantine-purge --grace-days=30
+bin/console asset-pilot:normalize-filenames --folder=/Products
 
 # Apply with identical selectors before the token expires
 bin/console asset-pilot:merge-duplicates --checksum=<hash> --canonical=123 --strategy=delete --apply --plan-token='v1...'
 bin/console asset-pilot:sweep-empty-folders --folder=/Products --apply --plan-token='v1...'
 bin/console asset-pilot:quarantine-purge --grace-days=30 --apply --plan-token='v1...'
+bin/console asset-pilot:normalize-filenames --folder=/Products --apply --plan-token='v1...'
 ```
 
-Plans bind the system actor, selectors, effective configuration, exact sorted targets, and live
-fingerprints. Selection or state drift, expiry, and token reuse are rejected before mutation. A
+`normalize-filenames` renames assets whose filename is not a valid Pimcore key to the sanitized
+form. Plans bind the system actor, selectors, effective configuration, exact sorted targets, and
+live fingerprints. Selection or state drift, expiry, and token reuse are rejected before mutation. A
 persisted duplicate merge resumes with `--run-id --apply` and does not require another token.
+
+## Finding and merging duplicates
+
+Before you can merge duplicates you need the group checksum that `merge-duplicates` (above) consumes.
+Build the content-hash index and report byte-identical groups with:
+
+```bash
+# Index matching assets, then list the duplicate groups and their checksums
+bin/console asset-pilot:find-duplicates --scan --folder=/Products
+
+# Report only the group a single asset belongs to
+bin/console asset-pilot:find-duplicates --asset-id=1234
+```
+
+`--scan` indexes up to `--limit` assets (default 1000) before reporting; omit it to report from the
+existing index. Feed a reported checksum into `merge-duplicates` to collapse a group onto its
+canonical asset. The same review is in the Duplicates tab.
+
+## Detecting and healing broken assets
+
+Find assets whose stored binary no longer renders, then roll each one back to its last renderable
+version. Detection and heal are separate commands, and heal follows the same preview-token-apply
+contract:
+
+```bash
+# Scan for broken assets (filter by --folder / --type / --extension, or pass --by-ids)
+bin/console asset-pilot:check-integrity --folder=/Products --limit=100
+
+# Preview the rollback for the broken assets in that scan
+bin/console asset-pilot:heal-assets --folder=/Products --limit=100
+
+# Apply the reviewed rollback with the token printed by the preview
+bin/console asset-pilot:heal-assets --folder=/Products --limit=100 --apply --plan-token='v1...'
+```
+
+`heal-assets` previews unless `--apply` is present and needs at least one filter, `--by-ids`, or
+`--all`. A heal is reversible: `asset-pilot:heal-assets --by-ids=1234 --undo` previews reversing the
+most recent heal of those assets, and adding `--apply --plan-token='v1...'` performs it. In the
+Studio UI, Integrity keeps detection separate from the reversible-heal history, and its Undo action
+requires the `asset_pilot_admin` permission.
+
+## Quarantine and restore
+
+Quarantine is a holding folder for assets a mutation set aside instead of deleting. Assets land there
+when a duplicate merge runs with the `quarantine` strategy (the configured default), when the Unused
+Assets tab bulk-quarantines a selection, or when `integrity.on_unrecoverable` is set to `quarantine`
+and a broken asset has no renderable version to roll back to. Bring one back from the Quarantine tab,
+which calls `POST /quarantine/{assetId}/restore`. `asset-pilot:quarantine-purge` (above) is only the
+final cleanup that permanently removes assets held longer than the grace period.
+
+## Checking for organization drift
+
+Report assets that sit somewhere other than where the current rules would place them, for example
+after a rule change:
+
+```bash
+# Scan a class, page by page
+bin/console asset-pilot:verify-locations --class=Product --limit=50
+
+# Or check a single object
+bin/console asset-pilot:verify-locations --object-id=1234
+```
+
+The report never moves anything; re-run `asset-pilot:organize` (by class or object) or
+`asset-pilot:reorganize-assets` to correct the drift. The same view is the Drift tab in the Studio
+UI.
+
+## Storage trends
+
+The Storage tab charts unused storage over time from point-in-time snapshots. Pimcore maintenance
+captures these automatically at the configured cadence, so no scheduling is required. To record one
+on demand, run `asset-pilot:capture-storage-snapshot`; add `--force` to capture even when a recent
+snapshot already exists.
 
 ## Protecting assets from organization
 

@@ -16,6 +16,8 @@ targeted regression tests; integration boundaries remain application-level accep
 
 ```
 tests/
+├── Fixtures/               OpenAPI spec info for API tests
+├── Support/                Cross-suite test doubles
 ├── Unit/
 │   ├── Action/             Rule action preparation, validation, and durable delivery
 │   ├── Api/                API serialization and RFC 3339 date formatting
@@ -23,6 +25,7 @@ tests/
 │   ├── Cache/              Stats caching and invalidation
 │   ├── Command/            Preview/apply guards, recovery, duplicate merge, and CLI support
 │   ├── Condition/          Expression evaluation and extension functions
+│   ├── Contract/           Frontend translation contract
 │   ├── Controller/         REST parsing, authorization, plans, recovery, and operation runs
 │   ├── DependencyInjection/ Configuration tree, aliases, tags, and Messenger routing
 │   ├── Engine/             Rule matching and explain traces
@@ -85,4 +88,4 @@ prefix routing, restricted asset/object/document workspaces, queue retry/failure
 locks across processes, remote storage failures, and the supported Studio browser matrix. These
 deployment-level checks are defined as an acceptance matrix in
 [End-to-end acceptance](e2e-acceptance.md) (Playwright + axe under `assets/studio/e2e/`); the matrix
-is a scaffold with a couple of smoke specs, not yet a wired gate.
+is a scaffold with a couple of smoke checks, not yet a wired gate.

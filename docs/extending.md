@@ -301,8 +301,10 @@ class HashNamingStrategy implements NamingStrategyInterface
 {
     public function generateName(Asset $asset, string $targetPath): string
     {
+        // Must be deterministic: reviewed operations compute the name at preview and recompute it at
+        // apply, so a time()/random input would change the plan between the two and reject the apply.
         $ext = pathinfo($asset->getFilename(), PATHINFO_EXTENSION);
-        $hash = substr(md5($asset->getFilename() . time()), 0, 8);
+        $hash = substr(md5($asset->getId() . ':' . $asset->getFilename() . ':' . $targetPath), 0, 8);
         return $hash . '.' . $ext;
     }
 }
@@ -509,7 +511,6 @@ safe scalar routing data, so transports never need to parse the title or message
 not put paths, exception messages, actor data, tokens, or credentials in context. Custom producers must
 preserve that boundary. A notifier that throws is isolated and logged by the dispatcher, so a failing
 transport never blocks the operation or the other notifiers.
-the others or the operation that triggered the alert.
 
 ### Rule Actions (do more than move)
 
@@ -574,7 +575,9 @@ Then reference it: `actions: [{ type: assign_review_tag }]`. Delivery is at leas
 is diagnostic only. Long actions must call `heartbeat()` more frequently than
 `operation_journal.lease_seconds` and immediately before irreversible work. If heartbeat throws, the
 lease was lost and the action must stop. Delivery already owns the bundle's processing marker and
-shared asset lock. The built-in `set_property` skips an already-matching property before saving.
+shared asset lock, and each `heartbeat()` renews that asset lock together with the delivery lease, so a
+long action keeps exclusive ownership for its whole run. The built-in `set_property` skips an
+already-matching property before saving.
 
 An action can also implement `RuleActionConfigValidatorInterface`. Its `validateConfig()` errors are
 reported by `asset-pilot:validate-config`, so consumer action configuration can fail validation
@@ -626,6 +629,7 @@ namespace App\AssetPilot;
 
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
 
@@ -641,8 +645,10 @@ class TagForReviewStrategy implements DuplicateMergeStrategyInterface
         return true;
     }
 
-    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+    public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
     {
+        $copyId = $context->copyId();
+
         // A strategy MUST NOT destroy a copy whose references were not fully repointed.
         if (!$report->fullyRepointed) {
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, 'references remain');
@@ -656,9 +662,25 @@ class TagForReviewStrategy implements DuplicateMergeStrategyInterface
 
 No service config is needed beyond autowiring. Then select it: `duplicates: { merge_strategy: tag_for_review }`.
 
-A strategy that can be interrupted after an external or destructive side effect must implement
-`ResumableDuplicateMergeStrategyInterface` and make `recoverDisposition()` recognize its committed
-state. Non-resumable strategies are blocked during recovery rather than executed twice.
+`disposeCopy()` always receives a fenced `DuplicateMergeContextInterface` as its second argument. This
+is the only contract; there is no context-free path in 2.0. A quick, in-process disposition can ignore
+it. A long-running or externally-integrated one must use it to stay safe while it works:
+
+- `heartbeat()` renews the operation-run item lease and every held asset/referrer lock together and
+  throws `MergeLeaseLostException` the instant any is lost. Call it more often than
+  `idempotency.lock_ttl` (default 60s) and immediately before each irreversible or external step; stop
+  as soon as it throws.
+- `save(callable $mutator)` performs a guarded save of the copy under the held lock (it heartbeats first,
+  so a write can never land after ownership lapsed).
+- `idempotencyKey()` (`duplicate-merge:<runId>:<checksum>:<copyId>`) is stable across attempt, resume,
+  and retry, so external side effects can dedupe. `operationId()`, `itemKey()`, `copyId()`,
+  `canonicalId()`, `attempt()`, and `actor()` identify the work.
+
+A strategy that can be interrupted after an external or destructive side effect must also implement
+`ResumableDuplicateMergeStrategyInterface` and make `recoverDisposition()` recognize its committed state,
+so a `MergeLeaseLostException` (which terminalizes the item at the `Disposing` phase) re-drives
+`recoverDisposition()` on retry rather than repeating the side effect. Non-resumable strategies are
+blocked during recovery rather than executed twice.
 
 > Strategies are selected by **name**, not by asset type (there is no `supports()` filter): a strategy
 > that should only handle certain types must check inside `disposeCopy()`. The bundled
@@ -759,6 +781,11 @@ interactive asset changes outside the move pipeline (CDN purge, search reindex, 
 | `oronts_asset_pilot.reverted` | `AssetPilotEvents::REVERTED` | A move was reverted |
 | `oronts_asset_pilot.quarantined` | `AssetPilotEvents::QUARANTINED` | Unused assets were quarantined (soft-deleted) |
 | `oronts_asset_pilot.restored` | `AssetPilotEvents::RESTORED` | An asset was restored from quarantine |
+
+> These notify listeners of a completed mutation and are best-effort: a listener that throws is isolated and
+> logged (it never rolls back the mutation), and the event is not replayed if the process crashes after the
+> mutation commits. A consumer that needs a guaranteed signal reconciles from the durable asset and audit
+> state rather than relying on the event.
 
 Duplicate merge events (`DuplicateMergeEvent`) are emitted only after a copy's persisted merge
 phase commits:

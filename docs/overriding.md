@@ -87,6 +87,7 @@ queries are closed with `final` or private state-transition methods.
 | `DependencyUsageVerifierInterface` | `DependencyUsageVerifier` |
 | `UndoHealEligibilityProbeInterface` | `VersionRollbackHealer` |
 | `VersionRollbackHealerInterface` | `VersionRollbackHealer` |
+| `ApiDateFormatterInterface` | `ApiDateFormatter` |
 
 All are under the `Oronts\AssetPilotBundle\` namespace.
 

@@ -37,7 +37,7 @@ two are third-party interfaces the bundle cannot auto-tag).
 | `oronts_asset_pilot.operation_observer` | `DurableOperationObserverInterface` | persisted success/failure delivery with actor, retry, lease, and optional declared asset ACL/lock | [link](extending.md#durable-operation-observers) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` | highest-priority `supports()` match render-tests the asset | [link](extending.md#add-an-integrity-checker) |
 | `oronts_asset_pilot.notifier` | `NotifierInterface` | receives an immutable `Notification` with kind, severity, presentation text, and safe scalar context | [link](extending.md#add-a-notifier) |
-| `oronts_asset_pilot.duplicate_merge_strategy` | `DuplicateMergeStrategyInterface` | copy disposition for merge, selected by `name()` (built-ins quarantine/delete/isolate) | [link](extending.md#duplicate-merge-strategies) |
+| `oronts_asset_pilot.duplicate_merge_strategy` | `DuplicateMergeStrategyInterface` | copy disposition for merge, selected by `name()` (built-ins quarantine/delete/isolate); `disposeCopy()` receives a mandatory `DuplicateMergeContextInterface`, optionally implement `ResumableDuplicateMergeStrategyInterface` for phase-aware resume | [link](extending.md#duplicate-merge-strategies) |
 | `oronts_asset_pilot.zip_strategy` | `ZipEntryStrategyInterface` | download-zip archive layout, selected by `getName()` (built-ins flat/folder/type) | [link](extending.md#add-a-zip-layout-strategy) |
 
 Integrity checker implementations are additive through the tag. Selection policy is independently
