@@ -189,6 +189,15 @@ contract because it runs while signed previews are built as well as immediately 
 RuleActionDeliveryContextInterface $delivery)`. Use `deliveryId()` as the stable idempotency key and
 call `heartbeat()` during long work. There is no 1.x compatibility adapter. See `docs/extending.md`.
 
+`DuplicateMergeStrategyInterface::disposeCopy()` changed incompatibly in 2.0. Its signature is now
+`disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition`: the
+leading `int $copyId` parameter is gone and the fenced context is mandatory. The opt-in
+`ContextAwareDuplicateMergeStrategyInterface` and its `disposeCopyWithContext()` method are removed.
+Migrate a custom strategy by dropping the `int $copyId` argument, reading `copyId()` / `canonicalId()` /
+`actor()` from the context, calling `heartbeat()` during long disposals so the run item and every held
+asset/referrer lock stay owned, and using `save(callable)` for guarded copy writes under the held lock.
+See `docs/extending.md`.
+
 Custom `DurableOperationObserverInterface` services must implement
 `requiredAssetPermission(): ?string`. Return the Pimcore asset permission needed by `deliver()` so
 the processor reauthorizes and locks the asset. Return `null` only for metadata-only delivery that

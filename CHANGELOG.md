@@ -39,6 +39,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   reconciliation. An `operation_run_backlog` health check warns when a run stays queued past
   `operation_runs.stale_queued_warning_seconds` (default 86400) without ever auto-failing a legitimate
   backlog.
+- Exact, configurable scan and export budgets for authorized listings and duplicate detection
+  (`listing.scan_budget` / `batch_size` / `export_max_rows`, `duplicates.group_scan_budget` /
+  `export_group_scan_budget`); every bounded listing returns an explicit `truncated` flag and every
+  ceiling-bounded CSV export appends a truncation marker row, so a scan ceiling can never masquerade as
+  end-of-data.
 
 ### Changed
 
@@ -50,6 +55,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   notification fan-out, integrity selection, and operation-run kinds now use typed public contracts.
 - Released as 2.0 because durable rule actions now use the prepare/deliver contract and receive a
   `RuleActionDeliveryContextInterface` with stable idempotency and lease heartbeat capabilities.
+- `DuplicateMergeStrategyInterface::disposeCopy()` now receives `(RepointReport, DuplicateMergeContextInterface)`
+  with the fenced context mandatory (stable idempotency key, lease `heartbeat()`, guarded `save()`); the
+  opt-in `ContextAwareDuplicateMergeStrategyInterface` and `disposeCopyWithContext()` are removed.
 - Added replaceable organizer, planner, dispatcher, ZIP, plan-claim, integrity-eligibility,
   dependency projection, freshness, rebuild, and usage-verifier service interfaces; custom
   condition and path resolvers now own their validation behavior too.

@@ -48,16 +48,16 @@ jobs:
       # e.g. composer create-project pimcore/skeleton pimcore, then composer config repositories.bundle
       # path ../, then composer require oronts/asset-pilot-bundle:@dev
       - name: Install Pimcore application with the bundle
-        run: echo "TODO(operator): install Pimcore skeleton + require the bundle from this checkout"
+        run: 'echo "TODO(operator): install Pimcore skeleton + require the bundle from this checkout"'
 
       - name: Migrate (empty + legacy fixture) and health-check
-        run: echo "TODO(operator): bin/console pimcore:migrations:migrate; bin/console asset-pilot:health"
+        run: 'echo "TODO(operator): bin/console pimcore:migrations:migrate; bin/console asset-pilot:health"'
 
       - name: Seed Admin/Operate/View users on disjoint workspaces
-        run: echo "TODO(operator): seed the three users + disjoint asset workspaces (matrix rows 4-7)"
+        run: 'echo "TODO(operator): seed the three users + disjoint asset workspaces (matrix rows 4-7)"'
 
       - name: Start Messenger consumers
-        run: echo "TODO(operator): run the asset_pilot + pimcore_maintenance consumers in the background"
+        run: 'echo "TODO(operator): run the asset_pilot + pimcore_maintenance consumers in the background"'
 
       - name: Build Studio frontend
         run: npm --prefix assets/studio ci && npm --prefix assets/studio run build && npm --prefix assets/studio run prepare-release-build
