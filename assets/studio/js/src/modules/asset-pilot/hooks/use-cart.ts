@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useUser } from '@pimcore/studio-ui-bundle/modules/auth'
 
 const CART_KEY = 'asset-pilot.cart'
-
-/** Mirrors the backend BulkIds::MAX so a cart can never build a zip request the API would reject. */
 export const CART_MAX = 1000
 
-function load(): number[] {
+function load(key: string): number[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(CART_KEY) ?? '[]')
-    return Array.isArray(raw) ? raw.filter((n): n is number => typeof n === 'number') : []
+    const raw: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return Array.isArray(raw)
+      ? raw.filter((id): id is number => Number.isInteger(id) && id > 0).slice(0, CART_MAX)
+      : []
   } catch {
     return []
   }
@@ -18,42 +19,43 @@ export interface Cart {
   ids: number[]
   count: number
   has: (id: number) => boolean
-  /** Adds ids (deduped, capped at CART_MAX). Returns true if the cap truncated the result. */
-  add: (ids: number[]) => boolean
+  add: (ids: number[]) => { added: number; capped: boolean }
   remove: (id: number) => void
   clear: () => void
 }
 
-/**
- * A durable asset "cart": a set of asset ids that survives page changes, searches and reloads
- * (localStorage-backed), so a content manager can gather assets across several views and download
- * them jointly as a zip.
- */
 export function useCart(): Cart {
-  const [ids, setIds] = useState<number[]>(load)
+  const { id: userId } = useUser()
+  const storageKey = `${CART_KEY}.${userId}`
+  const [ids, setIds] = useState<number[]>(() => load(storageKey))
 
   useEffect(() => {
-    const onStorage = (e: StorageEvent): void => { if (e.key === CART_KEY) setIds(load()) }
+    setIds(load(storageKey))
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === storageKey) setIds(load(storageKey))
+    }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [storageKey])
 
   const persist = useCallback((next: number[]): void => {
     setIds(next)
     try {
-      localStorage.setItem(CART_KEY, JSON.stringify(next))
+      localStorage.setItem(storageKey, JSON.stringify(next))
     } catch {
-      // a full or unavailable localStorage just means the cart is in-memory for this session
     }
-  }, [])
+  }, [storageKey])
 
-  const add = useCallback((toAdd: number[]): boolean => {
-    const merged = [...new Set([...load(), ...toAdd])]
+  const add = useCallback((toAdd: number[]): { added: number; capped: boolean } => {
+    const validIds = toAdd.filter(id => Number.isInteger(id) && id > 0)
+    const prev = load(storageKey)
+    const merged = [...new Set([...prev, ...validIds])]
     const capped = merged.length > CART_MAX
-    persist(capped ? merged.slice(0, CART_MAX) : merged)
-    return capped
-  }, [persist])
-  const remove = useCallback((id: number): void => { persist(load().filter(i => i !== id)) }, [persist])
+    const next = capped ? merged.slice(0, CART_MAX) : merged
+    persist(next)
+    return { added: next.length - prev.length, capped }
+  }, [persist, storageKey])
+  const remove = useCallback((id: number): void => { persist(load(storageKey).filter(item => item !== id)) }, [persist, storageKey])
   const clear = useCallback((): void => { persist([]) }, [persist])
   const has = useCallback((id: number): boolean => ids.includes(id), [ids])
 

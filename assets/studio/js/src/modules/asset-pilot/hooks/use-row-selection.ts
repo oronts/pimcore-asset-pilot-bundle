@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 interface RowSelection {
   selected: Set<number>
@@ -8,10 +8,12 @@ interface RowSelection {
   clear: () => void
 }
 
+const alwaysSelectable = (): boolean => true
+
 /**
  * Checkbox selection for a paginated table: tracks the selected ids, toggles one or all visible rows,
- * and clears (call on page/filter change so a bulk action never hits off-page rows). Shared by the
- * unused-assets and asset-management tabs.
+ * prunes ids that leave the result set, and clears on page/filter changes so a bulk action never
+ * hits off-page rows. Shared by the selectable asset-list tabs.
  *
  * Pass isSelectable to keep non-selectable rows (e.g. locked assets) out of selection entirely. The
  * guard lives here, in the one place both the table and the gallery consume, so a locked id can never
@@ -19,7 +21,7 @@ interface RowSelection {
  */
 export function useRowSelection<T extends { id: number }>(
   items?: ReadonlyArray<T>,
-  isSelectable: (item: T) => boolean = () => true,
+  isSelectable: (item: T) => boolean = alwaysSelectable,
 ): RowSelection {
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
@@ -27,6 +29,14 @@ export function useRowSelection<T extends { id: number }>(
     () => new Set((items ?? []).filter(isSelectable).map(i => i.id)),
     [items, isSelectable],
   )
+
+  useEffect(() => {
+    setSelected(current => {
+      const visible = new Set([...current].filter(id => selectableIds.has(id)))
+
+      return visible.size === current.size ? current : visible
+    })
+  }, [selectableIds])
 
   const allSelected = selectableIds.size > 0 && [...selectableIds].every(id => selected.has(id))
 
