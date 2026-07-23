@@ -301,8 +301,7 @@ class HashNamingStrategy implements NamingStrategyInterface
 {
     public function generateName(Asset $asset, string $targetPath): string
     {
-        // Must be deterministic: reviewed operations compute the name at preview and recompute it at
-        // apply, so a time()/random input would change the plan between the two and reject the apply.
+        // Must be deterministic: reviewed preview and apply both recompute this, so time()/random would break the plan.
         $ext = pathinfo($asset->getFilename(), PATHINFO_EXTENSION);
         $hash = substr(md5($asset->getId() . ':' . $asset->getFilename() . ':' . $targetPath), 0, 8);
         return $hash . '.' . $ext;

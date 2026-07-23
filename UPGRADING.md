@@ -158,6 +158,31 @@ already-committed dependency edge as a phantom that conservatively blocks a late
 (a safe over-block) until the projection is rebuilt or the source is reindexed. The asset delete path
 itself still cannot run inside an ambient transaction.
 
+### Scan and export budgets
+
+Authorized listings and duplicate detection now scan a bounded number of rows and groups instead of
+walking an unbounded result set. Review the defaults before rollout and raise them only where a
+larger authoritative page or export is genuinely required:
+
+```yaml
+oronts_asset_pilot:
+    listing:
+        scan_budget: 5000
+        batch_size: 100
+        export_max_rows: 200000
+    duplicates:
+        group_scan_budget: 5000
+        export_group_scan_budget: 500000
+```
+
+`listing.scan_budget` and `duplicates.group_scan_budget` cap how many raw rows or duplicate groups a
+single authorized page scans while filling past natively hidden entries. A page that cannot be
+resolved within its budget returns an explicit `truncated` flag. `listing.export_max_rows` and
+`duplicates.export_group_scan_budget` cap CSV exports, which stop at the ceiling and append a
+truncation marker row. A scan ceiling therefore never masquerades as end of data. REST and CLI
+consumers that page or export must read the `truncated` flag and the export marker row instead of
+treating a short result as complete.
+
 ### Removed configuration
 
 Remove `oronts_asset_pilot.content_scan.classes` from application configuration. The content guard

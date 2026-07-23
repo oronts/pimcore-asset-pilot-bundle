@@ -237,11 +237,17 @@ Pimcore 12 schedules its own dependency message before dispatching the element p
 post-update event. The default core bus is synchronous, but an application may route that message
 asynchronously. Asset Pilot therefore does not infer freshness from the Pimcore dependency table or
 its transport. Its pre-save/delete subscriber first persists a revision-fenced dirty source. After
-the Pimcore element transaction commits, the post event synchronously calls the element's current
-`resolveDependencies()` and atomically replaces the bundle-owned asset edges. A transient failure
-leaves the source dirty and dispatches an idempotent repair message fenced to the committing revision,
-so a repair that runs before the source transaction commits refuses to certify the old edges clean and
-re-queues instead; `unknown` blocks destructive operations until the latest revision is clean.
+the Pimcore element transaction commits, the post event attempts a best-effort synchronous refresh,
+reading the element's current `resolveDependencies()` and replacing the bundle-owned asset edges in
+one transaction. That fast path is not guaranteed: a save running inside a consumer's ambient
+transaction always defers it, and a transient failure falls back the same way. In both cases the
+source stays dirty and an idempotent repair message is dispatched, fenced to both the committing
+revision and the resolved-edge fingerprint, so a repair that runs before the source commits or sees
+pre-commit content refuses to certify the old edges clean and re-queues until the committed state is
+visible. A maintenance reconcile sweep re-dispatches any dirty source left stale past its cutoff and
+prunes abandoned pending markers, so a lost or crashed refresh still converges. The projection is
+therefore asynchronous and eventually consistent rather than synchronous; while a source is dirty,
+`unknown` blocks destructive operations until the latest revision is clean.
 
 The bootstrap command scans objects, documents, and assets by ascending ID in a bounded, durable
 cursor. A generation becomes `ready` only after every source has been projected and no dirty source

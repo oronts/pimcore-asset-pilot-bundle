@@ -416,7 +416,7 @@ configured ZIP asset ceiling is rejected with `422` rather than returned as a tr
 | `type` | `string` | Filter by asset type: `image`, `document`, `video`, `audio`, `text`, `archive` |
 | `folder` | `string` | Filter by folder path (e.g., `/Products/`) |
 | `objectId` | `int` | Filter to assets referenced by a specific DataObject (via dependencies table) |
-| `extension` | `string` | Filter by file extension (comma-separated, e.g. `jpg,png`) |
+| `extension` | `string` | Filter by file extension (single, e.g. `jpg`) |
 | `referenced` | `string` | Reference state: `referenced` or `unreferenced` |
 | `page` | `int` | Page number (default: 1) |
 | `limit` | `int` | Items per page (default: 50, max: 200) |

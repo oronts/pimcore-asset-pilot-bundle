@@ -73,12 +73,17 @@ Full tree and defaults in [Configuration](configuration.md).
 | `notifications.recipient_group_ids` | list | `[]` | Pimcore groups whose members receive in-app notifications |
 | `notifications.sender_user_id` | int | `0` | Pimcore notification sender (`0` = system) |
 | `duplicates.merge_strategy` | string | `quarantine` | Default built-in or tagged duplicate disposition strategy |
+| `duplicates.group_scan_budget` | int | `5000` | Duplicate groups the listing scans per page before it reports the page truncated |
+| `duplicates.export_group_scan_budget` | int | `500000` | Duplicate groups the CSV export scans before it stops and appends a truncation marker row |
 | `cache.stats_ttl` | int | `60` | Dashboard/audit-stat cache lifetime; `0` disables caching |
 | `cache.unused_stats_ttl` | int | `300` | Unused-storage-stat cache lifetime; `0` disables caching |
 | `zip.default_strategy` | string | `flat` | Built-in or tagged archive layout strategy |
 | `zip.max_assets` | int | `1000` | Maximum assets in one archive |
 | `zip.max_uncompressed_bytes` | int | `536870912` | Maximum total source bytes in one archive |
 | `zip.download_token_ttl` | int | `300` | Lifetime in seconds of a prepared archive download token |
+| `listing.scan_budget` | int | `5000` | Raw candidate rows an authorized listing scans per page past native-permission denials before it reports the page truncated |
+| `listing.batch_size` | int | `100` | Raw rows fetched per window while an authorized listing scans and fills a page |
+| `listing.export_max_rows` | int | `200000` | Rows an authorized CSV export streams before it stops and appends a truncation marker row |
 
 ### Rule options
 
@@ -115,6 +120,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:replay-failures` | Preview failed objects; apply the exact preview with `--apply --plan-token=...` (`--object-id`, `--since`, `--rule`, `--class`, `--limit`, `--async`) |
 | `asset-pilot:recover-operations` | Preview stale move/revert journal state; finalize exact reviewed IDs with `--apply --plan-token=...` |
 | `asset-pilot:retry-deliveries` | Preview dead durable observer deliveries; requeue the exact reviewed rows with `--apply --plan-token=...` |
+| `asset-pilot:rebuild-dependency-projection` | Build or resume the indexed dependency projection in a bounded batch (`--limit` 1..10000, `--restart` to discard the persisted cursor and start a new generation) |
 | `asset-pilot:health` | Run health checks (exits non-zero on a CRITICAL check) |
 | `asset-pilot:metrics` | Output metrics as Prometheus text exposition or JSON (`--format`) |
 | `asset-pilot:capture-storage-snapshot` | Record an unused-storage snapshot for trend reporting (`--force` bypasses the cadence guard) |
@@ -219,20 +225,25 @@ Constants on `AssetPilotEvents`. Details in [DX](dx.md#events) and
 | `ActorType` | `user`, `system`, `anonymous` |
 | `ApplyPlanStatus` | `Valid`, `Claimed`, `Malformed`, `Stale`, `AlreadyClaimed` |
 | `BulkObjectStatus` | `succeeded`, `skipped`, `failed` |
+| `DependencyProjectionState` | `bootstrap_required`, `building`, `ready`, `failed` |
+| `DependencyUsageVerdict` | `safe`, `referenced`, `unknown` |
 | `DispositionOutcome` | `quarantined`, `deleted`, `left_referenced`, `left_error`, `blocked`, `skipped` |
 | `DriftEligibility` | `no_known_block`, `blocked`, `runtime_check_required` |
 | `DuplicateMergePhase` | `prepared`, `repointing`, `repointed`, `disposing`, `committed`, `blocked`, `failed` |
 | `HealOutcome` | `healed`, `already_renderable`, `unrecoverable`, `unverifiable`, `skipped` |
 | `HealthStatus` | `ok`, `warning`, `critical` |
 | `IntegrityStatus` | `renderable`, `broken`, `unverifiable` |
+| `NotificationSeverity` | `info`, `warning`, `critical` |
+| `ObserverAuditReconciliationStatus` | `recorded`, `not_applicable`, `deferred` |
 | `OperationDeliveryOutcome` | `success`, `failure` |
 | `OperationDeliveryStatus` | `prepared`, `pending`, `processing`, `retry`, `delivered`, `dead`, `cancelled` |
 | `OperationKind` | `move`, `revert` |
 | `OperationRunItemStatus` | `queued`, `running`, `completed`, `blocked`, `skipped`, `failed`, `cancelled` |
+| `OperationRunKind` | `organize`, `reorganize`, `replay`, `duplicate-merge` |
 | `OperationRunStatus` | `queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `blocked`, `partial`, `failed` |
 | `QuarantineStatus` | `pending`, `committed` |
-| `RevertFailure` | `audit_entry_not_found`, `not_completed`, `asset_not_found`, `permission_denied`, `path_conflict`, `execution_failed`, `recovery_required` |
-| `ReviewedSelectionError` | `SelectionTooLarge`, `MutationForbidden`, `MissingPlanToken`, `MalformedPlanToken`, `StalePlan`, `PreflightFailed`, `ExecutionFailed` |
+| `RevertFailure` | `audit_entry_not_found`, `not_completed`, `asset_not_found`, `asset_locked`, `permission_denied`, `path_conflict`, `execution_failed`, `recovery_required` |
+| `ReviewedSelectionError` | `SelectionTooLarge`, `MutationForbidden`, `MissingPlanToken`, `MalformedPlanToken`, `StalePlan`, `OwnershipLost`, `PreflightFailed`, `ExecutionFailed` |
 | `RulePreviewPlanStatus` | `Valid`, `Malformed`, `Stale` |
 | `UndoHealOutcome` | `would_reverse`, `reversed`, `skipped`, `failed` |
 | `UndoHealReason` | `already_undone`, `superseded`, `asset_busy`, `asset_not_found`, `not_permitted`, `asset_locked`, `excluded_folder`, `no_reversible_heal`, `version_missing`, `asset_changed`, `restore_failed`, `log_update_failed` |
@@ -279,6 +290,44 @@ Interface aliases you can replace or decorate, see [Overriding](overriding.md):
 `ProjectionMarkerConnectionInterface` (supplies the autocommit sidecar connection that keeps the
 deletion-fence handshake correct when a consumer wraps an asset-referencing save in its own
 database transaction).
+
+### Additional interface aliases
+
+These interface aliases are also container-registered to a default implementation and are overridable
+or decoratable the same way, but are not named above. Source: `src/Resources/config/services.yaml`.
+
+| Interface | Default implementation |
+|-----------|------------------------|
+| `ApiDateFormatterInterface` | `ApiDateFormatter` |
+| `AssetDependencyResolverInterface` | `AssetDependencyResolver` |
+| `AssetDeletionFenceInterface` | `DbalAssetDeletionFence` |
+| `AssetIntegrityServiceInterface` | `AssetIntegrityService` |
+| `AssetMetadataMutationServiceInterface` | `AssetMetadataMutationService` |
+| `AssetPropertyServiceInterface` | `AssetPropertyService` |
+| `AssetReorganizerInterface` | `AssetReorganizer` |
+| `ConfigValidatorInterface` | `ConfigValidator` |
+| `ContentUsageScannerInterface` | `ContentUsageScanner` |
+| `DuplicateDetectionServiceInterface` | `DuplicateDetectionService` |
+| `DuplicateMergeServiceInterface` | `DuplicateMergeService` |
+| `DuplicateReferenceRepointerInterface` | `DuplicateReferenceRepointer` |
+| `ElementAuthorizationInterface` | `ElementAuthorization` |
+| `EmptyFolderSweepServiceInterface` | `EmptyFolderSweepService` |
+| `FailureReplayServiceInterface` | `FailureReplayService` |
+| `HealthCheckerInterface` | `HealthChecker` |
+| `IntegrityHealHistoryServiceInterface` | `IntegrityHealHistoryService` |
+| `LocationDriftServiceInterface` | `LocationDriftService` |
+| `MetricsServiceInterface` | `MetricsService` |
+| `NormalizeFilenamesServiceInterface` | `NormalizeFilenamesService` |
+| `NotificationDispatcherInterface` | `NotificationDispatcher` |
+| `OperationReverterInterface` | `OperationReverter` |
+| `PrometheusFormatterInterface` | `PrometheusFormatter` |
+| `QuarantineServiceInterface` | `QuarantineService` |
+| `RuleOverlapAnalyzerInterface` | `RuleOverlapAnalyzer` |
+| `RulePortabilityInterface` | `RulePortability` |
+| `RulePreviewPlanServiceInterface` | `RulePreviewPlanService` |
+| `StorageTrendServiceInterface` | `StorageTrendService` |
+| `VersionRollbackHealerInterface` | `VersionRollbackHealer` |
+| `ZipDownloadTokenStoreInterface` | `ZipDownloadTokenStore` |
 
 ## Template & condition helpers
 
