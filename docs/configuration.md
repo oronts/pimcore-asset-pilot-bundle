@@ -98,6 +98,7 @@ oronts_asset_pilot:
         rebuild_batch_size: 1000
         deletion_fence_lease_seconds: 900
         deletion_fence_reap_batch_size: 1000
+        reconcile_stale_seconds: 300
 
     storage_snapshots:
         enabled: true
@@ -106,6 +107,13 @@ oronts_asset_pilot:
 
     duplicates:
         merge_strategy: quarantine
+        group_scan_budget: 5000            # groups scanned per list page before it reports truncated
+        export_group_scan_budget: 500000   # groups scanned per CSV export before a truncation marker row
+
+    listing:
+        scan_budget: 5000        # raw rows an authorized list page scans past denials before truncated
+        batch_size: 100          # raw rows fetched per window while scanning a page
+        export_max_rows: 200000  # rows an authorized CSV export streams before a truncation marker row
 
     cache:
         stats_ttl: 60
@@ -170,6 +178,7 @@ oronts_asset_pilot:
 | `dependency_projection.rebuild_batch_size` | `int` | `1000` | Default sources processed by one rebuild command invocation; 1..10000 |
 | `dependency_projection.deletion_fence_lease_seconds` | `int` | `900` | Seconds a delete owns an asset deletion fence before the row is reapable; must exceed the worst-case single-asset delete duration. min 300 |
 | `dependency_projection.deletion_fence_reap_batch_size` | `int` | `1000` | Maximum stale deletion-fence rows reclaimed by one maintenance reaper run; 1..10000 |
+| `dependency_projection.reconcile_stale_seconds` | `int` | `300` | Age (seconds) at which maintenance re-dispatches a still-dirty dependency source whose refresh message was lost (for example a deferred commit-fenced publication) and clears a stale orphan pending row; min 60 |
 | `storage_snapshots.enabled` | `bool` | `true` | Enable maintenance and CLI storage snapshot capture |
 | `storage_snapshots.minimum_interval_seconds` | `int` | `3600` | Minimum completed-run age before another non-forced full storage scan is allowed |
 | `storage_snapshots.retention_days` | `int` | `365` | Retain completed/failed run headers and type rows for this many days; `0` disables pruning |
@@ -179,6 +188,11 @@ oronts_asset_pilot:
 | `notifications.recipient_group_ids` | `int[]` | `[]` | Pimcore user groups (roles) whose members are notified in-app |
 | `notifications.sender_user_id` | `int` | `0` | Pimcore user the in-app notification is sent from (`0` = system) |
 | `duplicates.merge_strategy` | `string` | `quarantine` | Default disposition for a duplicate merge: a registered strategy name (`quarantine`, `delete`, `isolate`, or a custom tagged one). See [Extending](extending.md#duplicate-merge-strategies) |
+| `duplicates.group_scan_budget` | `int` | `5000` | Maximum duplicate groups a list page scans past natively-hidden groups before it reports `truncated: true` (min 1) |
+| `duplicates.export_group_scan_budget` | `int` | `500000` | Maximum duplicate groups a CSV export scans before it stops and appends a truncation marker row (min 1) |
+| `listing.scan_budget` | `int` | `5000` | Maximum raw candidate rows an authorized list page (asset search, unused, quarantine, integrity history) scans past native-permission denials before it reports `truncated: true` (min 1) |
+| `listing.batch_size` | `int` | `100` | Raw rows fetched per window while an authorized list page scans and fills (min 1) |
+| `listing.export_max_rows` | `int` | `200000` | Maximum rows an authorized CSV export streams before it stops and appends a truncation marker row (min 1) |
 | `cache.stats_ttl` | `int` | `60` | TTL (seconds) for the audit-stats cache (dashboard/metrics). `0` disables (always live) |
 | `cache.unused_stats_ttl` | `int` | `300` | TTL (seconds) for the unused-asset storage-stats cache on the web endpoint. `0` disables |
 | `zip.default_strategy` | `string` | `flat` | Default archive layout for downloads: `flat`, `folder`, `type`, or a custom `oronts_asset_pilot.zip_strategy` name |

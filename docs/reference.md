@@ -63,6 +63,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `dependency_projection.rebuild_batch_size` | int | `1000` | Default bounded projection rebuild batch; 1..10000 |
 | `dependency_projection.deletion_fence_lease_seconds` | int | `900` | Seconds a delete owns an asset deletion fence before reaping; must exceed the worst-case single-asset delete (min 300) |
 | `dependency_projection.deletion_fence_reap_batch_size` | int | `1000` | Stale deletion-fence rows reclaimed per maintenance reaper run (1..10000) |
+| `dependency_projection.reconcile_stale_seconds` | int | `300` | Age at which a still-dirty dependency source (e.g. a lost commit-fenced refresh message) is re-dispatched for reconciliation and a stale orphan pending row is cleared by maintenance (min 60) |
 | `storage_snapshots.enabled` | bool | `true` | Enable storage trend capture |
 | `storage_snapshots.minimum_interval_seconds` | int | `3600` | Full-scan cadence guard (`0` disables) |
 | `storage_snapshots.retention_days` | int | `365` | Snapshot run retention (`0` keeps all) |
@@ -253,7 +254,7 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.operation_observer` | `DurableOperationObserverInterface` (prepare before mutation, deliver after outcome, declare any required asset permission) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` (broken-asset detection; built-ins stream/image/document) |
 | `oronts_asset_pilot.notifier` | `NotifierInterface` (typed `Notification` transport; built-in Pimcore in-app notifier) |
-| `oronts_asset_pilot.duplicate_merge_strategy` | `DuplicateMergeStrategyInterface` (copy disposition for merge; built-ins quarantine/delete/isolate) |
+| `oronts_asset_pilot.duplicate_merge_strategy` | `DuplicateMergeStrategyInterface` (copy disposition for merge; built-ins quarantine/delete/isolate; `disposeCopy()` takes a mandatory `DuplicateMergeContextInterface`, optional `ResumableDuplicateMergeStrategyInterface` for resume) |
 | `oronts_asset_pilot.zip_strategy` | `ZipEntryStrategyInterface` (download-zip archive layout; built-ins flat/folder/type) |
 
 The default path resolver is a single replaceable service (`PathResolverInterface`, below), not a

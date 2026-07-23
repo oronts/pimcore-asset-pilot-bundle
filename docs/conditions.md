@@ -26,6 +26,8 @@ callback strategies. Those mutation-adjacent hooks run only for an explicit prev
 | `has_property(element, name)` | `bool` | `has_property(asset, "source")` |
 | `path_matches(asset, pattern)` | `bool` | `path_matches(asset, "#/temp/#")` |
 
+Consumers can add custom condition functions by tagging an `ExpressionFunctionProviderInterface` service (`oronts_asset_pilot.expression_function_provider`). See [Extending](extending.md).
+
 ### Condition Examples
 
 ```yaml

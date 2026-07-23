@@ -18,7 +18,7 @@ buttons use the Studio SDK's `isAllowed('asset_pilot_operate' | 'asset_pilot_adm
 checking follows Pimcore's mechanisms; there is no custom permission endpoint.
 
 Bundle permissions do not broaden Pimcore workspaces. The SQL-backed asset listings (search, unused,
-duplicate, quarantine, integrity history) pass every emitted row through Pimcore's native
+duplicate, quarantine, integrity history, empty folders) pass every emitted row through Pimcore's native
 `isAllowed('view')`, which also honours workflow and permission-event denial, so a scoped actor sees only
 assets they may view and never receives an exact result total that would let them count hidden assets.
 Mutations re-check the required object, source asset, target folder, and referring-element permissions

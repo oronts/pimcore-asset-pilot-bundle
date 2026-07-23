@@ -12,6 +12,8 @@ Target paths use Twig syntax. The resolver provides these context variables:
 | `date` | `DateTimeImmutable` | Current date/time |
 | `className` | `string` | DataObject class name |
 
+Consumers can add more variables by tagging a `ContextProviderInterface` service (`oronts_asset_pilot.context_provider`); the core variables above always take precedence over provider keys. See [Extending](extending.md).
+
 You can call any method on the `object` and `asset` variables directly in the template. Empty path segments are dropped. If a template renders to nothing usable (empty, or all `unknown`) it falls back to `/Assets/<object key>`, never the asset root, and a template whose accessor throws at render time fails closed with a `PathResolutionException` so the asset is not misfiled to a generic destination.
 
 > **Trust boundary.** Path templates are trusted deployment code, not end-user input. The Twig
@@ -25,7 +27,7 @@ You can call any method on the `object` and `asset` variables directly in the te
 |--------|-------|-------------|
 | `safe_key` | `{{ value\|safe_key }}` | Replace any char that is not a letter, digit, `_`, `-`, or `.` with `-`; empty input becomes `unknown` |
 | `pluck` | `{{ items\|pluck('key') }}` | Extract a property from each array item |
-| `first_of` | `{{ items\|first_of('key') }}` | Get property from first item, fallback to `'unknown'` |
+| `first_of` | `{{ items\|first_of('key', 'default') }}` | Property from first item; optional second arg sets the fallback (default `'unknown'`) |
 | `slug` | `{{ value\|slug }}` | URL-safe lowercase slug |
 | `fallback` | `{{ value\|fallback('default') }}` | Return fallback when value is empty/null |
 | `trim_path` | `{{ value\|trim_path }}` | Strip leading/trailing slashes |

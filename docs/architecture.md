@@ -210,8 +210,10 @@ under the persisted actor and shared lock without repeating the mutation.
 Completing the journal activates only deliveries for the persisted outcome. Pimcore maintenance
 polls due IDs, Messenger carries exact IDs, and the database claim remains authoritative under
 duplicate messages or broker recovery. Observer execution restores the initiating actor. Observers
-that declare an asset permission recheck that ACL and hold the shared asset lock; metadata-only
-observers declare no asset permission and do not load or lock the asset. Delivery retries with
+that declare an asset permission recheck that ACL and hold the shared asset lock, and each delivery
+heartbeat renews that asset lock together with the delivery lease, so a long observer cannot keep a
+live lease while its asset lock silently expires. Metadata-only observers declare no asset permission
+and do not load or lock the asset. Delivery retries with
 bounded backoff. Exhausting a delivery changes an otherwise committed operation to
 `completed_with_observer_error`; a failed operation remains failed while dead-delivery health still
 reports the observer failure. `asset-pilot:retry-deliveries` can atomically requeue an exact signed
@@ -237,8 +239,9 @@ asynchronously. Asset Pilot therefore does not infer freshness from the Pimcore 
 its transport. Its pre-save/delete subscriber first persists a revision-fenced dirty source. After
 the Pimcore element transaction commits, the post event synchronously calls the element's current
 `resolveDependencies()` and atomically replaces the bundle-owned asset edges. A transient failure
-leaves the source dirty and dispatches an idempotent repair message; `unknown` blocks destructive
-operations until the latest revision is clean.
+leaves the source dirty and dispatches an idempotent repair message fenced to the committing revision,
+so a repair that runs before the source transaction commits refuses to certify the old edges clean and
+re-queues instead; `unknown` blocks destructive operations until the latest revision is clean.
 
 The bootstrap command scans objects, documents, and assets by ascending ID in a bounded, durable
 cursor. A generation becomes `ready` only after every source has been projected and no dirty source
@@ -349,10 +352,10 @@ skipped, blocked, and failed counts. Each item retains its immutable input finge
 status, error, state payload, and a claim-token-fenced liveness lease (`claim_token`,
 `lease_expires_at`). A worker stamps the token when it claims an item and renews the lease by
 heartbeat; maintenance then reconciles a running item whose lease expired
-(`reconcileExpiredItemLeases`), a synchronous item abandoned without a lease
-(`reconcileAbandonedLeaselessItems`), and a run left non-terminal after all its items finished
+(`reconcileExpiredItemLeases`) and a run left non-terminal after all its items finished
 (`reconcileUnfinalizedRuns`), so reconciliation fails only items whose durable lease actually expired
-and never a legitimately long-running or broker-queued run. Duplicate merges use that payload to persist the reference-repoint
+and never a legitimately long-running or broker-queued run. Every synchronous run item now also holds
+a claim-token lease, so there is no leaseless running path left to reconcile by age. Duplicate merges use that payload to persist the reference-repoint
 and copy-disposition phase, allowing an interrupted run to resume without repeating a completed
 phase. The supported run kinds are `organize`, `reorganize`, `replay`, and `duplicate-merge`;
 unknown persisted kinds are not retryable.

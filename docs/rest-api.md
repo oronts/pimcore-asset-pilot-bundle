@@ -19,6 +19,18 @@ and delivery endpoints. Three things are intentionally outside this guarantee: t
 directly; and the `/health` response `details` bag carries diagnostic, UTC-by-construction
 timestamps for operators rather than the RFC 3339 resource form.
 
+The authorized list endpoints (asset search, unused assets, quarantine, integrity history, and
+duplicates) page through a bounded scan that runs the native `isAllowed('view')` check on every
+candidate row. When that scan reaches its budget before it can prove where the listing ends, the
+response carries `truncated: true` next to `hasMore`. Read `truncated: true` as "results are
+limited, narrow the filters to reach the rest," never as a real end of the listing; `hasMore: false`
+on its own still marks a genuine end. The System actor bypasses the per-row check, reads an exact
+SQL total, and never returns `truncated: true`. The matching CSV exports stream to a row ceiling and,
+when that ceiling cuts the stream short, append a final `TRUNCATED: ...` marker row: a streamed
+download cannot carry a trailing header, so the notice travels in band as the last row. The audit
+export (unbounded keyset cursor) and the empty-folders listing (next-row probe) have no such ceiling
+and never signal truncation.
+
 ### Dashboard
 
 | Method | Endpoint | Permission | Description |
@@ -28,7 +40,7 @@ timestamps for operators rather than the RFC 3339 resource form.
 | `GET` | `/health` | View | Health checks + overall status (`{status, checks[]}`) |
 | `GET` | `/health/readiness` | View | Lightweight readiness status; returns `503` when any health check is critical |
 | `GET` | `/metrics` | View | Operation metrics (`{operations, total, moveTotal, failureRate, durationMs}`; `failureRate` = failed / `moveTotal`, which excludes nonterminal operations) |
-| `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`, `?minCopies` (default 2), `?type`). Returns `{items[], total, page, limit, hasMore}` — `total` is `null` for interactive (non-System) callers, so use `hasMore` to detect further pages. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
+| `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`, `?minCopies` (default 2), `?type`). Returns `{items[], total, page, limit, hasMore, truncated}` — `total` is `null` for interactive (non-System) callers, so use `hasMore` to detect further pages and `truncated` to detect a scan-budget cutoff. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
 | `GET` | `/duplicates/strategies` | View | Available merge-disposition strategies + the configured default (`{strategies[], default}`) |
 | `GET` | `/duplicates/export` | View | Stream the full duplicate report as CSV (`?minCopies`, `?type`) |
 | `POST` | `/duplicates/merge` | Admin | Preview/apply a merge with `{checksum, canonicalId?, strategy?, dryRun?, planToken?}`, or resume with `{runId}`. Apply uses a signed plan and returns durable run state. |
@@ -385,6 +397,16 @@ and computed operations. It can be claimed once and fails closed if any bound in
 | `DELETE` | `/assets/{id}/lock` | Operate | Unlock asset |
 | `POST` | `/assets/bulk-tag` | Operate + Pimcore `tags_assignment` | Bulk assign tags to assets through a signed apply plan (preview, then apply) |
 | `POST` | `/assets/bulk-property` | Operate | Bulk set custom properties through a signed apply plan (preview, then apply) |
+
+Both ZIP-streaming responses (`POST /assets/download-zip` and the prepared-token `GET
+/assets/download-zip/{token}`) carry four archive-accounting headers: `X-Asset-Pilot-Requested`
+(asset ids in the selection), `X-Asset-Pilot-Added` (files packed into the archive),
+`X-Asset-Pilot-Skipped` (ids dropped because the asset was missing, a folder, not viewable, or had
+no packable file), and `X-Asset-Pilot-Truncated` (`true` or `false`). A complete build accounts for
+every requested id as either added or skipped and returns `X-Asset-Pilot-Truncated: false`; `true`
+marks a partial archive that did not account for every requested id. A selection above the
+configured ZIP asset ceiling is rejected with `422` rather than returned as a truncated archive. The
+`prepare` endpoint returns JSON only and carries none of these headers.
 
 #### Search parameters
 
