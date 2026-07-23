@@ -45,7 +45,7 @@ export const OpenButton: React.FC<OpenButtonProps> = ({ id, type, label }) => {
 const linkStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  color: '#1677ff',
+  color: 'var(--ap-color-primary)',
   cursor: 'pointer',
   padding: 0,
   fontSize: 'inherit',

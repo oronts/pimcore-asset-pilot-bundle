@@ -3,11 +3,11 @@ import { useTranslation } from 'react-i18next'
 import type { ConfidenceLevel } from '../../types'
 
 const styles: Record<ConfidenceLevel, { bg: string; border: string; text: string }> = {
-  definitely_unused: { bg: '#f6ffed', border: '#b7eb8f', text: '#389e0d' },
-  probably_unused: { bg: '#fffbe6', border: '#ffe58f', text: '#d48806' },
-  recently_uploaded: { bg: '#fff2f0', border: '#ffccc7', text: '#cf1322' },
-  historically_used: { bg: '#fff7e6', border: '#ffd591', text: '#d46b08' },
-  protected: { bg: '#f5f5f5', border: '#d9d9d9', text: '#8c8c8c' },
+  definitely_unused: { bg: 'var(--ap-color-success-bg)', border: 'var(--ap-color-success-border)', text: 'var(--ap-color-success-text)' },
+  probably_unused: { bg: 'var(--ap-color-warning-bg)', border: 'var(--ap-color-warning-border)', text: 'var(--ap-color-warning-text)' },
+  recently_uploaded: { bg: 'var(--ap-color-error-bg)', border: 'var(--ap-color-error-border)', text: 'var(--ap-color-error-text)' },
+  historically_used: { bg: 'var(--ap-color-warning-bg)', border: 'var(--ap-color-warning-border)', text: 'var(--ap-color-warning-text-active)' },
+  protected: { bg: 'var(--ap-color-fill-secondary)', border: 'var(--ap-color-border)', text: 'var(--ap-color-text-secondary)' },
 }
 
 const i18nKeys: Record<ConfidenceLevel, string> = {
@@ -34,7 +34,7 @@ export const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({ confidence }) 
         background: s.bg,
         border: `1px solid ${s.border}`,
         borderRadius: 4,
-        fontSize: 10,
+        fontSize: 'var(--ap-font-size)',
         fontWeight: 600,
         color: s.text,
         whiteSpace: 'nowrap',

@@ -23,7 +23,7 @@ export const Highlight: React.FC<HighlightProps> = ({ text, query }) => {
 }
 
 const hlStyle: React.CSSProperties = {
-  background: '#fffb8f',
+  background: 'var(--ap-color-warning-bg)',
   padding: '1px 0',
   borderRadius: 2,
 }

@@ -2,11 +2,13 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 
 const statusStyles: Record<string, { bg: string; color: string; key: string }> = {
-  completed: { bg: '#f6ffed', color: '#52c41a', key: 'asset-pilot.status.completed' },
-  failed: { bg: '#fff2f0', color: '#ff4d4f', key: 'asset-pilot.status.failed' },
-  skipped: { bg: '#fafafa', color: '#8c8c8c', key: 'asset-pilot.status.skipped' },
-  pending: { bg: '#fffbe6', color: '#faad14', key: 'asset-pilot.status.pending' },
-  action_failed: { bg: '#fff1f0', color: '#cf1322', key: 'asset-pilot.status.action_failed' },
+  completed: { bg: 'var(--ap-color-success-bg)', color: 'var(--ap-color-success-text)', key: 'asset-pilot.status.completed' },
+  completed_with_observer_error: { bg: 'var(--ap-color-warning-bg)', color: 'var(--ap-color-warning-text)', key: 'asset-pilot.status.completed_with_observer_error' },
+  in_progress: { bg: 'var(--ap-color-info-bg)', color: 'var(--ap-color-info-text)', key: 'asset-pilot.status.in_progress' },
+  recovery_required: { bg: 'var(--ap-color-error-bg)', color: 'var(--ap-color-error-text)', key: 'asset-pilot.status.recovery_required' },
+  failed: { bg: 'var(--ap-color-error-bg)', color: 'var(--ap-color-error-text)', key: 'asset-pilot.status.failed' },
+  skipped: { bg: 'var(--ap-color-fill-alter)', color: 'var(--ap-color-text-secondary)', key: 'asset-pilot.status.skipped' },
+  pending: { bg: 'var(--ap-color-warning-bg)', color: 'var(--ap-color-warning-text)', key: 'asset-pilot.status.pending' },
 }
 
 interface StatusTagProps {
@@ -15,7 +17,7 @@ interface StatusTagProps {
 
 export const StatusTag: React.FC<StatusTagProps> = ({ status }) => {
   const { t } = useTranslation()
-  const config = statusStyles[status] ?? { bg: '#f5f5f5', color: '#595959', key: '' }
+  const config = statusStyles[status] ?? { bg: 'var(--ap-color-fill-secondary)', color: 'var(--ap-color-text-secondary)', key: '' }
 
   return (
     <span style={{
@@ -23,7 +25,7 @@ export const StatusTag: React.FC<StatusTagProps> = ({ status }) => {
       color: config.color,
       padding: '1px 8px',
       borderRadius: 4,
-      fontSize: 12,
+      fontSize: 'var(--ap-font-size)',
       fontWeight: 500,
       display: 'inline-block',
     }}>
@@ -33,12 +35,12 @@ export const StatusTag: React.FC<StatusTagProps> = ({ status }) => {
 }
 
 const triggerConfig: Record<string, { bg: string; color: string }> = {
-  object_save: { bg: '#e6f7ff', color: '#1677ff' },
-  asset_upload: { bg: '#f9f0ff', color: '#722ed1' },
-  bulk_operation: { bg: '#fff7e6', color: '#fa8c16' },
-  manual: { bg: '#f6ffed', color: '#52c41a' },
-  scheduled: { bg: '#f5f5f5', color: '#595959' },
-  api: { bg: '#e6fffb', color: '#13c2c2' },
+  object_save: { bg: 'var(--ap-color-info-bg)', color: 'var(--ap-color-primary)' },
+  asset_upload: { bg: 'var(--ap-color-primary-bg)', color: 'var(--ap-color-primary)' },
+  bulk_operation: { bg: 'var(--ap-color-warning-bg)', color: 'var(--ap-color-warning-text)' },
+  manual: { bg: 'var(--ap-color-success-bg)', color: 'var(--ap-color-success-text)' },
+  scheduled: { bg: 'var(--ap-color-fill-secondary)', color: 'var(--ap-color-text-secondary)' },
+  api: { bg: 'var(--ap-color-info-bg)', color: 'var(--ap-color-info)' },
 }
 
 interface TriggerTagProps {
@@ -46,7 +48,7 @@ interface TriggerTagProps {
 }
 
 export const TriggerTag: React.FC<TriggerTagProps> = ({ trigger }) => {
-  const config = triggerConfig[trigger] ?? { bg: '#f5f5f5', color: '#595959' }
+  const config = triggerConfig[trigger] ?? { bg: 'var(--ap-color-fill-secondary)', color: 'var(--ap-color-text-secondary)' }
 
   return (
     <span style={{
@@ -54,7 +56,7 @@ export const TriggerTag: React.FC<TriggerTagProps> = ({ trigger }) => {
       color: config.color,
       padding: '1px 8px',
       borderRadius: 4,
-      fontSize: 12,
+      fontSize: 'var(--ap-font-size)',
       fontWeight: 500,
       display: 'inline-block',
     }}>
@@ -64,9 +66,9 @@ export const TriggerTag: React.FC<TriggerTagProps> = ({ trigger }) => {
 }
 
 const strategyConfig: Record<string, { bg: string; color: string }> = {
-  always: { bg: '#e6f7ff', color: '#1677ff' },
-  first_assignment: { bg: '#fff7e6', color: '#fa8c16' },
-  callback: { bg: '#f9f0ff', color: '#722ed1' },
+  always: { bg: 'var(--ap-color-info-bg)', color: 'var(--ap-color-primary)' },
+  first_assignment: { bg: 'var(--ap-color-warning-bg)', color: 'var(--ap-color-warning-text)' },
+  callback: { bg: 'var(--ap-color-primary-bg)', color: 'var(--ap-color-primary)' },
 }
 
 interface StrategyTagProps {
@@ -74,7 +76,7 @@ interface StrategyTagProps {
 }
 
 export const StrategyTag: React.FC<StrategyTagProps> = ({ strategy }) => {
-  const config = strategyConfig[strategy] ?? { bg: '#f5f5f5', color: '#595959' }
+  const config = strategyConfig[strategy] ?? { bg: 'var(--ap-color-fill-secondary)', color: 'var(--ap-color-text-secondary)' }
 
   return (
     <span style={{
@@ -82,7 +84,7 @@ export const StrategyTag: React.FC<StrategyTagProps> = ({ strategy }) => {
       color: config.color,
       padding: '1px 8px',
       borderRadius: 4,
-      fontSize: 12,
+      fontSize: 'var(--ap-font-size)',
       fontWeight: 500,
       display: 'inline-block',
     }}>

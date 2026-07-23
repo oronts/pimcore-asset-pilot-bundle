@@ -5,12 +5,14 @@ interface ResponsiveTableWrapperProps {
   children: React.ReactNode
   stickyFirstColumn?: boolean
   tableId?: string
+  /** Accessible name for the horizontally scrollable region so keyboard/screen-reader users can reach it. */
+  label: string
 }
 
 let wrapperCounter = 0
 
 export const ResponsiveTableWrapper: React.FC<ResponsiveTableWrapperProps> = ({
-  children, stickyFirstColumn = false, tableId,
+  children, stickyFirstColumn = false, tableId, label,
 }) => {
   const id = React.useMemo(() => tableId ?? `ap-tw-${++wrapperCounter}`, [tableId])
 
@@ -23,14 +25,17 @@ export const ResponsiveTableWrapper: React.FC<ResponsiveTableWrapperProps> = ({
         z-index: 1;
         background: inherit;
       }
-      [data-ap-table="${id}"] tr { background: #fff; }
-      [data-ap-table="${id}"] tr:hover { background: #fafafa; }
+      [data-ap-table="${id}"] tr { background: var(--ap-color-bg-container); }
+      [data-ap-table="${id}"] tr:hover { background: var(--ap-color-fill-alter); }
     `)
   }
 
   return (
     <div
       data-ap-table={id}
+      role={label != null ? 'region' : undefined}
+      aria-label={label}
+      tabIndex={0}
       style={{ overflowX: 'auto', position: 'relative' }}
     >
       {children}
