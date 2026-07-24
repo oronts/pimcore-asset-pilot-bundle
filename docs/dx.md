@@ -74,19 +74,19 @@ filename normalization, and empty-folder sweeping are intentionally not part of 
 `PRE_MOVE` can veto a move and `INTEGRITY_PRE_HEAL` can veto a version rollback. Move
 events carry their `MoveOperation` and failure cause; bulk, mutation, and heal events carry the
 typed payload described in the table. See
-[Extending — Events](extending.md#events).
+[Extending: Events](extending.md#events).
 
 Use durable outcome events for side effects that must survive process or broker failure. Synchronous
 move events remain the correct extension point for pre-move vetoes and in-process diagnostics.
 
 ## Inspect and debug
 
-- `bin/console asset-pilot:debug-rule --object-id=ID` — per-rule trace of why each rule matched or was
+- `bin/console asset-pilot:debug-rule --object-id=ID`: per-rule trace of why each rule matched or was
   skipped, with the resolved path.
-- `bin/console asset-pilot:validate-config` — validates classes, fields, condition syntax, Twig
+- `bin/console asset-pilot:validate-config`: validates classes, fields, condition syntax, Twig
   templates, callback registration, and filter values before you deploy.
-- `bin/console asset-pilot:organize --object-id=ID -v` — full single-object evaluation without moving a file.
-- `POST {studio_backend_prefix}/asset-pilot/organize/explain` — the same trace over the
+- `bin/console asset-pilot:organize --object-id=ID -v`: full single-object evaluation without moving a file.
+- `POST {studio_backend_prefix}/asset-pilot/organize/explain`: the same trace over the
   [REST API](rest-api.md#operations), used by the Studio UI.
 
 ## Local workflow

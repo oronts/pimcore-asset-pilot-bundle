@@ -13,7 +13,7 @@ The tabs:
 
 | Tab | Description |
 |-----|-------------|
-| **Dashboard** | Statistics overview (organized, pending, failed, skipped, and rules counts), an operations-by-status donut and an assets-by-class bar chart, a health panel (database schema, rule config, shared cache, required consumers and queues, dependency tracking, stale/recovery-required journal entries, overdue/dead observer deliveries, and stuck operation runs queued past the backlog threshold), class breakdown table, recent operations list |
+| **Dashboard** | Statistics overview (organized, pending, failed, skipped, and rules counts), an operations-by-status donut and an assets-by-class bar chart, a health panel (database schema, rule config, shared cache, required consumers and queues, dependency tracking, stale/recovery-required journal entries, overdue/dead observer deliveries, and stuck operation runs awaiting dispatch or queued past the backlog threshold), class breakdown table, recent operations list |
 | **Rules** | View all configured rules with priority, strategy, target path. Export the rule set as a portable artifact. An overlap panel warns about rules competing for the same assets. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. Compare modal to diff the running rule set against an uploaded exported rule artifact (added, removed, changed, and unchanged rules). |
 | **Operations** | Single-object organize, bulk organize with paginated selection, replay, reorganize, durable run status/cancel/retry, and system status. Admins also get signed preview/apply panels for stale journal recovery and exact dead-delivery retry. |
 | **Audit Log** | Durable operation history. Sort and filter by class, status, and rule name, export CSV, and revert eligible operations. |
@@ -80,7 +80,7 @@ Asset Pilot uses Pimcore's own permission system, not a custom one:
 - The three permissions (`asset_pilot_view` / `asset_pilot_operate` / `asset_pilot_admin`) are
   registered as Pimcore `Permission\Definition`s by the installer and appear under Settings →
   Users/Roles (category "Asset Pilot"). Admins are allowed everything automatically.
-- **Menu visibility** is gated by the nav item's `permission: 'asset_pilot_view'` — Studio hides the
+- **Menu visibility** is gated by the nav item's `permission: 'asset_pilot_view'`; Studio hides the
   module for users without it.
 - **Button-level gating** (operate/admin) uses the SDK's `isAllowed()` from `@pimcore/studio-ui-bundle/modules/auth`.
 - **Enforcement** is server-side: every REST endpoint carries an Asset Pilot permission attribute.
@@ -88,7 +88,7 @@ Asset Pilot uses Pimcore's own permission system, not a custom one:
   and tag operations have the additional requirements documented in [REST API](rest-api.md).
 
 The frontend calls the API with the studio session cookie (`credentials: 'same-origin'`) over
-`getPrefix()` — no custom token handling.
+`getPrefix()`, no custom token handling.
 
 > The installer verifies all permission definitions and invalidates Studio's permission-key cache.
 > Keep `bin/console pimcore:cache:clear` in the deployment sequence after bundle or role changes as a
@@ -105,7 +105,6 @@ npm --prefix assets/studio test
 npm --prefix assets/studio run test:a11y
 npm --prefix assets/studio run check-types
 npm --prefix assets/studio run lint
-npm --prefix assets/studio run notices
 npm --prefix assets/studio run build
 npm --prefix assets/studio run prepare-release-build # release archives only
 npm --prefix assets/studio run verify-build

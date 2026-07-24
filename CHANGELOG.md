@@ -7,7 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-07-16
+## [2.0.0] - Unreleased
 
 ### Added
 
@@ -36,16 +36,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   packaged-build verification.
 - Claim-token-fenced liveness lease on operation-run items (`operation_runs.lease_seconds`, default
   300); maintenance fails only items whose durable lease expired, replacing the age-based stale
-  reconciliation. An `operation_run_backlog` health check warns when a run stays queued past
-  `operation_runs.stale_queued_warning_seconds` (default 86400) without ever auto-failing a legitimate
-  backlog.
+  reconciliation. An `operation_run_backlog` health check warns when a run stays awaiting dispatch or
+  queued past `operation_runs.stale_queued_warning_seconds` (default 86400) without ever auto-failing a
+  legitimate backlog.
 - Exact, configurable scan and export budgets for authorized listings and duplicate detection
   (`listing.scan_budget` / `batch_size` / `export_max_rows`, `duplicates.group_scan_budget` /
   `export_group_scan_budget`); every bounded listing returns an explicit `truncated` flag and every
   ceiling-bounded CSV export appends a truncation marker row, so a scan ceiling can never masquerade as
   end-of-data.
+- New `pending_dispatch` operation-run status for the automatic-organization producer outbox, surfaced
+  in the REST run status, OpenAPI, Studio types and styling, EN/DE translations, and health. It is
+  cancellable, and cancelling it terminates the run before publication.
+- Classification-store asset references are now included in dependency safety. `AssetFieldExtractor`
+  traverses an object's classification-store fields, and the dependency projection, live scanner, and
+  pre-save deletion fence all consume the result. An incompletely readable classification store is
+  treated as fail-closed: the source is kept dirty and the usage verdict is `unknown`, so a
+  still-referenced asset can never pass an unused-asset, quarantine-purge, or duplicate-hard-delete gate.
+- The PHP release-archive verifier now recomputes the Studio source hash from the archived sources and
+  rejects a build whose source no longer matches its recorded `sourceHash`, matching the JavaScript
+  build check (`npm run verify-build`) byte for byte.
 
 ### Changed
+
+- Automatic organization (data-object save and asset-upload listeners) now uses a transactional producer
+  outbox. The listener records a committed `pending_dispatch` operation run inside the (possibly
+  consumer-owned) save transaction instead of publishing a Messenger message directly, and
+  `OrganizeDispatchRelayTask` (a Pimcore maintenance task) publishes only committed pending runs after the
+  transaction commits. This removes the pre-commit publish race, so a rolled-back save leaves no phantom
+  message and a worker never sees a run before it is committed. Automatic organization now requires
+  `pimcore:maintenance` to be scheduled; see UPGRADING.md. Manual and controller-triggered organization
+  publish directly and are unaffected.
+- The `operation_run_backlog` health check and its backlog count now include `pending_dispatch` runs, so a
+  stranded producer backlog (for example when `pimcore:maintenance` is not scheduled) is visible instead of
+  silent.
 
 - Conflict strategies now receive an explicit `dryRun` flag; custom decisions and preview listeners
   have a documented query-only contract.
@@ -92,8 +115,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   normalization, audit revert, and quarantine restore; protection state is part of reviewed
   fingerprints.
 - Revalidate rule-specific and filename-normalization apply state under the mutation lock.
-- Aggregate duplicate legacy storage snapshots before assigning run IDs and backfill first-assignment
-  markers before retired audit statuses are consolidated.
+- Collapse duplicate legacy storage snapshots by deterministically retaining the earliest row per
+  (captured_at, type) and discarding the same-second duplicates before assigning run IDs, then
+  backfill first-assignment markers before retired audit statuses are consolidated.
 - Dead-letter expired deliveries at the attempt cap, fence lease heartbeats by claim token, prevent
   concurrent journal completion overwrites, and deduplicate repeated queue dispatches.
 - Treat a MariaDB zero changed-row lease heartbeat as valid only after a claim-token-fenced ownership
@@ -113,6 +137,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   WCAG AA contrast in light, dark, and tinted Studio surfaces.
 - Studio Unused Assets tab now lets you select locked rows and reach the bulk-unlock action; delete,
   move, and quarantine bulk operations act on the unlocked subset and flag locked assets as skipped.
+- The ZIP service authorizes the source object before extracting its asset relationships, so an actor who
+  cannot view an object no longer learns its asset associations; folder ZIP creation pages past
+  unauthorized rows instead of dropping authorized assets that follow them in a large shared folder.
+- The dispatch relay fails an undispatchable pending run (unrecognized trigger or actor, or no targets)
+  instead of leaving it in `pending_dispatch` indefinitely and invisible to the backlog health check.
 
 ### Security
 

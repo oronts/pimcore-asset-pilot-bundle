@@ -46,7 +46,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `operation_runs.retention_days` | int | `90` | Retain terminal actor-scoped operation runs; active runs are never pruned |
 | `operation_runs.retention_batch_size` | int | `500` | Maximum expired runs pruned in one maintenance pass (1..1000) |
 | `operation_runs.lease_seconds` | int | `300` | Durable liveness lease for an in-flight operation-run item; renewed each heartbeat, expired items are failed by maintenance (min 1) |
-| `operation_runs.stale_queued_warning_seconds` | int | `86400` | Queued-run age that raises a health warning (probably-lost broker message); never auto-failed (min 60) |
+| `operation_runs.stale_queued_warning_seconds` | int | `86400` | Awaiting-dispatch or queued run age that raises a health warning (unscheduled maintenance relay or lost broker message); never auto-failed (min 60) |
 | `audit.retention_days` | int | `90` | Age at which `--cleanup` prunes rows |
 | `protection.exclude_folders` | list | `[]` | Folder trees never organized |
 | `protection.lock_property` | string | `asset_pilot_locked` | Property that locks an asset |
@@ -159,6 +159,7 @@ operations have stricter requirements than the usual View/Operate split (see [Pe
 | GET | `/operations/status` | View |
 | GET | `/operations/runs`, `/operations/runs/{id}` | View |
 | POST | `/operations/runs/{id}/cancel`, `/operations/runs/{id}/retry` | Operate |
+| POST | `/operations/recovery`, `/operations/deliveries/retry` | Admin |
 | GET | `/audit`, `/audit/export` | View |
 | POST | `/audit/{id}/revert` | Admin |
 | GET | `/unused-assets`, `/unused-assets/stats`, `/unused-assets/export` | View |
@@ -178,10 +179,25 @@ Unused-asset bulk mutations use a two-step contract. Send `dryRun: true` first, 
 exact request with `dryRun: false` and the returned `planToken`. Tokens are actor-bound,
 single-use, short-lived, and rejected if an asset changes after preview.
 
+`POST /folders/empty/delete` uses the same reviewed two-step contract, but it does not preview by
+default: send `dryRun: true` explicitly to obtain a `planToken`. Because an apply is rejected without
+a valid token (`400`), a single request can still never both preview and delete. Preview with `dryRun: true` (1..200 folder ids)
+returns the per-folder `eligible`, `skipped`, and `failed` counts plus a single-use `planToken`; the
+apply repeats the identical `ids` set with `dryRun: false` and that token. The token binds the actor,
+the sorted folder ids, and each folder's fingerprint. Applying without a fresh token returns `400`,
+and a stale, reused, or changed plan returns `409`. Full request and response shapes are in
+[REST API](rest-api.md).
+
 `POST /operations/reorganize` and `POST /operations/replay` follow the same two-step contract and
 preview by default. Their token binds the complete selector, resolved object set, actor,
 configuration, object fingerprints, and computed move operations. Apply creates one operation run;
 async responses include its `runId` and `statusUrl`.
+
+`POST /operations/recovery` and `POST /operations/deliveries/retry` are Admin maintenance endpoints
+that follow the same reviewed two-step contract, previewing by default and applying the reviewed
+selection with the returned `planToken`. Recovery reconciles stale move/revert operation-journal
+state (the HTTP equivalent of `asset-pilot:recover-operations`); delivery retry requeues dead durable
+observer deliveries (the HTTP equivalent of `asset-pilot:retry-deliveries`).
 
 `POST /integrity/heal` also requires two calls: preview with `dryRun: true`, then apply the same ID
 set with the returned `planToken`. Its token additionally binds the sorted IDs, effective integrity
@@ -240,7 +256,7 @@ Constants on `AssetPilotEvents`. Details in [DX](dx.md#events) and
 | `OperationKind` | `move`, `revert` |
 | `OperationRunItemStatus` | `queued`, `running`, `completed`, `blocked`, `skipped`, `failed`, `cancelled` |
 | `OperationRunKind` | `organize`, `reorganize`, `replay`, `duplicate-merge` |
-| `OperationRunStatus` | `queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `blocked`, `partial`, `failed` |
+| `OperationRunStatus` | `pending_dispatch`, `queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `blocked`, `partial`, `failed` |
 | `QuarantineStatus` | `pending`, `committed` |
 | `RevertFailure` | `audit_entry_not_found`, `not_completed`, `asset_not_found`, `asset_locked`, `permission_denied`, `path_conflict`, `execution_failed`, `recovery_required` |
 | `ReviewedSelectionError` | `SelectionTooLarge`, `MutationForbidden`, `MissingPlanToken`, `MalformedPlanToken`, `StalePlan`, `OwnershipLost`, `PreflightFailed`, `ExecutionFailed` |

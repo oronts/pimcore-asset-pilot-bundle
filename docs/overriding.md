@@ -9,8 +9,8 @@ wrapping a core service, swapping a default, or overriding configuration.
 Supported replaceable core services are bound to interfaces and registered behind service **aliases**, so there are
 two clean override mechanisms, both standard Symfony:
 
-- **Replace** — point the alias at your own implementation.
-- **Decorate** — wrap the existing service and keep the original available as `.inner`.
+- **Replace**: point the alias at your own implementation.
+- **Decorate**: wrap the existing service and keep the original available as `.inner`.
 
 App-level configuration loads after the bundle, so an alias or service you define in your project's
 `config/services.yaml` wins over the bundle's. Public defaults are ordinary classes where implementation
@@ -227,7 +227,7 @@ behavior:
 
 - For per-rule custom logic, use `strategy: callback` with a `callback` service implementing
   `CallbackDecisionInterface`, which needs no service overrides at all (see
-  [Extending — Custom Strategy](extending.md#custom-strategy) and
+  [Extending: Custom Strategy](extending.md#custom-strategy) and
   [Scenarios](scenarios.md#callback-strategy-with-custom-logic)).
 - To change what a built-in strategy does globally, decorate or replace its service
   (`AlwaysMoveStrategy`, `FirstAssignmentStrategy`, or `CallbackStrategy`).
@@ -237,12 +237,12 @@ behavior:
 Most behavior is configuration, not code. Set these in `config/packages/` instead of overriding
 services:
 
-- `protection.lock_property` — the property name that locks an asset (default `asset_pilot_locked`).
-- `protection.exclude_folders` — folder trees never touched by organization.
-- `async.enabled`, `async.batch_size` — synchronous vs queued moves and bulk batch size.
-- `audit.retention_days` — how long audit rows are kept.
-- `locales` — the locales scanned for localized fields.
-- `confidence.recently_uploaded_days`, `confidence.probably_unused_days` — the day cutoffs for the
+- `protection.lock_property`: the property name that locks an asset (default `asset_pilot_locked`).
+- `protection.exclude_folders`: folder trees never touched by organization.
+- `async.enabled`, `async.batch_size`: synchronous vs queued moves and bulk batch size.
+- `audit.retention_days`: how long audit rows are kept.
+- `locales`: the locales scanned for localized fields.
+- `confidence.recently_uploaded_days`, `confidence.probably_unused_days`: the day cutoffs for the
   unused-asset confidence buckets (used by both scoring and the `?confidence=` filter).
 
 See [Configuration](configuration.md) for the full tree.
@@ -256,11 +256,11 @@ To change the scoring *logic* itself (not just the day cutoffs), replace the own
 
 `TemplatePathResolver` is the default `PathResolverInterface`, a single service (not a tagged chain).
 To change how target paths are built, replace that alias with your own implementation, see
-[Extending — Custom Path Resolver](extending.md#custom-path-resolver). To only add filters or
+[Extending: Custom Path Resolver](extending.md#custom-path-resolver). To only add filters or
 functions to the existing Twig environment, tag a Twig extension instead, see
-[Extending — Add Twig Filters/Functions](extending.md#add-twig-filtersfunctions-to-path-templates).
+[Extending: Add Twig Filters/Functions](extending.md#add-twig-filtersfunctions-to-path-templates).
 To inject extra variables into templates without replacing the resolver, tag a context provider, see
-[Extending — Add Path-Template Variables](extending.md#add-path-template-variables).
+[Extending: Add Path-Template Variables](extending.md#add-path-template-variables).
 
 ## Override the Studio UI
 

@@ -30,25 +30,40 @@ Consumers can add custom condition functions by tagging an `ExpressionFunctionPr
 
 ### Condition Examples
 
+Each example is a standalone `condition` for one rule. They are shown in separate blocks because a
+single YAML document cannot repeat the `condition` key.
+
 ```yaml
 # Only objects that have an item number set
 condition: 'object.getItemNumber() != null'
+```
 
+```yaml
 # Only images under 10 MB
 condition: 'is_image(asset) and asset_size(asset) < 10485760'
+```
 
+```yaml
 # Only PDF files
 condition: 'asset_extension(asset) == "pdf"'
+```
 
+```yaml
 # Compound: images over 1 MB from Product class
 condition: 'is_image(asset) and asset_size(asset) > 1048576 and object_class(object) == "Product"'
+```
 
+```yaml
 # Skip assets already in the target structure
 condition: 'not path_matches(asset, "#^/Products/#")'
+```
 
+```yaml
 # Only process assets with a specific property
 condition: 'has_property(asset, "approved") and has_property(asset, "reviewed")'
+```
 
+```yaml
 # Match only videos or documents (no images)
 condition: 'is_video(asset) or is_document(asset)'
 ```

@@ -75,7 +75,6 @@ npm --prefix assets/studio run check-types
 npm --prefix assets/studio run lint
 npm --prefix assets/studio test
 npm --prefix assets/studio run test:a11y
-npm --prefix assets/studio run notices
 npm --prefix assets/studio run build
 npm --prefix assets/studio run prepare-release-build
 npm --prefix assets/studio run verify-build

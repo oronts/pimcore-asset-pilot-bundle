@@ -124,7 +124,7 @@ and any known block such as an asset lock, excluded folder, or completed first a
 strategies and pre-move listeners are not invoked by this read-only audit; callback eligibility is
 reported as requiring an apply-time check. It is read-only;
 re-organize via `asset-pilot:organize` or the Operations tab. A whole-catalog sweep should page
-through with `--page` (or run async) rather than one blocking pass.
+through with `--page` rather than one blocking pass.
 
 ### Rule Overlap
 
@@ -217,7 +217,7 @@ A checker reports `unverifiable` rather than `broken` when its tool (e.g. Imagic
 feature never flags an asset broken just because a tool was missing. Each scanned asset is loaded and
 render-tested, so the scan is bounded (`--limit`, default 100). Narrow a scan with `--folder`, `--type`
 (image, document, ...), and `--extension`; use `--by-ids` to check exactly the assets you care about.
-Detection only — rolling back to a working version is a separate, guarded heal.
+Detection only; rolling back to a working version is a separate, guarded heal.
 
 ### Find Duplicates
 
@@ -404,23 +404,24 @@ bin/console asset-pilot:health
 ```
 
 Built-in checks (extensible via the `oronts_asset_pilot.health_check` tag):
-- `database_schema` — all fourteen owned tables, columns, primary keys, and indexes match the current
+- `database_schema`: all fourteen owned tables, columns, primary keys, and indexes match the current
   migration target (CRITICAL when missing or drifted).
-- `rule_config` — the loaded rules pass `validate-config` (CRITICAL on a failure, WARNING on a warning).
-- `shared_cache` — reports WARNING for a known process-local adapter or when cross-process
+- `rule_config`: the loaded rules pass `validate-config` (CRITICAL on a failure, WARNING on a warning).
+- `shared_cache`: reports WARNING for a known process-local adapter or when cross-process
   visibility cannot be proven. Fresh heartbeats written by both independent worker processes prove
   shared visibility even when the adapter type itself is not recognizable.
-- `async_transport` — always verifies durable-delivery routing, and additionally verifies organize
+- `async_transport`: always verifies durable-delivery routing, and additionally verifies organize
   and bulk routing when async organization is enabled. It checks the configured receiver and failure
   receiver, inspects native queue depths, warns on backlog or failed messages, and always requires
   fresh `pimcore_maintenance` and `asset_pilot` heartbeats.
-- `operation_journal` — warns on stale unfinished operations or overdue deliveries and reports
+- `operation_journal`: warns on stale unfinished operations or overdue deliveries and reports
   CRITICAL for recovery-required operations or dead observer deliveries.
-- `dependency_tracking` — reports live projection generation, cursor, source/edge counts, and dirty
+- `dependency_tracking`: reports live projection generation, cursor, source/edge counts, and dirty
   sources. It is OK only when Pimcore tracking is enabled and the projection is ready and clean,
   WARNING while bootstrap/rebuild/dirty-source repair is pending, and CRITICAL when disabled or the
   rebuild failed.
-- `operation_run_backlog` — WARNING when one or more operation runs have stayed `queued` longer than
+- `operation_run_backlog`: WARNING when one or more operation runs have stayed awaiting dispatch
+  (`pending_dispatch`, an unscheduled maintenance relay) or `queued` longer than
   `operation_runs.stale_queued_warning_seconds` (default 86400s / 24h), which can indicate a lost
   broker message. A queued run is never age-failed (a genuine broker backlog is left alone), so an
   operator should cancel and retry the run or verify the consumers. This check never returns CRITICAL.
@@ -509,7 +510,7 @@ permission-checked).
 
 > Note: with `content_scan.enabled` (see [Configuration](configuration.md)), delete and move also
 > skip an asset whose path is hard-coded in supported Pimcore object, nested, document, property,
-> or classification-store content — a reference the dependency table may not track. The guard runs
+> or classification-store content, a reference the dependency table may not track. The guard runs
 > only on assets being mutated and fails closed when it cannot verify safety.
 
 > Note: the unused-asset cleanup cannot filter by file size. The Pimcore `assets` table has no
@@ -563,6 +564,19 @@ registered under `pimcore.maintenance.task`), so it is pruned to `audit.retentio
 maintenance run without a dedicated cron entry. Operation-run retention and quarantine purge are
 also registered maintenance tasks; their configured policies do not require stored CLI plan tokens.
 The cron entry above stays valid for an explicit audit schedule.
+
+These maintenance tasks, and the organize dispatch relay that publishes listener-created automatic
+organize runs (`OrganizeDispatchRelayTask`), only run when `pimcore:maintenance` is scheduled. It is a
+command, not a daemon, so schedule it from cron or a timer; otherwise automatic organization stays in
+`pending_dispatch` and the retention/purge tasks never run:
+
+```bash
+# Dispatch Pimcore maintenance tasks (organize relay, retention, quarantine purge, storage snapshots)
+* * * * * cd /var/www/html && flock -n /tmp/pimcore-maintenance.lock bin/console pimcore:maintenance
+```
+
+The `pimcore:maintenance` scheduler dispatches the task messages onto the `pimcore_maintenance`
+transport; the `pimcore_maintenance` Messenger consumer executes them (see installation.md).
 
 ```bash
 

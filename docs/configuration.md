@@ -161,7 +161,7 @@ oronts_asset_pilot:
 | `operation_runs.retention_days` | `int` | `90` | Retain terminal actor-scoped runs for this many days; active runs are never pruned and retry chains are removed leaf-first |
 | `operation_runs.retention_batch_size` | `int` | `500` | Maximum expired terminal runs pruned by one Pimcore maintenance pass; 1..1000 |
 | `operation_runs.lease_seconds` | `int` | `300` | Durable liveness lease (seconds) for an in-flight operation-run item; a worker renews it each heartbeat and maintenance fails an item whose lease expired. Keep it above the Symfony lock TTL and the longest single-asset save; min 1 |
-| `operation_runs.stale_queued_warning_seconds` | `int` | `86400` | A run queued longer than this is surfaced as a health warning (probably-lost broker message); it is never auto-failed, an operator cancels/retries it. min 60 |
+| `operation_runs.stale_queued_warning_seconds` | `int` | `86400` | A run left awaiting dispatch (unscheduled maintenance relay) or queued (lost broker message) longer than this is surfaced as a health warning; it is never auto-failed, an operator cancels/retries it. min 60 |
 | `audit.retention_days` | `int` | `90` | Days to retain audit entries |
 | `protection.exclude_folders` | `string[]` | `[]` | Folders excluded from organization (e.g., `["/Protected/"]`) |
 | `protection.lock_property` | `string` | `asset_pilot_locked` | Custom property name used to lock assets |

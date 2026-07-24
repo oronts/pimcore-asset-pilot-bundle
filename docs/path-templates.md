@@ -26,8 +26,8 @@ You can call any method on the `object` and `asset` variables directly in the te
 | Filter | Usage | Description |
 |--------|-------|-------------|
 | `safe_key` | `{{ value\|safe_key }}` | Replace any char that is not a letter, digit, `_`, `-`, or `.` with `-`; empty input becomes `unknown` |
-| `pluck` | `{{ items\|pluck('key') }}` | Extract a property from each array item |
-| `first_of` | `{{ items\|first_of('key', 'default') }}` | Property from first item; optional second arg sets the fallback (default `'unknown'`) |
+| `pluck` | `{{ items\|pluck('key') }}` | Extract a property from each item in the list: object entries via getter, method, or public property; array entries by key |
+| `first_of` | `{{ items\|first_of('key', 'default') }}` | Property from the first item only, which must be an object (read via its getter or method); a non-object first entry, e.g. an associative array, yields the fallback. Optional second arg sets the fallback (default `'unknown'`) |
 | `slug` | `{{ value\|slug }}` | URL-safe lowercase slug |
 | `fallback` | `{{ value\|fallback('default') }}` | Return fallback when value is empty/null |
 | `trim_path` | `{{ value\|trim_path }}` | Strip leading/trailing slashes |
@@ -43,28 +43,45 @@ You can call any method on the `object` and `asset` variables directly in the te
 
 ### Path Template Examples
 
+Each example is a standalone `target_path` for one rule. They are shown in separate blocks because a
+single YAML document cannot repeat the `target_path` key.
+
 ```yaml
 # Simple flat structure
 target_path: '/Products/{{ object.getItemNumber() }}/Images'
+```
 
+```yaml
 # Category hierarchy
 target_path: '/Products/{{ object.getCategories()|first_of("key", "Uncategorized") }}/{{ object.getItemNumber() }}/Images'
+```
 
+```yaml
 # Locale-aware paths for localized fields
 target_path: '/Products/{{ object.getItemNumber() }}/Documents{{ locale ? "/" ~ locale : "" }}'
+```
 
+```yaml
 # Date-based organization
 target_path: '/Uploads/{{ date.format("Y/m") }}/{{ className }}'
+```
 
+```yaml
 # Conditional logic with Twig
 target_path: '{% if has_relation(object, "categories") %}/Products/{{ object.getCategories()|first_of("key") }}{% else %}/Products/Uncategorized{% endif %}/Assets'
+```
 
+```yaml
 # Joined relation path
 target_path: '/Products/{{ object.getCategories()|pluck("key")|join("/") }}/Media'
+```
 
+```yaml
 # Coalesce multiple possible identifiers
 target_path: '/Products/{{ coalesce(prop(object, "getItemNumber"), prop(object, "getSku"), object.getKey()) }}/Assets'
+```
 
+```yaml
 # Fallback with slug
 target_path: '/{{ className }}/{{ object.getName()|slug|fallback("unnamed") }}'
 ```

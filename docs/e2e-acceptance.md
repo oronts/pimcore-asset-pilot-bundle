@@ -27,7 +27,7 @@ Pimcore application:
 | 5 | View | View sees read-only tabs; Admin-only tabs (Storage) are absent and their API returns 403 |
 | 6 | Operate | Operate can run organize/heal/quarantine, cannot revert (Admin) and cannot see settings |
 | 7 | Admin | Admin can revert, sees every tab, and a revert is audited with the acting user |
-| 8 | Flows | the central Studio flows load and act: dashboard, rules (create/preview), audit + revert, duplicates + merge, integrity + heal, unused + quarantine, empty folders (scan/cleanup), asset management, drift, operations status |
+| 8 | Flows | the central Studio flows load and act: dashboard, rules (list/detail/preview/diff/export), audit + revert, duplicates + merge, integrity + heal, unused + quarantine, empty folders (scan/cleanup), asset management, drift, operations status |
 | 9 | Timestamps | every timestamp rendered in the UI is the RFC 3339 UTC value, localized correctly |
 | 10 | A11y | axe-core reports no serious/critical violations on each central tab |
 

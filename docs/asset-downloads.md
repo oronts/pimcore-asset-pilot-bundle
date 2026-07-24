@@ -81,7 +81,7 @@ Then select it with `strategy: by-sku` (request) or `zip.default_strategy: by-sk
 
 Pass `thumbnail: <config-name>` to pack the named Pimcore thumbnail of each image instead of the
 original (the entry extension follows the thumbnail format). Non-image assets and any image whose
-thumbnail cannot be produced fall back to the original — the archive never ends up empty because of a
+thumbnail cannot be produced fall back to the original; the archive never ends up empty because of a
 thumbnail problem.
 
 ## Programmatic use
@@ -146,7 +146,7 @@ oronts_asset_pilot:
 ## Storage model and scaling (multiple pods / workers)
 
 - **Reading is storage-adapter agnostic.** Assets are read through Pimcore's `getLocalFile()`, so the
-  source binaries can live on any configured asset storage (local, S3, …) — they are pulled from
+  source binaries can live on any configured asset storage (local, S3, …), and they are pulled from
   wherever they are.
 - **A synchronous download is multi-pod safe.** The archive is built into a local scratch file on the
   handling pod and streamed in the *same* request, then deleted. One pod builds and serves, so there is

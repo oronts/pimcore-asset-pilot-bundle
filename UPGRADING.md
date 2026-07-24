@@ -40,8 +40,18 @@ The dependency migration adds `asset_pilot_dependency_source`, `asset_pilot_depe
 `asset-pilot:health`. Destructive unused-asset operations return `unknown` and fail closed while the
 projection is building, failed, or contains dirty sources.
 
+Classification-store asset references are tracked alongside Pimcore's native dependencies (Pimcore does
+not record them itself). This is fail-closed: an object whose classification store cannot be fully read
+stays a dirty source, so the projection reports `unknown` for the affected assets and destructive
+operations are blocked until the data is corrected, rather than treating a still-referenced asset as
+unused. If the projection stops reaching `ready`, check `asset-pilot:health` for the incomplete source.
+
 Existing storage snapshot rows are grouped by capture timestamp into the new durable run model.
-Their counts, byte totals, unknown-size totals, type rows, and timestamps are preserved.
+When several legacy rows share the same capture second and type, the migration deterministically
+retains the earliest row (lowest id) for each (captured_at, type) and deletes the same-second
+duplicates. Those duplicate same-second totals may be discarded. Each legacy capture wrote one
+complete snapshot per type, so the retained row is a full historical sample and repeated captures
+are never summed.
 
 Bulk organization and duplicate merge now use `asset_pilot_operation_run` and
 `asset_pilot_operation_run_item`. Duplicate items persist their reference-repoint and disposition
@@ -80,11 +90,32 @@ asset operation and restart workers after changing it.
 Route `Oronts\AssetPilotBundle\Message\OperationDeliveryMessage` and
 `Oronts\AssetPilotBundle\Message\DependencyProjectionRefreshMessage` to `asset_pilot` together with
 the organize messages. Synchronous organization still needs this consumer for durable actions and
-events; Pimcore maintenance polls the database outbox so broker failures are recoverable.
+events; the scheduled `pimcore:maintenance` pass relays committed pending organize runs and retries the
+durable-delivery outbox, so broker failures are recoverable (see the next section).
 
 `APP_SECRET` must be non-empty because it signs every reviewed apply plan. Selection-based REST
 and CLI mutations reject apply requests without a fresh matching plan token. Configure a shared lock
 backend for multi-node deployments; plan consumption itself is database-backed.
+
+### Automatic organization requires scheduled maintenance
+
+Automatic organization (data-object saves and asset uploads) now records a committed `pending_dispatch`
+operation run inside the save transaction and no longer publishes a Messenger message from the listener.
+The `OrganizeDispatchRelayTask` maintenance task publishes those committed runs after the transaction
+commits, which removes the pre-commit publish race. Automatic organization therefore depends on Pimcore
+maintenance being scheduled: run `bin/console pimcore:maintenance` from cron or a timer in addition to the
+two Messenger consumers. Without the scheduler, saves still succeed but their organize runs stay in
+`pending_dispatch` and never execute, and the `operation_run_backlog` health check reports the stranded
+backlog. Manual and controller-triggered organization publish directly and do not need the scheduler.
+
+```cron
+* * * * * cd /var/www/html && flock -n /tmp/pimcore-maintenance.lock bin/console pimcore:maintenance
+```
+
+The `pimcore:maintenance` scheduler dispatches one message per maintenance task onto the
+`pimcore_maintenance` transport; the `pimcore_maintenance` consumer executes them. External consumers of
+the operation-run status (REST `/operations/runs`, audit tooling) must accept the new `pending_dispatch`
+value; it is a non-terminal state that becomes `queued` once published and can be cancelled beforehand.
 
 Review the new `oronts_asset_pilot.operation_journal` settings before production rollout:
 
@@ -111,7 +142,8 @@ oronts_asset_pilot:
 
 Keep `operation_runs.lease_seconds` above the longest single asset operation (same rule as
 `idempotency.lock_ttl` and `operation_journal.lease_seconds`); maintenance now fails an in-flight run
-item only when its claim-token-fenced lease expires. A run queued longer than
+item only when its claim-token-fenced lease expires. A run left awaiting dispatch (an unscheduled
+`pimcore:maintenance` relay) or queued (a lost broker message) longer than
 `stale_queued_warning_seconds` surfaces as an `operation_run_backlog` health warning and is never
 auto-failed; an operator cancels and retries it.
 

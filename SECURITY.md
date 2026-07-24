@@ -4,8 +4,12 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.0.x | yes |
-| 1.x | no |
+| 1.1.x | yes |
+| < 1.1 | no |
+
+1.1.x is the current published stable line on Packagist. The 2.0 line is in preparation and is not
+yet published; when `v2.0.0` is tagged and released it becomes the supported line and this table is
+updated in the same release operation.
 
 Supported releases receive dependency and security fixes. Release CI runs locked Composer and npm
 audits without ignored advisories. A remaining upstream advisory must have a documented reachability

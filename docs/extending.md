@@ -15,7 +15,7 @@ Asset Pilot exposes supported interfaces, tags, and events for consumer customiz
 
 ### Custom Filter
 
-Restrict which assets a rule applies to. All registered filters run inside `CompositeFilter` using AND logic — the first rejection short-circuits evaluation.
+Restrict which assets a rule applies to. All registered filters run inside `CompositeFilter` using AND logic; the first rejection short-circuits evaluation.
 
 ```php
 namespace App\AssetPilot\Filter;
@@ -94,14 +94,18 @@ oronts_asset_pilot:
 > is no separate custom strategy name to register.
 
 `decide()` runs while building previews and again before apply. It must be query-only: do not save
-Pimcore elements, dispatch external work, or write to another system. `$dryRun` is `true` for preview
-and drift evaluation, so integrations can suppress live-only diagnostics. `PRE_MOVE` listeners follow
-the same rule when `AssetMoveEvent::isDryRun()` is true.
+Pimcore elements, dispatch external work, or write to another system. `$dryRun` is `true` while
+building a preview and `false` immediately before the live move, so integrations can suppress
+live-only diagnostics during a preview. `PRE_MOVE` listeners follow the same rule when
+`AssetMoveEvent::isDryRun()` is true.
 
-Location-drift audits do not execute callback strategies. A directly registered strategy may also
-implement `SideEffectFreeConflictStrategyInterface` when its `resolve()` method only reads state;
-the drift audit can then report its known rejection reason. Strategies without that opt-in are
-reported as requiring an apply-time check.
+Drift evaluation never runs the `callback` strategy: `decide()` is invoked only for a preview or a
+live move, never during a drift audit. Drift evaluates a strategy only when the rule resolves to a
+directly registered `ConflictStrategyInterface` service that also implements
+`SideEffectFreeConflictStrategyInterface` (as the built-in `always` and `first_assignment` strategies
+do); its read-only `resolve()` then runs with `$dryRun = true` and the audit reports the known
+rejection reason. Every other strategy, `callback` included, is reported as requiring an apply-time
+check, because it is evaluated only when a move is actually requested.
 
 ### Add Twig Filters/Functions to Path Templates
 
@@ -109,11 +113,18 @@ To add filters or functions usable in `target_path` templates without replacing 
 Twig extension with `oronts_asset_pilot.twig_extension`:
 
 ```php
-class AssetPilotTwigExtension extends \Twig\Extension\AbstractExtension
+declare(strict_types=1);
+
+namespace App\AssetPilot\Twig;
+
+use Twig\Extension\AbstractExtension;
+use Twig\TwigFilter;
+
+class AssetPilotTwigExtension extends AbstractExtension
 {
     public function getFilters(): array
     {
-        return [new \Twig\TwigFilter('region_code', fn (string $v): string => substr($v, 0, 2))];
+        return [new TwigFilter('region_code', fn (string $v): string => substr($v, 0, 2))];
     }
 }
 ```
@@ -132,6 +143,10 @@ To add functions usable in rule `condition` expressions, tag a Symfony
 `ExpressionFunctionProviderInterface` with `oronts_asset_pilot.expression_function_provider`:
 
 ```php
+declare(strict_types=1);
+
+namespace App\AssetPilot\Expression;
+
 use Symfony\Component\ExpressionLanguage\ExpressionFunction;
 use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
 
@@ -165,6 +180,10 @@ domain variables (e.g. `productCode`, `region`) to `target_path` templates, impl
 `ContextProviderInterface` (auto-tagged via `oronts_asset_pilot.context_provider`):
 
 ```php
+declare(strict_types=1);
+
+namespace App\AssetPilot\Context;
+
 use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -304,7 +323,7 @@ class HashNamingStrategy implements NamingStrategyInterface
         // Must be deterministic: reviewed preview and apply both recompute this, so time()/random would break the plan.
         $ext = pathinfo($asset->getFilename(), PATHINFO_EXTENSION);
         $hash = substr(md5($asset->getId() . ':' . $asset->getFilename() . ':' . $targetPath), 0, 8);
-        return $hash . '.' . $ext;
+        return $ext !== '' ? $hash . '.' . $ext : $hash;
     }
 }
 ```
@@ -350,7 +369,7 @@ The bundle stays tenant-agnostic: "tenant" is a consumer concept, so you wire it
 existing hooks rather than configuring it in the bundle. Three seams compose into full
 multi-tenancy, none of which require changing the bundle:
 
-1. **Route per tenant** — a [path-template variable](#add-path-template-variables) exposes the
+1. **Route per tenant**: a [path-template variable](#add-path-template-variables) exposes the
    tenant to `target_path`, so assets land under a per-tenant folder:
 
    ```php
@@ -368,7 +387,7 @@ multi-tenancy, none of which require changing the bundle:
    target_path: '/Assets/{{ tenant }}/{{ locale|default("shared") }}/{{ object.getKey()|safe_key }}'
    ```
 
-2. **Match per tenant** — a rule `condition` reads the tenant straight off the object (conditions get
+2. **Match per tenant**: a rule `condition` reads the tenant straight off the object (conditions get
    `object`, `asset`, `rule`, `locale`); combine it with the `locales` key for language:
 
    ```yaml
@@ -383,7 +402,7 @@ multi-tenancy, none of which require changing the bundle:
    For richer logic, register a [condition function](#add-functions-to-rule-conditions) such as
    `tenant_of(object)`.
 
-3. **Generate rules per tenant** — when tenants are dynamic, emit one rule set per tenant from a
+3. **Generate rules per tenant**: when tenants are dynamic, emit one rule set per tenant from a
    [rule provider](#programmatic-rules) instead of hand-writing YAML.
 
 Because every tenant hook is a tagged consumer service, the generic bundle carries no
@@ -495,12 +514,16 @@ namespace App\AssetPilot;
 
 use Oronts\AssetPilotBundle\Notification\Notification;
 use Oronts\AssetPilotBundle\Notification\NotifierInterface;
+use Symfony\Component\Notifier\ChatterInterface;
+use Symfony\Component\Notifier\Message\ChatMessage;
 
 class SlackNotifier implements NotifierInterface
 {
+    public function __construct(private readonly ChatterInterface $chatter) {}
+
     public function notify(Notification $notification): void
     {
-        $this->slack->send($notification->severity, $notification->kind, $notification->context);
+        $this->chatter->send(new ChatMessage(sprintf('%s: %s', $notification->severity->name, $notification->kind)));
     }
 }
 ```
@@ -793,7 +816,7 @@ phase commits:
 |-------|----------|-------------|
 | `oronts_asset_pilot.duplicate_merge_committed` | `AssetPilotEvents::DUPLICATE_MERGE_COMMITTED` | A copy's reference repoint and disposition committed; carries run, checksum, canonical, strategy, disposition, repoint report, and item status |
 
-Integrity heal events (`AssetHealEvent`, carrying `asset`/`targetVersion`/`outcome`) — for vetoing or
+Integrity heal events (`AssetHealEvent`, carrying `asset`/`targetVersion`/`outcome`), for vetoing or
 observing a version-rollback self-heal:
 
 | Event | Constant | Description |
@@ -812,9 +835,19 @@ records relation references regardless of where they are nested.
 
 ## Known Limitations
 
-- **Classificationstore-held assets.** Assets referenced through a classification-store key are not
-  picked up by the organizer (they are uncommon; the dependency table still records them, so unused
-  detection stays correct). Add a `context_provider` or a custom extractor if you store assets there.
+- **Classificationstore-held assets (dependency safety).** Pimcore does not record classification-store
+  asset references as dependency-table edges (`Classificationstore` has no `resolveDependencies()`), so the
+  bundle traverses them itself: `AssetFieldExtractor::classificationStoreAssetIds()` reads each
+  classification-store field and `AssetDependencyTargetExtractor` merges those asset IDs into both the
+  dependency projection and the pre-save deletion fence. This traversal fails closed. When a key cannot be
+  resolved, a value has an unexpected shape, or a field read throws, the extraction is marked incomplete, the
+  source is kept `dirty` (never certified clean), and the usage verdict for any not-positively-referenced
+  asset is `Unknown`, so unused delete, quarantine purge, and duplicate hard-delete are blocked rather than
+  allowed on a partial read. The tradeoff is availability, not safety: a classification-store field that stays
+  unreadable keeps the projection dirty and blocks destructive cleanup globally until the data is corrected.
+  The `content_scan` guard still matches only asset paths in text columns, not the numeric ID a
+  classification-store field stores, so classification-store coverage comes from this traversal, not from
+  `content_scan`. A `context_provider` supplies template variables only and does not feed dependency safety.
 - **Content-reference scan storage formats.** The opt-in delete/move guard (`content_scan`)
   dynamically scans string, text, and JSON columns in Pimcore `properties`, `object_*`,
   `documents_*`, and `classificationstore_*` tables. Custom content stored outside those tables or

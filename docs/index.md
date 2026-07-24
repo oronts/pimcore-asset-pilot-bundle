@@ -3,8 +3,7 @@
 Documentation for the Pimcore 12 Asset Pilot bundle. For a project overview and quick start, see the
 [project README](../README.md). Release changes and deployment transitions are tracked in the
 [changelog](../CHANGELOG.md) and [upgrade guide](../UPGRADING.md). See also
-[Contributing](../CONTRIBUTING.md), the [Security policy](../SECURITY.md), and
-[third-party notices](../THIRD_PARTY_NOTICES.md).
+[Contributing](../CONTRIBUTING.md) and the [Security policy](../SECURITY.md).
 
 ## Getting started
 

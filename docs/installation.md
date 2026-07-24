@@ -43,9 +43,16 @@ Use Pimcore Studio's documented security configuration rather than copying a fir
 unrelated project. Asset Pilot's API is protected by the `pimcore_studio` firewall and will not be
 usable until Studio authentication is working.
 
+These docs describe the 2.0 line. 2.0 is the next release and is not yet published: `^2.0` will not
+resolve until `v2.0.0` is tagged on Packagist. Install the latest published stable, the 1.1 line:
+
 ```bash
-composer require oronts/asset-pilot-bundle:^2.0
+composer require oronts/asset-pilot-bundle:^1.1
 ```
+
+Once 2.0 is published, install it with `composer require oronts/asset-pilot-bundle:^2.0`. To evaluate
+the unreleased 2.0 line before then, require it from a VCS repository entry pointing at the release
+branch (`"oronts/asset-pilot-bundle": "dev-feature/v1.2.0"`).
 
 If Studio is already registered, add only Asset Pilot to `config/bundles.php`:
 
@@ -74,16 +81,21 @@ for contributors and custom distributions.
 
 ## Messenger
 
-Configure a durable transport, retries, and a failure transport:
+Configure a durable transport with a retry strategy and a dedicated failure transport. Scope
+`failure_transport` to the `asset_pilot` transport so only Asset Pilot's own exhausted messages are
+diverted. Do not set the global `framework.messenger.failure_transport`: that would redirect the
+failure destination for every unrelated transport in the host application. Bundle installation must
+leave the host's global failure policy untouched. This transport-scoped form is the same pattern
+Pimcore's own bundles use and the one the reference test application ships.
 
 ```yaml
 # config/packages/messenger.yaml
 framework:
     messenger:
-        failure_transport: asset_pilot_failed
         transports:
             asset_pilot:
                 dsn: '%env(MESSENGER_TRANSPORT_DSN)%/asset_pilot'
+                failure_transport: asset_pilot_failed
                 retry_strategy:
                     max_retries: 3
                     delay: 2000
@@ -106,8 +118,23 @@ bin/console messenger:consume asset_pilot --time-limit=3600 --memory-limit=256M
 bin/console messenger:consume pimcore_maintenance --time-limit=3600 --memory-limit=256M
 ```
 
+Also schedule Pimcore maintenance on a recurring interval. `pimcore:maintenance` is a command that must
+run from cron or a timer, not a daemon. It dispatches one message per maintenance task onto the
+`pimcore_maintenance` transport, so the `pimcore_maintenance` consumer above only executes tasks that
+this scheduler creates. Without it, an object save records a committed `pending_dispatch` organize run
+that is never published, and automatic organization silently does nothing:
+
+```cron
+* * * * * cd /var/www/html && flock -n /tmp/pimcore-maintenance.lock bin/console pimcore:maintenance
+```
+
+Use the interval your deployment needs and prevent overlapping runs (the `flock` above). To summarize the
+two roles: the `pimcore:maintenance` scheduler DISPATCHES the maintenance-task messages; the
+`pimcore_maintenance` consumer EXECUTES them.
+
 The first consumer performs queued organization and actor-aware durable observer delivery. The
-second executes Pimcore maintenance tasks, including database outbox polling, audit and
+second executes Pimcore maintenance tasks, including the organize dispatch relay (publishing committed
+`pending_dispatch` runs), durable-delivery outbox polling, audit and
 operation-run retention, operation-run item-lease reconciliation (failing items whose durable
 liveness lease expired and finalizing interrupted runs), quarantine purge, and storage snapshots. Configure graceful termination
 longer than the largest expected operation, restart consumers after deploys, alert on failed messages
@@ -118,7 +145,9 @@ use the broker's management tooling and structured application logs. Each worker
 heartbeat. `async.worker_heartbeat_max_age` controls when a missing or stale required consumer makes
 the bundle health result critical. Synchronous organization still requires the `asset_pilot`
 consumer because committed operations use that transport for durable rule actions and operation
-events. `pimcore_maintenance` polls the outbox, so broker outages and lost dispatches are retried.
+events. The scheduled `pimcore:maintenance` pass relays committed `pending_dispatch` organize runs and
+retries the durable-delivery outbox, so a rolled-back save leaves no message and broker outages or lost
+dispatches are retried.
 
 Retryable database, shared-cache, lock-storage, and asset-storage failures are propagated to
 Messenger and use the configured retry strategy. Permission denials, rule rejections, stale inputs,
@@ -169,8 +198,9 @@ the durable liveness lease for an in-flight operation-run item; keep it above bo
 `idempotency.lock_ttl` and the longest single-asset save, otherwise raising `lock_ttl` past the lease
 can trigger premature item-lease failures. The health endpoint intentionally reports a
 warning when cross-process cache visibility cannot be proven, the dependency projection is being
-built or contains dirty sources, or an operation run has stayed queued past
-`operation_runs.stale_queued_warning_seconds` (default 86400s), which signals a probably-lost broker
+built or contains dirty sources, or an operation run has stayed awaiting dispatch or queued past
+`operation_runs.stale_queued_warning_seconds` (default 86400s), which signals an unscheduled
+`pimcore:maintenance` relay or a probably-lost broker
 message that maintenance never auto-fails (an operator cancels and retries it, or verifies the
 consumers). It is critical when dependency tracking is disabled, the projection
 rebuild failed, or either required worker heartbeat is missing or stale.
@@ -183,6 +213,9 @@ build can set `ASSET_PILOT_ASSET_BASE` to a validated subpath or absolute CDN ba
 build`.
 
 ## Upgrade to 2.0
+
+This procedure applies once `v2.0.0` is tagged and published on Packagist; the `^2.0` constraint
+below cannot resolve before then.
 
 Before changing packages:
 

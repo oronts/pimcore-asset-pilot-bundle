@@ -46,11 +46,79 @@ and never signal truncation.
 | `POST` | `/duplicates/merge` | Admin | Preview/apply a merge with `{checksum, canonicalId?, strategy?, dryRun?, planToken?}`, or resume with `{runId}`. Apply uses a signed plan and returns durable run state. |
 | `GET` | `/folders/empty` | View | Empty asset folders (`?folder`, `?page`, `?limit`). Returns `{items[], page, limit, hasMore}` (no total; use `hasMore` for pagination) |
 | `GET` | `/storage/trends` | Admin | Global unused-storage series from the snapshots (`?type`, `?limit` max 365). Returns `{type, items[]}` — build snapshots with `asset-pilot:capture-storage-snapshot` |
-| `POST` | `/folders/empty/delete` | Operate | Delete empty folders (`{ids[]}`, max 200; each re-verified childless + permission-checked). Returns `{deleted, skipped, failed, errors}` |
+| `POST` | `/folders/empty/delete` | Operate | Preview or delete empty folders through a signed apply plan (`{ids[], dryRun?, planToken?}`, 1..200 ids; each re-verified childless + permission-checked). Preview returns `{deleted: 0, eligible, skipped, failed, errors, dryRun, planToken}`; apply returns `{deleted, skipped, failed, errors, dryRun, planToken: null}` |
 | `GET` | `/integrity` | View | Broken assets. Bounded non-folder scan (`?folder`, `?type`, `?extension`, `?page`, `?limit`) or check specific ids (`?ids=1,2,3`, max 50). Returns `{items[], scanned, broken, page, limit, hasNext}` |
 | `POST` | `/integrity/heal` | Operate | Preview or roll broken assets back through a signed apply plan (`{ids[], dryRun?, planToken?}`, max 50 ids). Returns `{dryRun, planToken, results[]}` |
 | `GET` | `/integrity/history` | Admin | Paginated completed reversible-heal records (`?page`, `?limit`, max 50). Results are asset-workspace scoped and include current `eligible`, `eligibilityReason`, and `reason` values. The lightweight read probe checks view/publish access, protection, exclusion rules, and pre-heal version availability without taking mutation locks or reading binaries. The undo endpoint repeats those checks under lock and verifies the live binary, so it can still reject a row whose state changed after listing. |
 | `POST` | `/integrity/undo` | Admin | Reverse the most recent heal of one asset (`{assetId}`); 404 when there is no reversible heal |
+
+#### Empty-folder delete preview and apply
+
+Deleting empty folders is a mandatory two-step reviewed-plan operation; a single request can never
+both preview and delete. Both steps post to `/folders/empty/delete` and carry the same `ids` array (1
+to 200 folder ids: an empty selection or one above the ceiling returns `400`). The caller needs the
+Operate permission, and every folder is additionally checked for its native `delete` permission.
+
+Preview first with `dryRun: true`:
+
+```json
+{
+    "ids": [1024, 1025],
+    "dryRun": true
+}
+```
+
+The preview classifies each folder without deleting anything and returns a signed, single-use
+`planToken`:
+
+```json
+{
+    "deleted": 0,
+    "eligible": 1,
+    "skipped": 1,
+    "failed": 0,
+    "errors": {},
+    "dryRun": true,
+    "planToken": "v1..."
+}
+```
+
+`deleted` is always `0` on a preview. `eligible` counts folders that would be deleted. `skipped`
+counts folders that are the asset root, no longer exist, or already regained children since the
+listing. `failed` counts folders the actor may not delete; each carries a message in the `errors`
+map keyed by folder id, for example `{"1024": "Not permitted to delete this folder"}`. If a folder
+changes while the preview is being built, no token is issued and the response is `409`.
+
+Apply the identical id set with `dryRun: false` and the returned token:
+
+```json
+{
+    "ids": [1024, 1025],
+    "dryRun": false,
+    "planToken": "v1..."
+}
+```
+
+Apply locks each folder, re-verifies it is still childless and still deletable, then reports the
+final counts. The apply response omits `eligible` and returns `planToken: null`:
+
+```json
+{
+    "deleted": 1,
+    "skipped": 1,
+    "failed": 0,
+    "errors": {},
+    "dryRun": false,
+    "planToken": null
+}
+```
+
+The token binds the actor, the sorted folder ids, the plan configuration, and each folder's
+fingerprint (existence, child state, modification time, and path). It is single-use and expires 300
+seconds (5 minutes, the `ApplyPlanService` default) after the preview. Applying without a token
+returns `400` (`A planToken from a fresh dry-run preview is required.`); a malformed token also
+returns `400`. An expired token, a token already claimed, or a folder whose fingerprint changed or
+that is locked by another operation after preview returns `409` and must be previewed again.
 
 #### Integrity heal preview and apply
 
@@ -152,7 +220,7 @@ references cannot be fully repointed are blocked and remain untouched.
 | `GET` | `/operations/status` | View | Operation statistics |
 | `GET` | `/operations/runs` | View | List the current actor's recent operation runs (`?limit`, default 20, max 100). Returns `{items[], limit}` without per-run item details |
 | `GET` | `/operations/runs/{id}` | View | Read an actor-scoped queued or completed operation run |
-| `POST` | `/operations/runs/{id}/cancel` | Operate | Cancel a queued or running run; queued runs become `cancelled` immediately |
+| `POST` | `/operations/runs/{id}/cancel` | Operate | Cancel a `pending_dispatch`, queued, or running run; pending and queued runs become `cancelled` immediately (a running run becomes `cancel_requested`). A listener-created automatic organize run starts in `pending_dispatch` until the maintenance relay publishes it |
 | `POST` | `/operations/runs/{id}/retry` | Operate | Retry blocked, failed, or cancelled items as a new actor-scoped run; object work retains immutable-plan fingerprints and duplicate merges resume their persisted phases. Skipped items are terminal and are not retried. |
 
 #### Organize preview and apply
@@ -330,7 +398,7 @@ plans return `409`. Both endpoints require the Asset Pilot Admin permission.
         "sourcePath": "/uploads/photo.jpg",
         "targetPath": "/Products/ART-123/Images/photo.jpg",
         "ruleName": "product_images",
-        "status": "completed"
+        "status": "pending"
     }],
     "evaluations": [{
         "assetId": 456,
@@ -365,6 +433,11 @@ plans return `409`. Both endpoints require the Asset Pilot Admin permission.
     }]
 }
 ```
+
+`/organize/explain` is View-only and never mutates. Its `operations[].status` is therefore always
+`pending` (a move this object would make) or `skipped` (a matched asset the move is skipped for:
+already at target, locked, in an excluded folder, strategy-rejected, or cancelled by a listener);
+a terminal status such as `completed` cannot appear on this endpoint.
 
 ### Rules
 
@@ -432,17 +505,34 @@ planToken, eligible}` where `<counter>` is `tagged` for bulk-tag and `updated` f
 
 #### Bulk tag request body
 
+Preview with `dryRun: true`:
+
 ```json
-// 1. Preview
 {
     "assetIds": [1, 2, 3],
     "tagIds": [10, 20],
     "replace": false,
     "dryRun": true
 }
-// -> {"tagged": 0, "failed": 0, "errors": {}, "observerWarnings": [], "dryRun": true, "planToken": "v1...", "eligible": 3}
+```
 
-// 2. Apply (same body, dryRun:false, plus the returned planToken)
+The preview returns the zeroed counter set, the `eligible` count, and a single-use `planToken`:
+
+```json
+{
+    "tagged": 0,
+    "failed": 0,
+    "errors": {},
+    "observerWarnings": [],
+    "dryRun": true,
+    "planToken": "v1...",
+    "eligible": 3
+}
+```
+
+Apply the same body with `dryRun: false` plus the returned `planToken`:
+
+```json
 {
     "assetIds": [1, 2, 3],
     "tagIds": [10, 20],
@@ -456,8 +546,9 @@ Set `replace: true` to remove all existing tags before assigning new ones.
 
 #### Bulk property request body
 
+Preview with `dryRun: true`:
+
 ```json
-// 1. Preview
 {
     "assetIds": [1, 2, 3],
     "name": "department",
@@ -465,9 +556,25 @@ Set `replace: true` to remove all existing tags before assigning new ones.
     "data": "Marketing",
     "dryRun": true
 }
-// -> {"updated": 0, "failed": 0, "errors": {}, "observerWarnings": [], "dryRun": true, "planToken": "v1...", "eligible": 3}
+```
 
-// 2. Apply (same body, dryRun:false, plus the returned planToken)
+The preview returns the zeroed counter set, the `eligible` count, and a single-use `planToken`:
+
+```json
+{
+    "updated": 0,
+    "failed": 0,
+    "errors": {},
+    "observerWarnings": [],
+    "dryRun": true,
+    "planToken": "v1...",
+    "eligible": 3
+}
+```
+
+Apply the same body with `dryRun: false` plus the returned `planToken`:
+
+```json
 {
     "assetIds": [1, 2, 3],
     "name": "department",

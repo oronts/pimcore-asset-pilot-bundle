@@ -184,6 +184,16 @@ oronts_asset_pilot:
 
 ```php
 // src/AssetPilot/Strategy/ApprovalDecision.php
+declare(strict_types=1);
+
+namespace App\AssetPilot\Strategy;
+
+use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Strategy\CallbackDecisionInterface;
+use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
+
 class ApprovalDecision implements CallbackDecisionInterface
 {
     public function decide(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool

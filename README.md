@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong><code>oronts/asset-pilot-bundle</code> — intelligent rule-based asset organization for Pimcore 12</strong>
+  <strong><code>oronts/asset-pilot-bundle</code>: intelligent rule-based asset organization for Pimcore 12</strong>
 </p>
 
 <p align="center">
@@ -35,27 +35,27 @@ a mandatory recoverable operation journal, durable observer delivery, and a Stud
 
 ## Features
 
-- **Rule engine** — priority-ordered rules with class and field targeting, ExpressionLanguage
+- **Rule engine**: priority-ordered rules with class and field targeting, ExpressionLanguage
   conditions, and type/size/extension filters.
-- **Twig target paths** — full Twig templates with custom filters and functions, and per-locale paths
+- **Twig target paths**: full Twig templates with custom filters and functions, and per-locale paths
   for localized fields.
-- **Async processing** — Symfony Messenger, renewable locks, actor context, coalescing stale jobs,
+- **Async processing**: Symfony Messenger, renewable locks, actor context, coalescing stale jobs,
   and already-at-target checks protect the move pipeline across workers.
-- **Audit & revert** — completed and attempted operations carry source, target, duration, actor, and
+- **Audit & revert**: completed and attempted operations carry source, target, duration, actor, and
   trigger data in the mandatory audit journal; CSV export and guarded revert are built in.
-- **Recovery & durable delivery** — move/revert intent is journaled before mutation; stale operations
+- **Recovery & durable delivery**: move/revert intent is journaled before mutation; stale operations
   are safely classified without repeating the mutation, while rule actions and operation events use
   a database-backed outbox with retries, leases, dead-letter health, and exact actor restoration.
-- **Unused-asset cleanup** — confidence-scored detection with bulk delete or archive, signed
+- **Unused-asset cleanup**: confidence-scored detection with bulk delete or archive, signed
   preview/apply plans for REST mutations, and per-asset or per-folder protection.
-- **Dependency safety** — an indexed, revision-fenced projection returns explicit safe, referenced,
+- **Dependency safety**: an indexed, revision-fenced projection returns explicit safe, referenced,
   or unknown verdicts; incomplete bootstrap and dirty sources block destructive operations.
-- **Integrity healing** — bounded broken-binary scans, previewable version rollback, and a separate
+- **Integrity healing**: bounded broken-binary scans, previewable version rollback, and a separate
   admin history that exposes Undo only while the recorded heal remains safely reversible.
-- **Studio UI** — a tabbed React dashboard (Dashboard, Rules, Operations, Audit, Unused, Duplicates,
+- **Studio UI**: a tabbed React dashboard (Dashboard, Rules, Operations, Audit, Unused, Duplicates,
   Integrity, Quarantine, Storage, Empty Folders, Drift, Asset Management) mounted in Pimcore Studio
   via Module Federation.
-- **Built to extend** — documented service tags, replaceable aliases, and typed events cover the
+- **Built to extend**: documented service tags, replaceable aliases, and typed events cover the
   supported extension surfaces. See [Extending](docs/extending.md) and [Overriding](docs/overriding.md).
 
 ## Quick Start
@@ -63,6 +63,10 @@ a mandatory recoverable operation journal, durable observer delivery, and a Stud
 ```bash
 composer require oronts/asset-pilot-bundle
 ```
+
+The latest published stable is 1.1.x. The 2.0 feature set documented here is the next release and is
+not yet on Packagist, so `composer require oronts/asset-pilot-bundle` installs the current 1.1.x
+stable line until `v2.0.0` is tagged and published.
 
 Asset Pilot requires an installed Pimcore Studio. A bare Pimcore Classic skeleton must install and
 configure Generic Execution Engine, Generic Data Index, Studio Backend, and Studio UI first; see the
@@ -132,10 +136,10 @@ organization) are in [docs/scenarios.md](docs/scenarios.md).
 
 Everything lives in **[docs/](docs/index.md)**.
 
-- **Getting started** — [Installation](docs/installation.md) &middot; [Usage](docs/usage.md) &middot; [Configuration](docs/configuration.md) &middot; [Scenarios](docs/scenarios.md)
-- **Releases** — [Changelog](CHANGELOG.md) &middot; [Upgrade guide](UPGRADING.md)
-- **Reference** — [Reference](docs/reference.md) &middot; [Commands](docs/commands.md) &middot; [REST API](docs/rest-api.md) &middot; [Path Templates](docs/path-templates.md) &middot; [Conditions](docs/conditions.md) &middot; [Permissions](docs/permissions.md) &middot; [Studio UI](docs/studio-ui.md) &middot; [Architecture](docs/architecture.md)
-- **Extending & overriding** — [Developer Experience](docs/dx.md) &middot; [Extending](docs/extending.md) &middot; [Overriding](docs/overriding.md) &middot; [Testing](docs/testing.md)
+- **Getting started**: [Installation](docs/installation.md) &middot; [Usage](docs/usage.md) &middot; [Configuration](docs/configuration.md) &middot; [Scenarios](docs/scenarios.md)
+- **Releases**: [Changelog](CHANGELOG.md) &middot; [Upgrade guide](UPGRADING.md)
+- **Reference**: [Reference](docs/reference.md) &middot; [Commands](docs/commands.md) &middot; [REST API](docs/rest-api.md) &middot; [Path Templates](docs/path-templates.md) &middot; [Conditions](docs/conditions.md) &middot; [Permissions](docs/permissions.md) &middot; [Studio UI](docs/studio-ui.md) &middot; [Architecture](docs/architecture.md)
+- **Extending & overriding**: [Developer Experience](docs/dx.md) &middot; [Extending](docs/extending.md) &middot; [Overriding](docs/overriding.md) &middot; [Testing](docs/testing.md)
 
 ## Requirements
 
@@ -158,9 +162,7 @@ quality gates, and what a mergeable change looks like.
 
 Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later). Pimcore and
 Studio dependencies have their own licenses. Review the licenses for your distribution and service
-model; AGPL section 13 applies when users interact remotely with a modified covered version. The
-prebuilt Studio dependency inventory and distributed license texts are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+model; AGPL section 13 applies when users interact remotely with a modified covered version.
 
 ---
 
