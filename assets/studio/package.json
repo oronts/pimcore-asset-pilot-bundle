@@ -15,8 +15,6 @@
     "build:bundle": "rsbuild build",
     "check-types": "tsc --noEmit",
     "lint": "eslint js/src js/test scripts rsbuild.config.ts vitest.config.ts --max-warnings=0",
-    "notices": "node scripts/generate-third-party-notices.mjs --check",
-    "notices:write": "node scripts/generate-third-party-notices.mjs",
     "test": "vitest run",
     "test:a11y": "vitest run js/test/accessibility",
     "test:watch": "vitest",

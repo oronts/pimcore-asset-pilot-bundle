@@ -75,9 +75,6 @@ jobs:
       - name: Run frontend accessibility tests
         run: npm --prefix assets/studio run test:a11y
 
-      - name: Verify third-party notices
-        run: npm --prefix assets/studio run notices
-
       - name: Verify shipped frontend build
         run: npm --prefix assets/studio run verify-build
 

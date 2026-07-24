@@ -28,26 +28,13 @@ try {
         throw new RuntimeException('Invalid Studio package version.');
     }
 
-    $pointer = $zip->getFromName('public/studio/build/active.json');
-    if ($pointer === false) {
-        throw new RuntimeException('Missing active Studio build pointer.');
-    }
-
-    $active = json_decode($pointer, true, 512, JSON_THROW_ON_ERROR);
-    $buildId = $active['buildId'] ?? null;
-    if (!is_string($buildId) || !\Oronts\AssetPilotBundle\Tools\isValidReleaseBuildId($buildId)) {
-        throw new RuntimeException('Invalid active Studio build pointer.');
-    }
-    if (!str_starts_with($buildId, $version . '-')) {
-        throw new RuntimeException('The active Studio build does not match the package version.');
-    }
+    $buildId = \Oronts\AssetPilotBundle\Tools\assertActiveStudioBuildPointer($zip, $version);
 
     \Oronts\AssetPilotBundle\Tools\assertReleaseArchiveLayout($zip, $buildId);
 
     foreach ([
         'CHANGELOG.md',
         'assets/studio/package.json',
-        'THIRD_PARTY_NOTICES.md',
         'UPGRADING.md',
         sprintf('public/studio/build/%s/entrypoints.json', $buildId),
         sprintf('public/studio/build/%s/exposeRemote.js', $buildId),

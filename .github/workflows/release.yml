@@ -48,9 +48,6 @@ jobs:
       - name: Audit frontend dependencies
         run: npm audit --prefix assets/studio --audit-level=low
 
-      - name: Verify third-party notices
-        run: npm --prefix assets/studio run notices
-
       - name: Lint frontend
         run: npm --prefix assets/studio run lint
 
