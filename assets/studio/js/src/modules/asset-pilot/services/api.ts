@@ -229,35 +229,41 @@ export const assetPilotApi = {
       { signal },
     ),
   getUnusedStats: (signal?: AbortSignal) => request<UnusedAssetStats>('/unused-assets/stats', { signal }),
-  previewBulkDeleteAssets: (assetIds: number[]) =>
+  previewBulkDeleteAssets: (assetIds: number[], signal?: AbortSignal) =>
     request<PlannedBulkActionResult>('/unused-assets/bulk-delete', {
       method: 'POST',
       body: JSON.stringify({ assetIds, dryRun: true }),
+      signal,
     }),
-  applyBulkDeleteAssets: (assetIds: number[], planToken: string) =>
+  applyBulkDeleteAssets: (assetIds: number[], planToken: string, signal?: AbortSignal) =>
     request<PlannedBulkActionResult>('/unused-assets/bulk-delete', {
       method: 'POST',
       body: JSON.stringify({ assetIds, dryRun: false, planToken }),
+      signal,
     }),
-  previewBulkMoveAssets: (assetIds: number[], targetFolder: string) =>
+  previewBulkMoveAssets: (assetIds: number[], targetFolder: string, signal?: AbortSignal) =>
     request<PlannedBulkActionResult>('/unused-assets/bulk-move', {
       method: 'POST',
       body: JSON.stringify({ assetIds, targetFolder, dryRun: true }),
+      signal,
     }),
-  applyBulkMoveAssets: (assetIds: number[], targetFolder: string, planToken: string) =>
+  applyBulkMoveAssets: (assetIds: number[], targetFolder: string, planToken: string, signal?: AbortSignal) =>
     request<PlannedBulkActionResult>('/unused-assets/bulk-move', {
       method: 'POST',
       body: JSON.stringify({ assetIds, targetFolder, dryRun: false, planToken }),
+      signal,
     }),
-  previewBulkQuarantineAssets: (assetIds: number[]) =>
+  previewBulkQuarantineAssets: (assetIds: number[], signal?: AbortSignal) =>
     request<PlannedBulkActionResult>('/unused-assets/bulk-quarantine', {
       method: 'POST',
       body: JSON.stringify({ assetIds, dryRun: true }),
+      signal,
     }),
-  applyBulkQuarantineAssets: (assetIds: number[], planToken: string) =>
+  applyBulkQuarantineAssets: (assetIds: number[], planToken: string, signal?: AbortSignal) =>
     request<PlannedBulkActionResult>('/unused-assets/bulk-quarantine', {
       method: 'POST',
       body: JSON.stringify({ assetIds, dryRun: false, planToken }),
+      signal,
     }),
   exportUnused: (filters: UnusedAssetFilters = {}): void => {
     const query = buildQuery({

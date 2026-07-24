@@ -6,14 +6,12 @@ import { AssetPilotDashboard } from './components/asset-pilot-dashboard'
 
 export const AssetPilotModule: AbstractModule = {
   onInit: (): void => {
-    // Register widget first (before nav item references it)
     const widgetRegistryService = container.get<WidgetRegistry>(serviceIds.widgetManager)
     widgetRegistryService.registerWidget({
       name: 'asset-pilot-dashboard',
       component: AssetPilotDashboard
     })
 
-    // Register nav item
     const mainNavRegistryService = container.get<MainNavRegistry>(serviceIds.mainNavRegistry)
     mainNavRegistryService.registerMainNavItem({
       path: 'ExperienceEcommerce/Asset Pilot',

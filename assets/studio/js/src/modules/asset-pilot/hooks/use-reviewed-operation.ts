@@ -20,23 +20,35 @@ export interface ReviewedOperation<TPlan extends ReviewedPlanBase> {
   runId: string | null
   review: <R extends ReviewedPreview>(preview: (signal: AbortSignal) => Promise<R>, toPlan: (result: R) => TPlan, confirmImmediately?: boolean) => Promise<void>
   confirm: () => void
-  apply: <A extends { runId?: string | null }>(applyCall: (plan: TPlan & { planToken: string }, signal: AbortSignal) => Promise<A>, onApplied: (result: A, plan: TPlan) => void) => Promise<void>
+  apply: <A>(applyCall: (plan: TPlan & { planToken: string }, signal: AbortSignal) => Promise<A>, onApplied: (result: A, plan: TPlan) => void) => Promise<void>
   clear: () => void
   cancel: () => void
   setRunId: (id: string | null) => void
 }
 
+/** Preview validity check for the organize family, whose preview must carry an operations list. */
+export const requireOperations = (result: ReviewedPreview): boolean => result.operations != null
+
 /**
- * The shared preview -> signed-token -> apply lifecycle behind the reviewed operation forms (organize,
- * bulk organize, reorganize, replay). It owns running/confirming/reviewedPlan/runId, the latest-wins
- * guard on preview, plan-token validation, and 409 stale-plan handling, so each form supplies only its
- * own request and response adapters. Centralizing the security-sensitive apply ceremony keeps it from
- * drifting between forms.
+ * The shared preview -> signed-token -> apply lifecycle behind every reviewed operation flow (organize,
+ * bulk organize, reorganize, replay, and the unused-assets bulk actions). It owns
+ * running/confirming/reviewedPlan/runId, the latest-wins guard on preview, plan-token validation, and 409
+ * stale-plan handling, so each caller supplies only its own request and response adapters. Centralizing the
+ * security-sensitive apply ceremony keeps it from drifting between flows. `messageNamespace` selects the
+ * flow's `<ns>.preview-invalid` / `<ns>.plan-stale` toasts; `validatePreview` is its extra validity rule
+ * (organize flows pass `requireOperations`; the bulk preview has no operations list).
  */
 export function useReviewedOperation<TPlan extends ReviewedPlanBase>(
-  options: { fallbackErrorKey?: string } = {},
+  options: {
+    messageNamespace: string
+    fallbackErrorKey?: string
+    validatePreview?: (result: ReviewedPreview) => boolean
+  },
 ): ReviewedOperation<TPlan> {
   const fallbackErrorKey = options.fallbackErrorKey ?? 'asset-pilot.common.unknown-error'
+  const previewInvalidKey = `${options.messageNamespace}.preview-invalid`
+  const planStaleKey = `${options.messageNamespace}.plan-stale`
+  const validatePreview = options.validatePreview ?? ((): boolean => true)
   const { t } = useTranslation()
   const toast = useToast()
   const [running, setRunning] = useState(false)
@@ -76,8 +88,8 @@ export function useReviewedOperation<TPlan extends ReviewedPlanBase>(
     try {
       const result = await preview(controller.signal)
       if (controller.signal.aborted) return
-      if (result.dryRun !== true || result.operations == null || result.planToken == null || result.planToken === '') {
-        throw new Error(t('asset-pilot.operations.preview-invalid'))
+      if (result.dryRun !== true || result.planToken == null || result.planToken === '' || !validatePreview(result)) {
+        throw new Error(t(previewInvalidKey))
       }
       setReviewedPlan(toPlan(result))
       if (confirmImmediately) setConfirming(true)
@@ -92,7 +104,7 @@ export function useReviewedOperation<TPlan extends ReviewedPlanBase>(
 
   const confirm = (): void => setConfirming(true)
 
-  const apply = async <A extends { runId?: string | null }>(
+  const apply = async <A>(
     applyCall: (plan: TPlan & { planToken: string }, signal: AbortSignal) => Promise<A>,
     onApplied: (result: A, plan: TPlan) => void,
   ): Promise<void> => {
@@ -106,13 +118,14 @@ export function useReviewedOperation<TPlan extends ReviewedPlanBase>(
     try {
       const result = await applyCall(plan, controller.signal)
       if (controller.signal.aborted) return
-      if (result.runId != null) setRunId(result.runId)
+      const resultRunId = (result as { runId?: string | null }).runId
+      if (resultRunId != null) setRunId(resultRunId)
       onApplied(result, plan)
       setReviewedPlan(null)
     } catch (error) {
       if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
       setReviewedPlan(null)
-      if (error instanceof ApiError && error.status === 409) toast.warning(t('asset-pilot.operations.plan-stale'))
+      if (error instanceof ApiError && error.status === 409) toast.warning(t(planStaleKey))
       else toast.error(error instanceof Error ? error.message : t(fallbackErrorKey))
     } finally {
       if (!controller.signal.aborted) {

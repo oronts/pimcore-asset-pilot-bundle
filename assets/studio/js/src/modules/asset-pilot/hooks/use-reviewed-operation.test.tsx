@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../services/api'
-import { useReviewedOperation } from './use-reviewed-operation'
+import { requireOperations, useReviewedOperation } from './use-reviewed-operation'
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }))
 vi.mock('./use-toast', () => ({ useToast: () => toast }))
@@ -13,7 +13,7 @@ const validPreview = { dryRun: true, operations: [{ assetId: 1 }], planToken: 't
 
 describe('useReviewedOperation', () => {
   it('reviews a valid preview into a confirmed plan', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
 
     await act(async () => {
       await result.current.review(async () => validPreview, r => ({ planToken: r.planToken ?? null, folder: '/x' }))
@@ -25,7 +25,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('rejects a preview missing its plan token and surfaces an error without a plan', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
 
     await act(async () => {
       await result.current.review(async () => ({ dryRun: true, operations: [], planToken: '' }), r => ({ planToken: r.planToken ?? null, folder: '/x' }))
@@ -36,8 +36,19 @@ describe('useReviewedOperation', () => {
     expect(toast.error).toHaveBeenCalled()
   })
 
+  it('derives its messages from the namespace and applies the injected preview validity rule', async () => {
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.bulk', validatePreview: requireOperations }))
+
+    await act(async () => {
+      await result.current.review(async () => ({ dryRun: true, planToken: 'tok' }), r => ({ planToken: r.planToken ?? null, folder: '/x' }))
+    })
+
+    expect(result.current.reviewedPlan).toBeNull()
+    expect(toast.error).toHaveBeenCalledWith('asset-pilot.bulk.preview-invalid')
+  })
+
   it('defers confirmation when confirmImmediately is false, then confirm() opens it', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
 
     await act(async () => {
       await result.current.review(async () => validPreview, r => ({ planToken: r.planToken ?? null, folder: '/x' }), false)
@@ -50,7 +61,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('applies the reviewed plan, captures the run id, and clears the plan', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
     await act(async () => {
       await result.current.review(async () => validPreview, r => ({ planToken: r.planToken ?? null, folder: '/x' }))
     })
@@ -67,7 +78,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('maps a 409 apply into the stale-plan warning and clears the plan', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
     await act(async () => {
       await result.current.review(async () => validPreview, r => ({ planToken: r.planToken ?? null, folder: '/x' }))
     })
@@ -81,7 +92,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('latest-wins: a superseded review does not overwrite the newer plan', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
     let releaseSlow: (v: typeof validPreview) => void = () => {}
     const slow = new Promise<typeof validPreview>(resolve => { releaseSlow = resolve })
 
@@ -101,7 +112,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('passes an abort signal to the preview and apply callbacks', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
     let previewSignal: AbortSignal | null = null
     let applySignal: AbortSignal | null = null
 
@@ -117,7 +128,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('aborts the in-flight request when a newer review supersedes it', async () => {
-    const { result } = renderHook(() => useReviewedOperation<Plan>())
+    const { result } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
     let firstAborted = false
     let releaseSlow: (v: typeof validPreview) => void = () => {}
     const slow = new Promise<typeof validPreview>(resolve => { releaseSlow = resolve })
@@ -140,7 +151,7 @@ describe('useReviewedOperation', () => {
   })
 
   it('does not invoke onApplied after the component unmounts mid-apply', async () => {
-    const { result, unmount } = renderHook(() => useReviewedOperation<Plan>())
+    const { result, unmount } = renderHook(() => useReviewedOperation<Plan>({ messageNamespace: 'asset-pilot.operations' }))
     await act(async () => {
       await result.current.review(async () => validPreview, r => ({ planToken: r.planToken ?? null, folder: '/x' }), false)
     })
