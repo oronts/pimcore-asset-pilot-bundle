@@ -11,6 +11,7 @@ use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
 use Oronts\AssetPilotBundle\Model\HealResult;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -234,7 +235,7 @@ final class IntegrityHealFingerprintServiceTest extends TestCase
         array $versions,
         CompositeIntegrityChecker $checker,
         array $configuration = [],
-        string $lockProperty = 'asset_pilot_locked',
+        string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ): IntegrityHealFingerprintService {
         return new class ($checker, $configuration, $lockProperty, $asset, $versions) extends IntegrityHealFingerprintService {
             /** @param array<string, mixed> $configuration @param list<Version> $versions */

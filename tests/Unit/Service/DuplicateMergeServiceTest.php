@@ -14,6 +14,7 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
 use Oronts\AssetPilotBundle\Merge\ReferrerSnapshot;
@@ -59,8 +60,9 @@ class DuplicateMergeServiceTest extends TestCase
                 return $this->repoints;
             }
 
-            public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+            public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
             {
+                $copyId = $context->copyId();
                 $this->disposed?->append($copyId);
 
                 return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
@@ -332,6 +334,49 @@ class DuplicateMergeServiceTest extends TestCase
     }
 
     #[Test]
+    public function passesTheFencedExecutionContextToEveryStrategy(): void
+    {
+        $captured = new \ArrayObject();
+        $strategy = new class ('quarantine', $captured) implements DuplicateMergeStrategyInterface {
+            public function __construct(private readonly string $n, private readonly \ArrayObject $captured) {}
+
+            public function name(): string
+            {
+                return $this->n;
+            }
+
+            public function repointsReferences(): bool
+            {
+                return true;
+            }
+
+            public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
+            {
+                $context->heartbeat();
+                $this->captured->append($context);
+
+                return new CopyDisposition($context->copyId(), DispositionOutcome::Quarantined);
+            }
+        };
+        $repointer = $this->createMock(DuplicateReferenceRepointer::class);
+        $repointer->method('repoint')->willReturnCallback(static fn (int $from, int $to, bool $dry): RepointReport => new RepointReport($from, $to, 1, []));
+
+        $this->applyReviewed($this->service($repointer, [$strategy]), new DuplicateGroup('abc', 100, 2, [3, 9]));
+
+        self::assertCount(1, $captured);
+        $context = $captured[0];
+        self::assertInstanceOf(DuplicateMergeContextInterface::class, $context);
+        self::assertSame(9, $context->copyId());
+        self::assertSame(3, $context->canonicalId());
+        self::assertSame('asset:9', $context->itemKey());
+        self::assertMatchesRegularExpression(
+            '/^duplicate-merge:[^:]+:abc:9$/',
+            $context->idempotencyKey(),
+            'the idempotency key carries the run-scoped root-operation id, so an independent later merge of the same copy does not collide',
+        );
+    }
+
+    #[Test]
     public function firstCopyDispositionDoesNotInvalidateLaterReviewedCopies(): void
     {
         $paths = new \ArrayObject([
@@ -361,8 +406,9 @@ class DuplicateMergeServiceTest extends TestCase
                 return true;
             }
 
-            public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+            public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
             {
+                $copyId = $context->copyId();
                 $this->paths[$copyId] = '/quarantine/' . $copyId . '.jpg';
 
                 return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
@@ -534,8 +580,9 @@ class DuplicateMergeServiceTest extends TestCase
                 return true;
             }
 
-            public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+            public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
             {
+                $copyId = $context->copyId();
                 return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'storage failed');
             }
         };
@@ -629,8 +676,9 @@ class DuplicateMergeServiceTest extends TestCase
                 return true;
             }
 
-            public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+            public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
             {
+                $copyId = $context->copyId();
                 throw new \LogicException('Disposition must not repeat after recovery confirms it committed.');
             }
 
@@ -706,8 +754,9 @@ class DuplicateMergeServiceTest extends TestCase
                 return true;
             }
 
-            public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+            public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
             {
+                $copyId = $context->copyId();
                 throw new \LogicException('A committed disposition must never run again.');
             }
         };

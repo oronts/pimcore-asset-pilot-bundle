@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Oronts\AssetPilotBundle\Enum\ObserverAuditReconciliationStatus;
 use Oronts\AssetPilotBundle\Enum\OperationDeliveryOutcome;
 use Oronts\AssetPilotBundle\Enum\OperationDeliveryStatus;
 use Oronts\AssetPilotBundle\Enum\OperationKind;
@@ -208,12 +209,147 @@ final class OperationDeliveryProcessorTest extends TestCase
     }
 
     #[Test]
+    public function expiredFinalAttemptIsDeadLetteredWithoutRunningTheObserverAgain(): void
+    {
+        $delivered = false;
+        $observer = $this->observer('events', static function () use (&$delivered): void {
+            $delivered = true;
+        }, requiredPermission: null);
+        [$id, $registry] = $this->prepare($observer, 59, ActorContext::system());
+        $crashed = $this->store->claim($id, 'crashed-worker', 300);
+        self::assertNotNull($crashed);
+        $this->connection->update(
+            Installer::TABLE_OPERATION_DELIVERY,
+            ['locked_until' => '2000-01-01 00:00:00'],
+            ['id' => $id],
+        );
+        $journal = $this->createMock(OperationJournalInterface::class);
+        $journal->expects(self::once())
+            ->method('recordObserverFailure')
+            ->with(59, 'events')
+            ->willReturn(ObserverAuditReconciliationStatus::Recorded);
+
+        self::assertSame(
+            OperationDeliveryStatus::Dead,
+            $this->processor($registry, maxAttempts: 1, journal: $journal)->process($id),
+        );
+        self::assertFalse($delivered);
+        self::assertSame(1, (int) $this->row($id)['attempts']);
+    }
+
+    #[Test]
+    public function deadAuditReconciliationSurvivesFailureWithoutRepeatingTheObserver(): void
+    {
+        $deliveries = 0;
+        $observer = $this->observer('events', static function () use (&$deliveries): never {
+            ++$deliveries;
+            throw new \RuntimeException('observer failed');
+        }, requiredPermission: null);
+        [$id, $registry] = $this->prepare($observer, 61, ActorContext::system());
+        $reconciliations = 0;
+        $journal = $this->createMock(OperationJournalInterface::class);
+        $journal->expects(self::exactly(2))
+            ->method('recordObserverFailure')
+            ->with(61, 'events')
+            ->willReturnCallback(static function () use (&$reconciliations): ObserverAuditReconciliationStatus {
+                ++$reconciliations;
+                if ($reconciliations === 1) {
+                    throw new \RuntimeException('audit unavailable');
+                }
+
+                return ObserverAuditReconciliationStatus::Recorded;
+            });
+        $processor = $this->processor($registry, maxAttempts: 1, journal: $journal);
+
+        self::assertSame(OperationDeliveryStatus::Dead, $processor->process($id));
+        self::assertSame(1, $deliveries);
+        self::assertSame([], $this->store->due());
+        self::assertNull($this->row($id)['audit_reconciled_at']);
+
+        $this->connection->update(
+            Installer::TABLE_OPERATION_DELIVERY,
+            ['available_at' => '2000-01-01 00:00:00'],
+            ['id' => $id],
+        );
+        self::assertSame([$id], $this->store->due());
+
+        self::assertSame(OperationDeliveryStatus::Dead, $processor->process($id));
+        self::assertSame(1, $deliveries);
+        self::assertSame([], $this->store->due());
+        self::assertNotNull($this->row($id)['audit_reconciled_at']);
+    }
+
+    #[Test]
+    public function deliveredAuditReconciliationSurvivesFailureWithoutRepeatingTheObserver(): void
+    {
+        $deliveries = 0;
+        $observer = $this->observer('events', static function () use (&$deliveries): void {
+            ++$deliveries;
+        }, requiredPermission: null);
+        [$id, $registry] = $this->prepare($observer, 62, ActorContext::system());
+        $reconciliations = 0;
+        $journal = $this->createMock(OperationJournalInterface::class);
+        $journal->expects(self::exactly(2))
+            ->method('resolveObserverFailures')
+            ->with(62)
+            ->willReturnCallback(static function () use (&$reconciliations): ObserverAuditReconciliationStatus {
+                ++$reconciliations;
+                if ($reconciliations === 1) {
+                    throw new \RuntimeException('audit unavailable');
+                }
+
+                return ObserverAuditReconciliationStatus::Recorded;
+            });
+        $processor = $this->processor($registry, journal: $journal);
+
+        self::assertSame(OperationDeliveryStatus::Delivered, $processor->process($id));
+        self::assertSame(1, $deliveries);
+        self::assertSame([], $this->store->due());
+        self::assertNull($this->row($id)['audit_reconciled_at']);
+
+        $this->connection->update(
+            Installer::TABLE_OPERATION_DELIVERY,
+            ['available_at' => '2000-01-01 00:00:00'],
+            ['id' => $id],
+        );
+        self::assertSame([$id], $this->store->due());
+        self::assertSame(OperationDeliveryStatus::Delivered, $processor->process($id));
+        self::assertSame(1, $deliveries);
+        self::assertSame([], $this->store->due());
+        self::assertNotNull($this->row($id)['audit_reconciled_at']);
+    }
+
+    #[Test]
+    public function observerCanHeartbeatDuringLongRunningDelivery(): void
+    {
+        $observer = $this->observer(
+            'events',
+            static fn (DeliveryEnvelope $delivery) => $delivery->heartbeat(),
+            requiredPermission: null,
+        );
+        [$id, $registry] = $this->prepare($observer, 60, ActorContext::system());
+        $store = new class ($this->connection) extends OperationDeliveryStore {
+            public int $renewals = 0;
+
+            public function renewLease(DeliveryEnvelope $delivery, int $leaseSeconds): bool
+            {
+                ++$this->renewals;
+
+                return parent::renewLease($delivery, $leaseSeconds);
+            }
+        };
+
+        self::assertSame(OperationDeliveryStatus::Delivered, $this->processor($registry, deliveries: $store)->process($id));
+        self::assertSame(3, $store->renewals);
+    }
+
+    #[Test]
     public function successfulDeliveryReconcilesTheOperationWarning(): void
     {
         $observer = $this->observer('events', static function (): void {}, requiredPermission: null);
         [$id, $registry] = $this->prepare($observer, 58, ActorContext::system());
         $journal = $this->createMock(OperationJournalInterface::class);
-        $journal->expects(self::once())->method('resolveObserverFailures')->with(58)->willReturn(true);
+        $journal->expects(self::once())->method('resolveObserverFailures')->with(58)->willReturn(ObserverAuditReconciliationStatus::Recorded);
 
         self::assertSame(
             OperationDeliveryStatus::Delivered,
@@ -280,14 +416,21 @@ final class OperationDeliveryProcessorTest extends TestCase
         ?\DateTimeImmutable $now = null,
         bool $assetExists = true,
         ?OperationJournalInterface $journal = null,
+        ?OperationDeliveryStoreInterface $deliveries = null,
     ): OperationDeliveryProcessor {
+        if ($journal === null) {
+            $journal = $this->createMock(OperationJournalInterface::class);
+            $journal->method('recordObserverFailure')->willReturn(ObserverAuditReconciliationStatus::NotApplicable);
+            $journal->method('resolveObserverFailures')->willReturn(ObserverAuditReconciliationStatus::NotApplicable);
+        }
+
         return new class (
-            $this->store,
+            $deliveries ?? $this->store,
             $registry,
             $this->actors,
             $this->authorization,
             $this->loopGuard(),
-            $journal ?? $this->createMock(OperationJournalInterface::class),
+            $journal,
             new NullLogger(),
             $assetExists ? $this->asset : null,
             $now,

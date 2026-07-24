@@ -83,7 +83,7 @@ final class OperationRecoveryCoordinatorTest extends TestCase
         $resolved = $this->recoveryResult(OperationStatus::Completed, true);
         $recovery = $this->createMock(OperationRecoveryService::class);
         $recovery->method('preview')->willReturn([$preview]);
-        $recovery->expects(self::once())->method('recover')->with(100, [91])->willReturn([$resolved]);
+        $recovery->expects(self::once())->method('recover')->with(100, [91 => str_repeat('a', 64)])->willReturn([$resolved]);
         $plans = $this->createMock(ApplyPlanServiceInterface::class);
         $plans->expects(self::once())->method('claim')->with('signed', self::isInstanceOf(ApplyPlan::class))->willReturn(ApplyPlanStatus::Claimed);
 
@@ -112,7 +112,7 @@ final class OperationRecoveryCoordinatorTest extends TestCase
     {
         $recovery = $this->createMock(OperationRecoveryService::class);
         $recovery->method('preview')->willReturn([$this->recoveryResult(OperationStatus::Completed, false)]);
-        $recovery->method('recover')->willReturn([]);
+        $recovery->method('recover')->willThrowException(new \Oronts\AssetPilotBundle\Exception\StaleApplyPlanException('changed'));
         $plans = $this->createMock(ApplyPlanServiceInterface::class);
         $plans->method('claim')->willReturn(ApplyPlanStatus::Claimed);
 

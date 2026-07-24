@@ -19,7 +19,7 @@ class AssetProtectionTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $asset->method('hasProperty')->willReturn(false);
 
-        self::assertFalse(AssetProtection::isLocked($asset, 'asset_pilot_locked'));
+        self::assertFalse(AssetProtection::isLocked($asset, AssetProtection::DEFAULT_LOCK_PROPERTY));
     }
 
     #[Test]
@@ -29,16 +29,16 @@ class AssetProtectionTest extends TestCase
         $asset->method('hasProperty')->willReturn(true);
         $asset->method('getProperty')->willReturn(false);
 
-        self::assertFalse(AssetProtection::isLocked($asset, 'asset_pilot_locked'));
+        self::assertFalse(AssetProtection::isLocked($asset, AssetProtection::DEFAULT_LOCK_PROPERTY));
     }
 
     #[Test]
     public function lockedWhenPropertyPresentAndTruthy(): void
     {
         $asset = $this->createMock(Asset::class);
-        $asset->method('hasProperty')->with('asset_pilot_locked')->willReturn(true);
-        $asset->method('getProperty')->with('asset_pilot_locked')->willReturn(true);
+        $asset->method('hasProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+        $asset->method('getProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
 
-        self::assertTrue(AssetProtection::isLocked($asset, 'asset_pilot_locked'));
+        self::assertTrue(AssetProtection::isLocked($asset, AssetProtection::DEFAULT_LOCK_PROPERTY));
     }
 }

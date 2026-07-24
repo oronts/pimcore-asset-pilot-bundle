@@ -159,6 +159,90 @@ final class OperationDeliveryStoreTest extends TestCase
     }
 
     #[Test]
+    public function unchangedLeaseUpdateStillConfirmsFencedOwnership(): void
+    {
+        $id = $this->store->prepare($this->handle(49), [
+            new PreparedDelivery('observer', 'success:0', OperationDeliveryOutcome::Success),
+        ])[0];
+        $this->store->activateForOutcome(49, OperationDeliveryOutcome::Success);
+        $claim = $this->store->claim($id, 'worker-one', 300);
+        self::assertNotNull($claim);
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->willReturn(0);
+        $connection->expects(self::once())->method('fetchOne')->willReturn(1);
+
+        self::assertTrue((new OperationDeliveryStore($connection))->renewLease($claim, 300));
+    }
+
+    #[Test]
+    public function leaseRenewalIsClaimTokenFencedAndCannotReviveAnExpiredLease(): void
+    {
+        $id = $this->store->prepare($this->handle(46), [
+            new PreparedDelivery('observer', 'success:0', OperationDeliveryOutcome::Success),
+        ])[0];
+        $this->store->activateForOutcome(46, OperationDeliveryOutcome::Success);
+        $claim = $this->store->claim($id, 'worker-one', 300);
+        self::assertNotNull($claim);
+        $initialExpiry = (string) $this->row($id)['locked_until'];
+
+        self::assertTrue($this->store->renewLease($claim, 600));
+        self::assertGreaterThan($initialExpiry, (string) $this->row($id)['locked_until']);
+        self::assertFalse($this->store->renewLease(new \Oronts\AssetPilotBundle\Model\DeliveryEnvelope(
+            $claim->deliveryId,
+            $claim->operationId,
+            $claim->deliveryKey,
+            $claim->observerId,
+            $claim->outcome,
+            $claim->intent,
+            $claim->payload,
+            $claim->attempt,
+            'worker-two',
+        ), 600));
+
+        $this->connection->update(
+            Installer::TABLE_OPERATION_DELIVERY,
+            ['locked_until' => '2000-01-01 00:00:00'],
+            ['id' => $id],
+        );
+        self::assertFalse($this->store->renewLease($claim, 600));
+        self::assertNotNull($this->store->claim($id, 'worker-two', 300));
+    }
+
+    #[Test]
+    public function exhaustedExpiredClaimIsDeadLetteredWithoutAnotherAttempt(): void
+    {
+        $id = $this->store->prepare($this->handle(47), [
+            new PreparedDelivery('observer', 'success:0', OperationDeliveryOutcome::Success),
+        ])[0];
+        $this->store->activateForOutcome(47, OperationDeliveryOutcome::Success);
+        $claim = $this->store->claim($id, 'crashed-worker', 300);
+        self::assertNotNull($claim);
+        $this->connection->update(
+            Installer::TABLE_OPERATION_DELIVERY,
+            ['locked_until' => '2000-01-01 00:00:00'],
+            ['id' => $id],
+        );
+
+        $dead = $this->store->deadLetterExhausted($id, 1, 'Lease expired.');
+        self::assertNotNull($dead);
+        self::assertSame(47, $dead->operationId);
+        self::assertSame(1, $dead->attempts);
+        self::assertSame(OperationDeliveryStatus::Dead->value, $this->row($id)['status']);
+        self::assertNull($this->store->deadLetterExhausted($id, 1, 'Lease expired.'));
+        self::assertFalse($this->store->markDelivered($claim));
+        self::assertSame([$id], $this->store->due());
+        self::assertSame([], $this->store->dead());
+        $audit = $this->store->awaitingAudit($id);
+        self::assertNotNull($audit);
+        self::assertSame(OperationDeliveryStatus::Dead, $audit->status);
+        self::assertTrue($this->store->markAuditReconciled($audit));
+        self::assertFalse($this->store->markAuditReconciled($audit));
+        self::assertSame([], $this->store->due());
+        self::assertSame([$id], array_map(static fn ($delivery): string => $delivery->deliveryId, $this->store->dead()));
+    }
+
+    #[Test]
     public function retryAndDeadAreTokenGuardedTerminalTransitions(): void
     {
         $id = $this->store->prepare($this->handle(44), [
@@ -223,10 +307,12 @@ final class OperationDeliveryStoreTest extends TestCase
         $table->addColumn('created_at', 'datetime');
         $table->addColumn('updated_at', 'datetime');
         $table->addColumn('delivered_at', 'datetime', ['notnull' => false]);
+        $table->addColumn('audit_reconciled_at', 'datetime', ['notnull' => false]);
         $table->setPrimaryKey(['id']);
-        $table->addUniqueIndex(['operation_id', 'delivery_key'], 'uniq_operation_delivery_key');
+        $table->addUniqueIndex(['operation_id', 'observer_id', 'delivery_key'], 'uniq_operation_delivery_key');
         $table->addIndex(['status', 'available_at'], 'idx_operation_delivery_due');
         $table->addIndex(['operation_id', 'status'], 'idx_operation_delivery_operation');
+        $table->addIndex(['status', 'audit_reconciled_at'], 'idx_operation_delivery_audit_reconcile');
         $connection->createSchemaManager()->createTable($table);
     }
 }

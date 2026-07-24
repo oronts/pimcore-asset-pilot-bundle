@@ -21,6 +21,7 @@ use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Oronts\AssetPilotBundle\Tests\Unit\Support\MutationSafetyDependencies;
@@ -78,7 +79,7 @@ class QuarantineServiceTest extends TestCase
         $dependencyVerifier = $this->createMock(DependencyUsageVerifierInterface::class);
         $dependencyVerifier->method('verdict')->willReturn(DependencyUsageVerdict::Safe);
         $connection = $this->createMock(Connection::class);
-        [$contentScanner, , $reviewedLocks, $authorization, $dependencyVerifier, $workspaceScope, $mutationFingerprints, , $deletionFence] = $this->mutationSafetyDependencies(
+        [$contentScanner, , $reviewedLocks, $authorization, $dependencyVerifier, $workspaceScope, $authorizedPage, $mutationFingerprints, , $deletionFence] = $this->mutationSafetyDependencies(
             $connection,
             contentScanner: $contentScanner,
             loopGuard: $loopGuard,
@@ -103,6 +104,7 @@ class QuarantineServiceTest extends TestCase
             $authorization,
             $dependencyVerifier,
             $workspaceScope,
+            $authorizedPage,
             $mutationFingerprints,
             $deletionFence,
         ) extends QuarantineService {
@@ -113,9 +115,9 @@ class QuarantineServiceTest extends TestCase
             public array $pending = [];
 
             /** @param array<int, ?Asset> $assetsById @param array<int, ?string> $originalPaths @param array<int, QuarantineStatus> $recordStatuses @param list<int> $expiredIds */
-            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private array $recordStatuses, private bool $allowCreate, private array $expiredIds, ContentUsageScanner $scanner, private array $assetsAtPath, ElementAuthorization $authorization, DependencyUsageVerifierInterface $dependencyVerifier, AssetWorkspaceQueryScope $workspaceScope, AssetMutationFingerprintService $mutationFingerprints, AssetDeletionFenceInterface $deletionFence)
+            public function __construct(Connection $c, LoopGuard $lg, UnusedAssetFinderInterface $f, $ed, $log, private array $assetsById, private array $originalPaths, private array $recordStatuses, private bool $allowCreate, private array $expiredIds, ContentUsageScanner $scanner, private array $assetsAtPath, ElementAuthorization $authorization, DependencyUsageVerifierInterface $dependencyVerifier, AssetWorkspaceQueryScope $workspaceScope, AuthorizedAssetPage $authorizedPage, AssetMutationFingerprintService $mutationFingerprints, AssetDeletionFenceInterface $deletionFence)
             {
-                parent::__construct($c, $lg, new ReviewedAssetLockCoordinator($lg), $f, $ed, $log, $scanner, $authorization, $dependencyVerifier, $workspaceScope, $mutationFingerprints, new LoopGuardedAssetSaver($lg), $deletionFence);
+                parent::__construct($c, $lg, new ReviewedAssetLockCoordinator($lg), $f, $ed, $log, $scanner, $authorization, $dependencyVerifier, $workspaceScope, $authorizedPage, $mutationFingerprints, new LoopGuardedAssetSaver($lg), $deletionFence);
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -191,10 +193,13 @@ class QuarantineServiceTest extends TestCase
                 return $this->assetsAtPath[$path] ?? null;
             }
 
-            protected function deleteQuarantineRecord(int $assetId): void
+            protected function deleteQuarantineRecord(int $assetId): int
             {
+                $existed = array_key_exists($assetId, $this->originalPaths) || array_key_exists($assetId, $this->recordStatuses);
                 unset($this->originalPaths[$assetId], $this->recordStatuses[$assetId]);
                 $this->removed[] = $assetId;
+
+                return $existed ? 1 : 0;
             }
         };
     }
@@ -533,6 +538,35 @@ class QuarantineServiceTest extends TestCase
     }
 
     #[Test]
+    public function recoverQuarantineFinalizesALingeringRecordWhoseAssetIsAlreadyBackAtItsOriginalPath(): void
+    {
+        // A prior restore committed the move but the record delete did not complete: the asset sits at
+        // its original path yet the row lingers. Reconciliation must finalize it idempotently.
+        $service = $this->service(
+            [5 => $this->asset('/Products/a.jpg')],
+            [5 => '/Products/a.jpg'],
+            recordStatuses: [5 => QuarantineStatus::Committed],
+        );
+
+        self::assertTrue($service->recoverQuarantine(5));
+        self::assertSame([5], $service->removed, 'the lingering record is deleted');
+        self::assertNull($service->findOriginalPathForTest(5));
+    }
+
+    #[Test]
+    public function restoreIsIdempotentAndFinalizesTheRecordWhenTheAssetWasAlreadyRestored(): void
+    {
+        $service = $this->service(
+            [5 => $this->asset('/Products/a.jpg')],
+            [5 => '/Products/a.jpg'],
+            recordStatuses: [5 => QuarantineStatus::Committed],
+        );
+
+        self::assertTrue($service->restore(5), 'a retry after a partial restore reports success');
+        self::assertSame([5], $service->removed);
+    }
+
+    #[Test]
     public function restoreThrowsNotPermittedWhenTheUserMayNotPublish(): void
     {
         $service = $this->service([5 => $this->asset('/Quarantine/a.jpg', allowed: false)], [5 => '/Products/a.jpg']);
@@ -720,7 +754,7 @@ class QuarantineServiceTest extends TestCase
         $connection->insert('asset_pilot_quarantine', ['asset_id' => 3, 'original_path' => '/Products/pending.jpg', 'quarantined_at' => '2024-01-01 10:00:00', 'status' => 'pending']);
 
         $loopGuard = $this->createMock(LoopGuard::class);
-        [$contentScanner, , $reviewedLocks, $authorization, $dependencyVerifier, $workspaceScope, $fingerprints, $assetSaver, $deletionFence] = $this->mutationSafetyDependencies($connection, loopGuard: $loopGuard);
+        [$contentScanner, , $reviewedLocks, $authorization, $dependencyVerifier, $workspaceScope, $authorizedPage, $fingerprints, $assetSaver, $deletionFence] = $this->mutationSafetyDependencies($connection, loopGuard: $loopGuard);
         $service = new QuarantineService(
             $connection,
             $loopGuard,
@@ -732,6 +766,7 @@ class QuarantineServiceTest extends TestCase
             $authorization,
             $dependencyVerifier,
             $workspaceScope,
+            $authorizedPage,
             $fingerprints,
             $assetSaver,
             $deletionFence,
@@ -775,14 +810,22 @@ class QuarantineServiceTest extends TestCase
         $actors->method('resolveUser')->willReturn($user);
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn(ActorContext::user(42));
+        $authorization->method('isAllowed')->willReturn(true);
         $workspaceScope = new AssetWorkspaceQueryScope($connection, $authorization, $actors);
         $loopGuard = $this->createMock(LoopGuard::class);
-        [$contentScanner, , $reviewedLocks, , $dependencyVerifier, , $fingerprints, $assetSaver, $deletionFence] = $this->mutationSafetyDependencies(
+        [$contentScanner, , $reviewedLocks, , $dependencyVerifier, , , $fingerprints, $assetSaver, $deletionFence] = $this->mutationSafetyDependencies(
             $connection,
             loopGuard: $loopGuard,
             authorization: $authorization,
             workspaceScope: $workspaceScope,
         );
+        $stubs = [];
+        foreach ([1, 2] as $id) {
+            $stub = $this->createStub(Asset::class);
+            $stub->method('getId')->willReturn($id);
+            $stubs[$id] = $stub;
+        }
+        $authorizedPage = new AuthorizedAssetPage($authorization, $workspaceScope, static fn (int $id): ?Asset => $stubs[$id] ?? null);
 
         $service = new QuarantineService(
             $connection,
@@ -795,6 +838,7 @@ class QuarantineServiceTest extends TestCase
             $authorization,
             $dependencyVerifier,
             $workspaceScope,
+            $authorizedPage,
             $fingerprints,
             $assetSaver,
             $deletionFence,
@@ -802,9 +846,10 @@ class QuarantineServiceTest extends TestCase
 
         $result = $service->listQuarantined(limit: 1);
 
-        self::assertSame(1, $result['total']);
-        self::assertSame(1, $result['pages']);
-        self::assertSame([1], array_column($result['items'], 'asset_id'));
+        self::assertNull($result['total'], 'a scoped user must not receive an SQL-count-derived quarantine total');
+        self::assertNull($result['pages']);
+        self::assertFalse($result['hasMore']);
+        self::assertSame([1], array_column($result['items'], 'asset_id'), 'asset 2 is workspace-denied, asset 1 remains');
     }
 
     #[Test]

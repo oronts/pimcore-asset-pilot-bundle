@@ -22,6 +22,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
 #[CoversClass(OperationDeliveryDispatcher::class)]
 final class OperationDeliveryDispatcherTest extends TestCase
@@ -32,22 +33,31 @@ final class OperationDeliveryDispatcherTest extends TestCase
         $store = $this->createMock(OperationDeliveryStoreInterface::class);
         $store->expects(self::once())->method('due')->with(25)->willReturn(['first', 'second']);
         $messages = [];
+        $stamps = [];
         $bus = $this->createMock(MessageBusInterface::class);
         $bus->expects(self::exactly(2))->method('dispatch')->willReturnCallback(
-            static function (OperationDeliveryMessage $message) use (&$messages): Envelope {
+            static function (OperationDeliveryMessage $message, array $messageStamps) use (&$messages, &$stamps): Envelope {
                 $messages[] = $message;
+                $stamps[] = $messageStamps;
 
                 return new Envelope($message);
             },
         );
 
-        $result = (new OperationDeliveryDispatcher($store, $bus, new NullLogger()))->dispatchDue(25);
+        $result = (new OperationDeliveryDispatcher($store, $bus, new NullLogger(), 7200.0))->dispatchDue(25);
 
         self::assertSame(['first', 'second'], array_map(
             static fn (OperationDeliveryMessage $message): string => $message->deliveryId,
             $messages,
         ));
         self::assertSame(['dispatched' => ['first', 'second'], 'failed' => []], $result);
+        self::assertCount(2, $stamps);
+        foreach ($stamps as $messageStamps) {
+            self::assertCount(1, $messageStamps);
+            self::assertInstanceOf(DeduplicateStamp::class, $messageStamps[0]);
+            self::assertSame(7200.0, $messageStamps[0]->getTtl());
+            self::assertTrue($messageStamps[0]->onlyDeduplicateInQueue());
+        }
     }
 
     #[Test]

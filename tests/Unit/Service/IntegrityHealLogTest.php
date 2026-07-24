@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Security\ActorContextProvider;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -74,19 +75,22 @@ class IntegrityHealLogTest extends TestCase
 
         $history = $this->log($connection, ActorContext::anonymous())->getReversibleHistory();
 
-        self::assertSame(0, $history['total']);
+        self::assertNull($history['total'], 'a non-admin actor never receives an SQL-count-derived total');
         self::assertSame([], $history['items']);
+        self::assertFalse($history['hasMore']);
     }
 
     private function log(Connection $connection, ?ActorContext $actor = null): IntegrityHealLog
     {
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn($actor ?? ActorContext::system());
+        $scope = new AssetWorkspaceQueryScope($connection, $authorization, $this->createMock(ActorContextProvider::class));
 
         return new IntegrityHealLog(
             $connection,
             new NullLogger(),
-            new AssetWorkspaceQueryScope($connection, $authorization, $this->createMock(ActorContextProvider::class)),
+            $scope,
+            new AuthorizedAssetPage($authorization, $scope),
         );
     }
 

@@ -11,11 +11,14 @@ use Oronts\AssetPilotBundle\DependencyProjectionSchema;
 use Oronts\AssetPilotBundle\Enum\DependencyProjectionState;
 use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Installer;
+use Oronts\AssetPilotBundle\Model\DependencyExtraction;
 use Oronts\AssetPilotBundle\Service\AssetDependencyTargetExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\DbalDependencyProjection;
 use Oronts\AssetPilotBundle\Service\DbalDependencyProjectionFreshness;
 use Oronts\AssetPilotBundle\Service\DependencyUsageVerifier;
 use Oronts\AssetPilotBundle\Service\LiveDependencyUsageScanner;
+use Oronts\AssetPilotBundle\Service\ProjectionMarkerConnectionInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -33,7 +36,7 @@ class DbalDependencyProjectionTest extends TestCase
     {
         $connection = $this->connection();
         $freshness = new DbalDependencyProjectionFreshness($connection);
-        $projection = new DbalDependencyProjection($connection, $freshness, new AssetDependencyTargetExtractor());
+        $projection = new DbalDependencyProjection($connection, $freshness, $this->targetExtractor());
         $verifier = new DependencyUsageVerifier(
             $projection,
             $freshness,
@@ -61,6 +64,79 @@ class DbalDependencyProjectionTest extends TestCase
         $unchanged = $freshness->beginRebuild();
         self::assertSame(DependencyProjectionState::Ready, $unchanged->state);
         self::assertSame($status->generation, $unchanged->generation);
+    }
+
+    #[Test]
+    public function anIncompleteTraversalKeepsTheSourceDirtyAndNeverYieldsASafeVerdict(): void
+    {
+        $connection = $this->connection();
+        $freshness = new DbalDependencyProjectionFreshness($connection);
+        $projection = new DbalDependencyProjection($connection, $freshness, $this->targetExtractor(new DependencyExtraction([], false)));
+        $verifier = new DependencyUsageVerifier($projection, $freshness, $this->createMock(LiveDependencyUsageScanner::class), new NullLogger(), false);
+        $source = $this->source(10, [77]);
+
+        self::assertTrue($projection->refresh($source, $projection->markDirty('object', 10)));
+
+        $freshness->beginRebuild(true);
+        self::assertTrue($projection->refresh($source, $projection->markDirty('object', 10)));
+        $freshness->advanceRebuild('complete', 0);
+        $freshness->completeRebuild();
+
+        // The recorded edge still reports a positive reference, but the incompletely-traversed source stays
+        // dirty, so a non-referenced asset is never certified Safe (contrast: the complete case returns Safe).
+        self::assertSame(DependencyUsageVerdict::Referenced, $verifier->verdict($this->asset(77)));
+        self::assertSame(DependencyUsageVerdict::Unknown, $verifier->verdict($this->asset(88)));
+    }
+
+    #[Test]
+    public function deferredPublicationNeverProducesAFalseSafeAndConvergesOnACommittedReconcile(): void
+    {
+        $connection = $this->connection();
+        $freshness = new DbalDependencyProjectionFreshness($connection);
+        $projection = new DbalDependencyProjection($connection, $freshness, $this->targetExtractor(), $this->deferredMarker($connection));
+        $verifier = new DependencyUsageVerifier($projection, $freshness, $this->createMock(LiveDependencyUsageScanner::class), new NullLogger(), false);
+
+        self::assertTrue($projection->refresh($this->source(1, [77]), $projection->markDirty('object', 1)));
+        $freshness->beginRebuild(true);
+        self::assertTrue($projection->refresh($this->source(1, [77]), $projection->markDirty('object', 1)));
+        $freshness->advanceRebuild('complete', 0);
+        $freshness->completeRebuild();
+        self::assertSame(DependencyUsageVerdict::Referenced, $verifier->verdict($this->asset(77)));
+
+        $projection->retainDirtyForCommit('object', 1, $projection->markDirty('object', 1));
+
+        self::assertSame(DependencyUsageVerdict::Referenced, $verifier->verdict($this->asset(77)));
+        self::assertSame(DependencyUsageVerdict::Unknown, $verifier->verdict($this->asset(88)));
+
+        self::assertTrue($projection->refresh($this->source(1, [77]), $projection->markDirty('object', 1)));
+        self::assertSame(DependencyUsageVerdict::Referenced, $verifier->verdict($this->asset(77)));
+        self::assertSame(DependencyUsageVerdict::Safe, $verifier->verdict($this->asset(88)));
+    }
+
+    #[Test]
+    public function deferredPublicationForANewElementReKeysThePendingRowAndKeepsTheGlobalFlagDirty(): void
+    {
+        $connection = $this->connection();
+        $freshness = new DbalDependencyProjectionFreshness($connection);
+        $projection = new DbalDependencyProjection($connection, $freshness, $this->targetExtractor(), $this->deferredMarker($connection));
+
+        $pending = $projection->markPending('object');
+        self::assertSame(1, (int) $connection->fetchOne('SELECT COUNT(*) FROM ' . Installer::TABLE_DEPENDENCY_SOURCE . " WHERE source_key LIKE 'pending:%'"));
+
+        $projection->retainDirtyForCommit('object', 42, $pending);
+
+        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM ' . Installer::TABLE_DEPENDENCY_SOURCE . " WHERE source_key LIKE 'pending:%'"));
+        self::assertSame('dirty', $connection->fetchOne('SELECT state FROM ' . Installer::TABLE_DEPENDENCY_SOURCE . ' WHERE source_key = ?', ['object:42']));
+        self::assertTrue($projection->referenceSnapshot(1)->dirty);
+    }
+
+    private function deferredMarker(Connection $connection): ProjectionMarkerConnectionInterface
+    {
+        $marker = $this->createMock(ProjectionMarkerConnectionInterface::class);
+        $marker->method('forMarker')->willReturn($connection);
+        $marker->method('publicationIsDeferred')->willReturn(true);
+
+        return $marker;
     }
 
     #[Test]
@@ -94,8 +170,8 @@ class DbalDependencyProjectionTest extends TestCase
             $secondConnection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => $path]);
             $firstFreshness = new DbalDependencyProjectionFreshness($firstConnection);
             $secondFreshness = new DbalDependencyProjectionFreshness($secondConnection);
-            $first = new DbalDependencyProjection($firstConnection, $firstFreshness, new AssetDependencyTargetExtractor());
-            $second = new DbalDependencyProjection($secondConnection, $secondFreshness, new AssetDependencyTargetExtractor());
+            $first = new DbalDependencyProjection($firstConnection, $firstFreshness, $this->targetExtractor());
+            $second = new DbalDependencyProjection($secondConnection, $secondFreshness, $this->targetExtractor());
             $source = $this->source(10, [77]);
 
             $staleToken = $first->markDirty('object', 10);
@@ -117,7 +193,7 @@ class DbalDependencyProjectionTest extends TestCase
     {
         $connection = $this->connection();
         $freshness = new DbalDependencyProjectionFreshness($connection);
-        $projection = new DbalDependencyProjection($connection, $freshness, new AssetDependencyTargetExtractor());
+        $projection = new DbalDependencyProjection($connection, $freshness, $this->targetExtractor());
         $pending = $projection->markPending('object');
 
         self::assertTrue($projection->refresh($this->source(42, [77]), $pending));
@@ -135,7 +211,7 @@ class DbalDependencyProjectionTest extends TestCase
     {
         $connection = $this->connection();
         $freshness = new DbalDependencyProjectionFreshness($connection);
-        $projection = new DbalDependencyProjection($connection, $freshness, new AssetDependencyTargetExtractor());
+        $projection = new DbalDependencyProjection($connection, $freshness, $this->targetExtractor());
 
         $empty = $projection->referenceSnapshot(77);
         self::assertFalse($empty->referenced);
@@ -186,5 +262,13 @@ class DbalDependencyProjectionTest extends TestCase
         $asset->method('getId')->willReturn($id);
 
         return $asset;
+    }
+
+    private function targetExtractor(?DependencyExtraction $classification = null): AssetDependencyTargetExtractor
+    {
+        $fieldExtractor = $this->createStub(AssetFieldExtractorInterface::class);
+        $fieldExtractor->method('classificationStoreAssetIds')->willReturn($classification ?? new DependencyExtraction([], true));
+
+        return new AssetDependencyTargetExtractor($fieldExtractor);
     }
 }

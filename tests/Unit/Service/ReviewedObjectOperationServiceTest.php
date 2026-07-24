@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
@@ -16,6 +17,8 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Security\ActorContextProvider;
+use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\ApplyPlanService;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
@@ -23,6 +26,8 @@ use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationService;
+use Oronts\AssetPilotBundle\Service\RunItemLease;
+use Oronts\AssetPilotBundle\Tests\Support\InMemoryApplyPlanClaimStore;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -30,13 +35,54 @@ use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
-use Symfony\Component\Cache\Adapter\ArrayAdapter;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\InMemoryStore;
 
 #[CoversClass(ReviewedObjectOperationService::class)]
 final class ReviewedObjectOperationServiceTest extends TestCase
 {
+    private ActorContextStore $actorStore;
+
+    #[Test]
+    public function reviewedExecutionRunsPreviewAndApplyUnderTheExplicitActorNotAmbient(): void
+    {
+        $actor = ActorContext::user(7);
+        $object = $this->object(42);
+        $operation = $this->operation(42, 10);
+        $seenDuringPreview = null;
+        $seenDuringApply = null;
+
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('dryRun')->willReturnCallback(function () use (&$seenDuringPreview, $operation): array {
+            $seenDuringPreview = $this->actorStore->current();
+
+            return [$operation];
+        });
+        $report = new BulkOrganizeReport([], [new BulkObjectResult(42, BulkObjectStatus::Succeeded, operationCount: 1)]);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(function () use (&$seenDuringApply, $report): BulkOrganizeReport {
+            $seenDuringApply = $this->actorStore->current();
+
+            return $report;
+        });
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->method('createRun')->willReturn('sync-run');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('start')->willReturn(true);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('startItem')->willReturn(true);
+        $runs->method('finish')->willReturn(OperationRunStatus::Completed);
+        $service = $this->service([$object], $organizer, $dispatcher, $runs);
+        $selector = ['assetIds' => [10], 'mode' => 'asset_ids'];
+
+        $preview = $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, true, false, actor: $actor);
+        self::assertInstanceOf(ActorContext::class, $seenDuringPreview);
+        self::assertSame(ActorType::User, $seenDuringPreview->type);
+        self::assertSame(7, $seenDuringPreview->userId);
+
+        $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, false, false, $preview->planToken, $actor);
+        self::assertInstanceOf(ActorContext::class, $seenDuringApply);
+        self::assertSame(ActorType::User, $seenDuringApply->type);
+        self::assertSame(7, $seenDuringApply->userId);
+    }
+
     #[Test]
     public function previewIssuesSignedPlanWithoutCreatingOrExecutingARun(): void
     {
@@ -53,7 +99,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $service = $this->service([$object], $organizer, $dispatcher, $runs);
 
         $result = $service->execute(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [42],
             ['folder' => '/Staging', 'limit' => 25],
             TriggerType::Manual,
@@ -87,7 +133,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $dispatcher->expects(self::never())->method('createRun');
         $service = $this->service([$object], $organizer, $dispatcher);
         $preview = $service->execute(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [42],
             ['folder' => '/Staging'],
             TriggerType::Manual,
@@ -99,7 +145,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
 
         $this->expectReviewedError(ReviewedSelectionError::StalePlan);
         $service->execute(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [42],
             ['folder' => '/Staging'],
             TriggerType::Manual,
@@ -120,7 +166,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $dispatcher->expects(self::never())->method('createRun');
         $service = $this->service([$object], $organizer, $dispatcher);
         $preview = $service->execute(
-            'replay',
+            OperationRunKind::Replay,
             [42],
             ['filters' => ['rule_name' => 'images'], 'limit' => 10],
             TriggerType::Manual,
@@ -131,7 +177,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
 
         $this->expectReviewedError(ReviewedSelectionError::StalePlan);
         $service->execute(
-            'replay',
+            OperationRunKind::Replay,
             [42],
             ['filters' => ['rule_name' => 'other'], 'limit' => 10],
             TriggerType::Manual,
@@ -156,7 +202,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $service = $this->service([$first, $second], $organizer, $dispatcher);
         $selector = ['folder' => '/Staging', 'limit' => 25];
         $preview = $service->execute(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [42, 43],
             $selector,
             TriggerType::Manual,
@@ -167,7 +213,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
 
         $this->expectReviewedError(ReviewedSelectionError::StalePlan);
         $service->execute(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [42],
             $selector,
             TriggerType::Manual,
@@ -189,7 +235,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
 
         $this->expectReviewedError(ReviewedSelectionError::StalePlan);
         $service->execute(
-            'organize',
+            OperationRunKind::Organize,
             [42],
             ['mode' => 'object_id', 'objectId' => 42],
             TriggerType::Manual,
@@ -211,7 +257,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $dispatcher->expects(self::once())->method('dispatchBulk')->willReturn('run-1');
         $service = $this->service([$object], $organizer, $dispatcher);
         $preview = $service->execute(
-            'replay',
+            OperationRunKind::Replay,
             [42],
             ['filters' => [], 'limit' => 10],
             TriggerType::Manual,
@@ -220,7 +266,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
             actor: ActorContext::system(),
         );
         $applyArguments = [
-            'replay',
+            OperationRunKind::Replay,
             [42],
             ['filters' => [], 'limit' => 10],
             TriggerType::Manual,
@@ -265,7 +311,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
             TriggerType::Manual,
             self::callback(static fn (ActorContext $actual): bool => $actual->type === ActorType::System),
             [42 => $fingerprint],
-            'replay',
+            OperationRunKind::Replay,
             $request,
         )->willReturn('replay-run');
         $dispatcher->expects(self::once())->method('dispatchBulk')->with(
@@ -277,10 +323,10 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         )->willReturn('replay-run');
         $service = $this->service([$object], $organizer, $dispatcher);
         $selector = ['filters' => ['rule_name' => 'images'], 'limit' => 10];
-        $preview = $service->execute('replay', [42], $selector, TriggerType::Manual, true, false, actor: $actor);
+        $preview = $service->execute(OperationRunKind::Replay, [42], $selector, TriggerType::Manual, true, false, actor: $actor);
 
         $result = $service->execute(
-            'replay',
+            OperationRunKind::Replay,
             [42],
             $selector,
             TriggerType::Manual,
@@ -313,9 +359,12 @@ final class ReviewedObjectOperationServiceTest extends TestCase
             self::isCallable(),
             self::isCallable(),
             [42 => $fingerprint],
-        )->willReturnCallback(static function (array $ids, TriggerType $trigger, mixed $progress, mixed $dispatchedAt, mixed $stale, callable $cancel, callable $before) use ($report): BulkOrganizeReport {
+            self::isCallable(),
+            self::isCallable(),
+        )->willReturnCallback(static function (array $ids, TriggerType $trigger, mixed $progress, mixed $dispatchedAt, mixed $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $afterObject) use ($report): BulkOrganizeReport {
             self::assertFalse($cancel());
             self::assertTrue($before(42));
+            $afterObject($report->objectResults[0]);
 
             return $report;
         });
@@ -325,21 +374,22 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $runs = $this->createMock(OperationRunStoreInterface::class);
         $runs->expects(self::once())->method('start')->with('sync-run')->willReturn(true);
         $runs->method('isCancellationRequested')->willReturn(false);
-        $runs->expects(self::once())->method('startItem')->with('sync-run', 'object:42')->willReturn(true);
-        $runs->expects(self::once())->method('completeItem')->with(
+        $runs->expects(self::once())->method('finish')->with('sync-run')->willReturn(OperationRunStatus::Completed);
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->expects(self::once())->method('start')->with('sync-run', 'object:42')->willReturn(true);
+        $lease->expects(self::once())->method('complete')->with(
             'sync-run',
             'object:42',
             OperationRunItemStatus::Completed,
             ['operationCount' => 1],
             null,
-        )->willReturn(true);
-        $runs->expects(self::once())->method('finish')->with('sync-run')->willReturn(OperationRunStatus::Completed);
-        $service = $this->service([$object], $organizer, $dispatcher, $runs);
+        );
+        $service = $this->service([$object], $organizer, $dispatcher, $runs, $lease);
         $selector = ['assetIds' => [10], 'mode' => 'asset_ids'];
-        $preview = $service->execute('reorganize', [42], $selector, TriggerType::Manual, true, false, actor: ActorContext::system());
+        $preview = $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, true, false, actor: ActorContext::system());
 
         $result = $service->execute(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [42],
             $selector,
             TriggerType::Manual,
@@ -364,14 +414,14 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         $service = $this->service([$object], $organizer);
 
         try {
-            $service->execute('replay', [42], [], TriggerType::Manual, false, true);
+            $service->execute(OperationRunKind::Replay, [42], [], TriggerType::Manual, false, true);
             self::fail('Missing token was accepted.');
         } catch (ReviewedSelectionException $e) {
             self::assertSame(ReviewedSelectionError::MissingPlanToken, $e->error);
         }
 
         $this->expectReviewedError(ReviewedSelectionError::MalformedPlanToken);
-        $service->execute('replay', [42], [], TriggerType::Manual, false, true, 'broken', ActorContext::system());
+        $service->execute(OperationRunKind::Replay, [42], [], TriggerType::Manual, false, true, 'broken', ActorContext::system());
     }
 
     /**
@@ -384,23 +434,30 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         ?AssetOrganizer $organizer = null,
         ?OrganizeDispatcher $dispatcher = null,
         ?OperationRunStoreInterface $runs = null,
+        ?RunItemLease $lease = null,
     ): ReviewedObjectOperationService {
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn(ActorContext::system());
         $authorization->method('isAllowed')->willReturn(true);
+        $provider = $this->createMock(ActorContextProvider::class);
+        $provider->method('current')->willReturn(ActorContext::system());
+        $this->actorStore = new ActorContextStore($provider);
         $objectMap = [];
         foreach ($objects as $object) {
             $objectMap[(int) $object->getId()] = $object;
         }
+        $claims = new InMemoryApplyPlanClaimStore();
         $service = $this->getMockBuilder(ReviewedObjectOperationService::class)
             ->setConstructorArgs([
                 $organizer ?? $this->createMock(AssetOrganizer::class),
                 $dispatcher ?? $this->createMock(OrganizeDispatcher::class),
                 $authorization,
+                $this->actorStore,
                 $runs ?? $this->createMock(OperationRunStoreInterface::class),
-                new ApplyPlanService('test-secret', new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+                new ApplyPlanService('test-secret', $claims),
                 new OrganizePlanFingerprint(),
                 new NullLogger(),
+                $lease ?? $this->createMock(RunItemLease::class),
                 ['rules' => ['product-assets']],
             ])
             ->onlyMethods(['loadObject'])

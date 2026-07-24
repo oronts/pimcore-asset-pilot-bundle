@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\RevertFailure;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\RevertException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -15,6 +16,7 @@ use Oronts\AssetPilotBundle\Model\OperationHandle;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
 use Oronts\AssetPilotBundle\Service\OperationJournalInterface;
 use Oronts\AssetPilotBundle\Service\OperationReverter;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -76,6 +78,17 @@ class OperationReverterTest extends TestCase
 
         self::assertSame(RevertFailure::PermissionDenied, $reason);
     }
+    #[Test]
+    public function rejectsAProtectedAsset(): void
+    {
+        $reason = $this->revertFailure(
+            $this->reverter($this->completedEntry(), $this->asset('/organized/a.png', allowed: true, locked: true)),
+            1,
+        );
+
+        self::assertSame(RevertFailure::AssetLocked, $reason);
+    }
+
 
     #[Test]
     public function revertsACompletedMoveLogsItAndFiresTheEvent(): void
@@ -86,8 +99,8 @@ class OperationReverterTest extends TestCase
         $logged = [];
         $dispatcher = new EventDispatcher();
         $reverted = [];
-        $dispatcher->addListener(AssetPilotEvents::REVERTED, static function () use (&$reverted): void {
-            $reverted[] = true;
+        $dispatcher->addListener(AssetPilotEvents::REVERTED, static function (AssetMutationEvent $event) use (&$reverted): void {
+            $reverted[] = $event->context;
         });
 
         $reverter = $this->reverter($this->completedEntry(), $asset, $dispatcher, $logged);
@@ -96,10 +109,12 @@ class OperationReverterTest extends TestCase
         self::assertSame('/organized/a.png', $result->fromPath);
         self::assertSame('/source/a.png', $result->toPath);
         self::assertCount(1, $logged);
+        self::assertSame('/organized/a.png', $logged[0]->sourcePath);
+        self::assertSame('/source/a.png', $logged[0]->targetPath);
         self::assertSame('revert:test_rule', $logged[0]->ruleName);
         self::assertSame(OperationStatus::Completed, $logged[0]->status);
         self::assertSame(42, $logged[0]->userId);
-        self::assertSame([true], $reverted);
+        self::assertSame([['from' => '/organized/a.png', 'to' => '/source/a.png']], $reverted);
     }
 
     #[Test]
@@ -124,7 +139,10 @@ class OperationReverterTest extends TestCase
         $journal = $this->createMock(OperationJournalInterface::class);
         $journal->expects(self::once())
             ->method('begin')
-            ->with(self::callback(static fn (OperationIntent $intent): bool => $intent->parentOperationId === 1))
+            ->with(self::callback(static fn (OperationIntent $intent): bool => $intent->parentOperationId === 1
+                && $intent->sourcePath === '/organized/a.png'
+                && $intent->targetPath === '/source/a.png',
+            ))
             ->willReturnCallback(static fn (OperationIntent $intent): OperationHandle => new OperationHandle(91, $intent));
         $journal->expects(self::once())
             ->method('complete')
@@ -188,13 +206,14 @@ class OperationReverterTest extends TestCase
         });
 
         $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(42);
         $asset->expects(self::once())->method('save')->willReturnCallback(function () use (&$calls, &$asset): Asset {
             $calls[] = 'save';
 
             return $asset;
         });
 
-        $reverter = new class ($this->createMock(AuditLoggerInterface::class), $this->createMock(OperationJournalInterface::class), $loopGuard, new EventDispatcher(), new NullLogger(), $this->authorization()) extends OperationReverter {
+        $reverter = new class ($this->createMock(AuditQueryInterface::class), $this->createMock(OperationJournalInterface::class), $loopGuard, new EventDispatcher(), new NullLogger(), $this->authorization(), new LoopGuardedAssetSaver($loopGuard)) extends OperationReverter {
             public function exposeSaveReverted(Asset $asset, int $assetId): void
             {
                 $this->saveReverted($asset, $assetId);
@@ -229,11 +248,14 @@ class OperationReverterTest extends TestCase
         ];
     }
 
-    private function asset(string $currentPath, bool $allowed): Asset
+    private function asset(string $currentPath, bool $allowed, bool $locked = false): Asset
     {
         $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(7);
         $asset->method('getRealFullPath')->willReturn($currentPath);
         $asset->method('isAllowed')->willReturn($allowed);
+        $asset->method('hasProperty')->willReturn($locked);
+        $asset->method('getProperty')->willReturn($locked);
 
         return $asset;
     }
@@ -247,20 +269,15 @@ class OperationReverterTest extends TestCase
         ?Asset $asset,
         ?EventDispatcher $dispatcher = null,
         ?array &$loggedRef = null,
-        ?AuditLoggerInterface $auditLoggerOverride = null,
+        ?AuditQueryInterface $auditLoggerOverride = null,
         ?OperationJournalInterface $journalOverride = null,
         OperationStatus $classification = OperationStatus::Completed,
         ?\Throwable $saveError = null,
     ): OperationReverter {
         $auditLogger = $auditLoggerOverride;
         if ($auditLogger === null) {
-            $auditLogger = $this->createMock(AuditLoggerInterface::class);
+            $auditLogger = $this->createMock(AuditQueryInterface::class);
             $auditLogger->method('findById')->willReturn($entry);
-            $auditLogger->method('log')->willReturnCallback(static function (MoveOperation $op) use (&$loggedRef): void {
-                if ($loggedRef !== null) {
-                    $loggedRef[] = $op;
-                }
-            });
         }
 
         $journal = $journalOverride ?? $this->createMock(OperationJournalInterface::class);
@@ -289,7 +306,7 @@ class OperationReverterTest extends TestCase
 
         return new class ($auditLogger, $journal, $loopGuard, $dispatcher ?? new EventDispatcher(), new NullLogger(), $this->authorization(), $asset, $folder, $classification, $saveError) extends OperationReverter {
             public function __construct(
-                AuditLoggerInterface $auditLogger,
+                AuditQueryInterface $auditLogger,
                 OperationJournalInterface $journal,
                 LoopGuard $loopGuard,
                 EventDispatcher $dispatcher,
@@ -300,7 +317,7 @@ class OperationReverterTest extends TestCase
                 private readonly OperationStatus $classification,
                 private readonly ?\Throwable $saveError,
             ) {
-                parent::__construct($auditLogger, $journal, $loopGuard, $dispatcher, $logger, $authorization);
+                parent::__construct($auditLogger, $journal, $loopGuard, $dispatcher, $logger, $authorization, new LoopGuardedAssetSaver($loopGuard));
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -330,7 +347,7 @@ class OperationReverterTest extends TestCase
                 }
             }
 
-            protected function classifyPersistedRevert(int $assetId, string $sourcePath, string $targetPath): OperationStatus
+            protected function classifyPersistedRevert(int $assetId, string $currentPath, string $originalPath): OperationStatus
             {
                 return $this->classification;
             }

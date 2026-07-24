@@ -12,14 +12,13 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Service\ApplyPlanService;
+use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\RulePreviewPlanService;
+use Oronts\AssetPilotBundle\Tests\Support\InMemoryApplyPlanClaimStore;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
-use Symfony\Component\Cache\Adapter\ArrayAdapter;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\InMemoryStore;
 
 #[CoversClass(RulePreviewPlanService::class)]
 final class RulePreviewPlanServiceTest extends TestCase
@@ -59,6 +58,14 @@ final class RulePreviewPlanServiceTest extends TestCase
         self::assertSame(
             RulePreviewPlanStatus::Stale,
             $service->verify($token, $rule, $this->object(901), $actor, $operations),
+        );
+        self::assertSame(
+            RulePreviewPlanStatus::Stale,
+            $service->verify($token, $rule, $this->object(900, '/changed/42'), $actor, $operations),
+        );
+        self::assertSame(
+            RulePreviewPlanStatus::Stale,
+            $service->verify($token, $rule, $this->object(900, '/products/42', 4), $actor, $operations),
         );
         self::assertSame(
             RulePreviewPlanStatus::Stale,
@@ -125,22 +132,29 @@ final class RulePreviewPlanServiceTest extends TestCase
 
     private function service(int &$now = 1_000, int $ttlSeconds = 300): RulePreviewPlanService
     {
+        $claims = new InMemoryApplyPlanClaimStore();
+
         return new RulePreviewPlanService(new ApplyPlanService(
             'test-rule-preview-secret',
-            new ArrayAdapter(),
-            new LockFactory(new InMemoryStore()),
+            $claims,
             ttlSeconds: $ttlSeconds,
             clock: static function () use (&$now): int {
                 return $now;
             },
-        ));
+        ), new OrganizePlanFingerprint());
     }
 
-    private function object(int $modifiedAt = 900): AbstractObject
-    {
+    private function object(
+        int $modifiedAt = 900,
+        string $fullPath = '/products/42',
+        int $versionCount = 3,
+    ): AbstractObject {
         $object = $this->createMock(AbstractObject::class);
         $object->method('getId')->willReturn(42);
         $object->method('getModificationDate')->willReturn($modifiedAt);
+        $object->method('getRealFullPath')->willReturn($fullPath);
+        $object->method('getType')->willReturn('object');
+        $object->method('getVersionCount')->willReturn($versionCount);
 
         return $object;
     }

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -22,7 +22,7 @@ final class FailureReplayServiceTest extends TestCase
             'rule_name' => 'images',
             'object_class' => 'Product',
         ];
-        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit = $this->createMock(AuditQueryInterface::class);
         $audit->expects(self::once())->method('getDistinctFailedObjects')->with($filters, 25)->willReturn([
             ['object_id' => 42],
         ]);
@@ -33,7 +33,7 @@ final class FailureReplayServiceTest extends TestCase
     #[Test]
     public function selectionUsesConfiguredDefaultLimit(): void
     {
-        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit = $this->createMock(AuditQueryInterface::class);
         $audit->expects(self::once())->method('getDistinctFailedObjects')->with([], 75)->willReturn([]);
 
         self::assertSame([], (new FailureReplayService($audit, 75))->selectObjects());
@@ -42,7 +42,7 @@ final class FailureReplayServiceTest extends TestCase
     #[Test]
     public function selectionNormalizesDistinctPositiveObjectIds(): void
     {
-        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit = $this->createMock(AuditQueryInterface::class);
         $audit->method('getDistinctFailedObjects')->willReturn([
             ['object_id' => '42'],
             ['object_id' => 42],

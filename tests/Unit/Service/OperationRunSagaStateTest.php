@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -34,7 +35,7 @@ final class OperationRunSagaStateTest extends TestCase
     public function runningItemCanResumeWithItsDurableState(): void
     {
         $store = $this->store();
-        $runId = $store->create('duplicate-merge', ActorContext::system(), [[
+        $runId = $store->create(OperationRunKind::DuplicateMerge, ActorContext::system(), [[
             'key' => 'asset:9',
             'type' => 'duplicate_copy',
             'id' => 9,
@@ -57,7 +58,7 @@ final class OperationRunSagaStateTest extends TestCase
     public function allBlockedItemsProduceBlockedRunAndRetryPreservesSagaState(): void
     {
         $store = $this->store();
-        $runId = $store->create('duplicate-merge', ActorContext::system(), [[
+        $runId = $store->create(OperationRunKind::DuplicateMerge, ActorContext::system(), [[
             'key' => 'asset:9',
             'type' => 'duplicate_copy',
             'id' => 9,

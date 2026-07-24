@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Oronts\AssetPilotBundle\Enum\HealOutcome;
 use Oronts\AssetPilotBundle\Enum\IntegrityStatus;
+use Oronts\AssetPilotBundle\Enum\NotificationSeverity;
 use Oronts\AssetPilotBundle\Enum\UndoHealOutcome;
 use Oronts\AssetPilotBundle\Enum\UndoHealReason;
 use Oronts\AssetPilotBundle\Event\AssetHealEvent;
@@ -15,13 +16,16 @@ use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
-use Oronts\AssetPilotBundle\Notification\NotificationDispatcher;
+use Oronts\AssetPilotBundle\Notification\Notification;
+use Oronts\AssetPilotBundle\Notification\NotificationDispatcherInterface;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -106,7 +110,7 @@ class VersionRollbackHealerTest extends TestCase
         string $onUnrecoverable = 'report',
         array $assetsById = [],
         array $versionsById = [],
-        ?NotificationDispatcher $notifier = null,
+        ?NotificationDispatcherInterface $notifier = null,
         string $liveBinary = '',
         bool $throwOnRestore = false,
         ?LoopGuard $loopGuard = null,
@@ -144,7 +148,7 @@ class VersionRollbackHealerTest extends TestCase
                 string $onUnrecoverable,
                 private readonly array $assetsById,
                 private readonly array $versionsById,
-                ?NotificationDispatcher $notifier,
+                ?NotificationDispatcherInterface $notifier,
                 private readonly string $liveBytes,
                 private readonly bool $throwOnRestore,
                 array $excludeFolders,
@@ -153,10 +157,12 @@ class VersionRollbackHealerTest extends TestCase
                 parent::__construct(
                     $checker,
                     $loopGuard,
+                    new ReviewedAssetLockCoordinator($loopGuard),
                     $dispatcher,
                     $healLog,
                     new NullLogger(),
                     $authorization,
+                    new LoopGuardedAssetSaver($loopGuard),
                     $quarantine,
                     $onUnrecoverable,
                     $notifier,
@@ -347,8 +353,12 @@ class VersionRollbackHealerTest extends TestCase
     #[Test]
     public function unrecoverableDispatchesANotification(): void
     {
-        $notifier = $this->createMock(NotificationDispatcher::class);
-        $notifier->expects(self::once())->method('dispatch');
+        $notifier = $this->createMock(NotificationDispatcherInterface::class);
+        $notifier->expects(self::once())->method('dispatch')->with(self::callback(static fn (Notification $notification): bool =>
+            $notification->kind === 'integrity.unrecoverable'
+            && $notification->severity === NotificationSeverity::Critical
+            && $notification->context === ['assetId' => 7, 'quarantined' => false],
+        ));
 
         $this->healer(
             $this->checker(IntegrityStatus::Broken, ['bad' => IntegrityStatus::Broken]),
@@ -366,7 +376,7 @@ class VersionRollbackHealerTest extends TestCase
         $healLog = $this->createMock(IntegrityHealLog::class);
         $healLog->method('latestStatus')->willReturn(IntegrityHealLog::STATUS_UNRECOVERABLE);
 
-        $notifier = $this->createMock(NotificationDispatcher::class);
+        $notifier = $this->createMock(NotificationDispatcherInterface::class);
         $notifier->expects(self::never())->method('dispatch');
 
         $this->healer(
@@ -741,6 +751,44 @@ class VersionRollbackHealerTest extends TestCase
     }
 
     #[Test]
+    public function eligibilityProbeDoesNotTakeTheMutationLockOrHashBinaries(): void
+    {
+        $store = new InMemoryStore();
+        $owner = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        $probe = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        self::assertTrue($owner->acquireAsset(7));
+
+        $healLog = $this->createMock(IntegrityHealLog::class);
+        $healLog->expects(self::never())->method('findUndoable');
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $healLog,
+            new \ArrayObject(),
+            binaryByVersionId: [2 => 'healed-bytes'],
+            assetsById: [7 => $this->asset()],
+            versionsById: [3 => $this->version(3), 2 => $this->version(2)],
+            liveBinary: 'different-live-bytes',
+            loopGuard: $probe,
+        )->assessUndoEligibility(7, 3);
+
+        self::assertSame(UndoHealOutcome::WouldReverse, $result->outcome);
+        self::assertTrue($result->dryRun);
+    }
+
+    #[Test]
+    public function eligibilityProbeReportsADeletedPreHealVersion(): void
+    {
+        $result = $this->healer(
+            $this->checker(IntegrityStatus::Broken),
+            $this->createMock(IntegrityHealLog::class),
+            new \ArrayObject(),
+            assetsById: [7 => $this->asset()],
+        )->assessUndoEligibility(7, 3);
+
+        self::assertSame(UndoHealReason::VersionMissing, $result->reasonCode);
+    }
+
+    #[Test]
     public function undoPreviewRunsTheFeasibilityChecksWithoutRestoring(): void
     {
         $healLog = $this->createMock(IntegrityHealLog::class);
@@ -905,7 +953,7 @@ class VersionRollbackHealerTest extends TestCase
         return new class ($this->checker(IntegrityStatus::Broken), $this->createMock(IntegrityHealLog::class), $loopGuard ?? new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), $this->authorization()) extends VersionRollbackHealer {
             public function __construct(CompositeIntegrityChecker $checker, IntegrityHealLog $healLog, LoopGuard $loopGuard, ElementAuthorization $authorization)
             {
-                parent::__construct($checker, $loopGuard, new EventDispatcher(), $healLog, new NullLogger(), $authorization);
+                parent::__construct($checker, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), new EventDispatcher(), $healLog, new NullLogger(), $authorization, new LoopGuardedAssetSaver($loopGuard));
             }
 
             public function callRestore(Asset $asset, Version $version): void

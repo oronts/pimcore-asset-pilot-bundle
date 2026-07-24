@@ -59,6 +59,23 @@ class LoopGuardTest extends TestCase
     }
 
     #[Test]
+    public function operationRunItemLeaseTokenIsMintedOnBeginStableAndClearedOnRelease(): void
+    {
+        self::assertNull($this->guard->operationRunItemToken('run-1', 'object:42'), 'no token before the item is begun');
+
+        self::assertTrue($this->guard->acquireOperationRunItem('run-1', 'object:42'));
+        $token = $this->guard->beginOperationRunItemLease('run-1', 'object:42');
+
+        self::assertNotSame('', $token);
+        self::assertSame($token, $this->guard->operationRunItemToken('run-1', 'object:42'), 'the same token is held for the item');
+        self::assertSame($token, $this->guard->beginOperationRunItemLease('run-1', 'object:42'), 'beginning again keeps the same token');
+        self::assertNotSame($token, $this->guard->beginOperationRunItemLease('run-1', 'object:43'), 'a different item gets its own token');
+
+        $this->guard->releaseOperationRunItem('run-1', 'object:42');
+        self::assertNull($this->guard->operationRunItemToken('run-1', 'object:42'), 'the token is cleared once the item lock is released');
+    }
+
+    #[Test]
     public function releasingALockYouDoNotOwnDoesNotFreeTheCurrentHolder(): void
     {
         $store = new InMemoryStore();

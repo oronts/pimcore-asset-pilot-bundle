@@ -47,13 +47,14 @@ class DuplicateDetectionServiceTest extends TestCase
         array $duplicateRows = [],
         array $idsByChecksum = [],
         ?array $visibleIds = null,
+        int $groupScanBudget = 5000,
     ): DuplicateDetectionService {
         $upserts ??= new \ArrayObject();
 
         $connection = (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor();
         [$authorization, $workspaceScope] = $this->security($connection, $visibleIds);
 
-        return new class ($idsToScan, $assetsById, $checksumById, $sizeById, $upserts, $duplicateRows, $idsByChecksum, $connection, $authorization, $workspaceScope, $visibleIds) extends DuplicateDetectionService {
+        return new class ($idsToScan, $assetsById, $checksumById, $sizeById, $upserts, $duplicateRows, $idsByChecksum, $connection, $authorization, $workspaceScope, $visibleIds, $groupScanBudget) extends DuplicateDetectionService {
             /**
              * @param list<int>          $idsToScan
              * @param array<int, ?Asset> $assetsById
@@ -75,12 +76,14 @@ class DuplicateDetectionServiceTest extends TestCase
                 ElementAuthorization $authorization,
                 AssetWorkspaceQueryScope $workspaceScope,
                 private readonly ?array $visibleIds,
+                int $groupScanBudget,
             ) {
                 parent::__construct(
                     $connection,
                     new NullLogger(),
                     $authorization,
                     $workspaceScope,
+                    $groupScanBudget,
                 );
             }
 
@@ -161,6 +164,104 @@ class DuplicateDetectionServiceTest extends TestCase
     }
 
     #[Test]
+    public function findDuplicatePageFillsAcrossHiddenGroupsAndFlagsAVisibleSurplus(): void
+    {
+        // Groups B and D have no natively-visible members, so the page must still be filled from the
+        // visible groups (A, C) and hasMore set only because a further visible group (E) exists.
+        $service = $this->service(
+            duplicateRows: [
+                ['checksum' => 'A', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'B', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'C', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'D', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'E', 'file_size' => 10, 'cnt' => 3],
+            ],
+            idsByChecksum: ['A' => [1, 2, 3], 'B' => [4, 5, 6], 'C' => [7, 8, 9], 'D' => [10, 11, 12], 'E' => [13, 14, 15]],
+            visibleIds: [1, 2, 3, 7, 8, 9, 13, 14, 15],
+        );
+
+        $result = $service->findDuplicatePage(1, 2, 2);
+
+        self::assertSame(['A', 'C'], array_map(static fn (DuplicateGroup $g): string => $g->checksum, $result['groups']));
+        self::assertTrue($result['hasMore'], 'a further visible group (E) exists past the page');
+    }
+
+    #[Test]
+    public function findDuplicatePageReportsNoMoreWhenVisibleGroupsAreExhausted(): void
+    {
+        $service = $this->service(
+            duplicateRows: [
+                ['checksum' => 'A', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'B', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'C', 'file_size' => 10, 'cnt' => 3],
+            ],
+            idsByChecksum: ['A' => [1, 2, 3], 'B' => [4, 5, 6], 'C' => [7, 8, 9]],
+            visibleIds: [1, 2, 3, 7, 8, 9],
+        );
+
+        $result = $service->findDuplicatePage(1, 2, 2);
+
+        self::assertSame(['A', 'C'], array_map(static fn (DuplicateGroup $g): string => $g->checksum, $result['groups']));
+        self::assertFalse($result['hasMore']);
+        self::assertFalse($result['truncated'], 'a genuinely exhausted group scan is a real end, not a budget truncation');
+    }
+
+    #[Test]
+    public function findDuplicatePageFlagsTruncatedWhenTheGroupScanBudgetIsExhausted(): void
+    {
+        $rows = array_map(
+            static fn (int $i): array => ['checksum' => 'H' . $i, 'file_size' => 10, 'cnt' => 3],
+            range(1, 600),
+        );
+        $service = $this->service(duplicateRows: $rows, idsByChecksum: [], visibleIds: [], groupScanBudget: 200);
+
+        $result = $service->findDuplicatePage(1, 2, 2);
+
+        self::assertSame([], $result['groups']);
+        self::assertFalse($result['hasMore']);
+        self::assertTrue($result['truncated'], 'hitting the exact group scan budget with the page unfilled is a truncation');
+    }
+
+    #[Test]
+    public function findDuplicatePageDoesNotFlagTruncatedWhenGroupsEndExactlyAtTheBudget(): void
+    {
+        $rows = array_map(
+            static fn (int $i): array => ['checksum' => 'H' . $i, 'file_size' => 10, 'cnt' => 3],
+            range(1, 1000),
+        );
+        $service = $this->service(duplicateRows: $rows, idsByChecksum: [], visibleIds: [], groupScanBudget: 1000);
+
+        $result = $service->findDuplicatePage(1, 40, 2);
+
+        self::assertSame([], $result['groups']);
+        self::assertFalse($result['hasMore']);
+        self::assertFalse($result['truncated'], 'a group scan that ends exactly at the budget is exhausted, not truncated');
+    }
+
+    #[Test]
+    public function iterateForExportStreamsEveryVisibleGroupAndDropsHiddenOnes(): void
+    {
+        $service = $this->service(
+            duplicateRows: [
+                ['checksum' => 'A', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'B', 'file_size' => 10, 'cnt' => 3],
+                ['checksum' => 'C', 'file_size' => 10, 'cnt' => 3],
+            ],
+            idsByChecksum: ['A' => [1, 2, 3], 'B' => [4, 5, 6], 'C' => [7, 8, 9]],
+            visibleIds: [1, 2, 3, 7, 8, 9],
+        );
+
+        $export = $service->iterateForExport(2);
+        $checksums = array_map(
+            static fn (DuplicateGroup $group): string => $group->checksum,
+            iterator_to_array($export, false),
+        );
+
+        self::assertSame(['A', 'C'], $checksums);
+        self::assertFalse($export->getReturn(), 'a fully-drained export is complete, not truncated');
+    }
+
+    #[Test]
     public function indexSkipsFoldersMissingAndUnhashableAssets(): void
     {
         $upserts = new \ArrayObject();
@@ -226,16 +327,29 @@ class DuplicateDetectionServiceTest extends TestCase
         $actor = ActorContext::user(7);
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn($actor);
+        $authorization->method('isAllowed')->willReturn(true);
         $actors = $this->createMock(ActorContextProvider::class);
         $actors->method('resolveUser')->with($actor)->willReturn(
             (new \Pimcore\Model\User())->setId(7)->setActive(true)->setAdmin(false)->setPermissions(['assets']),
         );
-        $service = new DuplicateDetectionService(
-            $connection,
-            new NullLogger(),
-            $authorization,
-            new AssetWorkspaceQueryScope($connection, $authorization, $actors),
-        );
+        $stubs = [];
+        foreach ([1, 2, 3, 7, 8] as $id) {
+            $stub = $this->createStub(Asset::class);
+            $stub->method('getId')->willReturn($id);
+            $stubs[$id] = $stub;
+        }
+        $service = new class ($connection, new NullLogger(), $authorization, new AssetWorkspaceQueryScope($connection, $authorization, $actors), $stubs) extends DuplicateDetectionService {
+            /** @param array<int, Asset> $stubs */
+            public function __construct(Connection $connection, NullLogger $logger, ElementAuthorization $authorization, AssetWorkspaceQueryScope $scope, private array $stubs)
+            {
+                parent::__construct($connection, $logger, $authorization, $scope);
+            }
+
+            protected function loadAsset(int $id): ?Asset
+            {
+                return $this->stubs[$id] ?? null;
+            }
+        };
 
         $groups = $service->findDuplicates();
 

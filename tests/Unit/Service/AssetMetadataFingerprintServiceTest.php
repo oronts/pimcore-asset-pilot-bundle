@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Oronts\AssetPilotBundle\Service\AssetMetadataFingerprintService;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -26,7 +27,9 @@ final class AssetMetadataFingerprintServiceTest extends TestCase
             public function __construct(
                 private readonly Asset $asset,
                 public array $tags,
-            ) {}
+            ) {
+                parent::__construct(AssetProtection::DEFAULT_LOCK_PROPERTY);
+            }
 
             protected function loadAsset(int $assetId): ?Asset
             {
@@ -63,7 +66,10 @@ final class AssetMetadataFingerprintServiceTest extends TestCase
         $asset = $this->asset();
         $asset->method('getProperty')->with('source', true)->willReturn($property);
         $service = new class ($asset) extends AssetMetadataFingerprintService {
-            public function __construct(private readonly Asset $asset) {}
+            public function __construct(private readonly Asset $asset)
+            {
+                parent::__construct(AssetProtection::DEFAULT_LOCK_PROPERTY);
+            }
 
             protected function loadAsset(int $assetId): ?Asset
             {
@@ -96,7 +102,10 @@ final class AssetMetadataFingerprintServiceTest extends TestCase
             return $modifiedAt;
         });
         $service = new class ($asset) extends AssetMetadataFingerprintService {
-            public function __construct(private readonly Asset $asset) {}
+            public function __construct(private readonly Asset $asset)
+            {
+                parent::__construct(AssetProtection::DEFAULT_LOCK_PROPERTY);
+            }
 
             protected function loadAsset(int $assetId): ?Asset
             {

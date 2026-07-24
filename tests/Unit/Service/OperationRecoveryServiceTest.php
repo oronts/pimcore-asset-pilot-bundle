@@ -59,7 +59,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover();
+        )->recover(100, $this->reviewed($operation, OperationStatus::Completed, 'The persisted move postcondition is satisfied.'));
 
         self::assertTrue($results[0]->journalUpdated);
         self::assertTrue($results[0]->isResolved());
@@ -81,7 +81,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::Failed, 'The persisted move did not commit.'))[0];
 
         self::assertSame(OperationStatus::Failed, $result->status);
         self::assertTrue($result->isResolved());
@@ -103,7 +103,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::RecoveryRequired, 'The persisted move state does not match a known postcondition.'))[0];
 
         self::assertSame(OperationStatus::RecoveryRequired, $result->status);
         self::assertTrue($result->journalUpdated);
@@ -126,7 +126,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::Completed, 'The persisted revert postcondition is satisfied.'))[0];
 
         self::assertSame(OperationKind::Revert, $result->kind);
         self::assertTrue($result->isResolved());
@@ -148,7 +148,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::Failed, 'The persisted revert did not commit.'))[0];
 
         self::assertSame(OperationStatus::Failed, $result->status);
         self::assertTrue($result->isResolved());
@@ -174,7 +174,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, ActorContext::user(77), false),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::RecoveryRequired, 'The initiating actor is no longer permitted to publish the operation asset.'))[0];
 
         self::assertSame(OperationStatus::RecoveryRequired, $result->status);
         self::assertFalse($result->isResolved());
@@ -192,11 +192,11 @@ final class OperationRecoveryServiceTest extends TestCase
         $loopGuard->expects(self::once())->method('acquireAsset')->with(7)->willReturn(false);
         $loopGuard->expects(self::never())->method('releaseAsset');
 
-        $result = $this->service($journal, $loopGuard, $authorization, null)->recover()[0];
-
-        self::assertSame(OperationStatus::RecoveryRequired, $result->status);
-        self::assertFalse($result->journalUpdated);
-        self::assertStringContainsString('busy', $result->message);
+        $this->expectException(\Oronts\AssetPilotBundle\Exception\StaleApplyPlanException::class);
+        $this->service($journal, $loopGuard, $authorization, null)->recover(
+            100,
+            $this->reviewed($operation, OperationStatus::RecoveryRequired, 'The operation asset is unavailable.'),
+        );
     }
 
     #[Test]
@@ -215,7 +215,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::RecoveryRequired, 'The persisted move state does not match a known postcondition.'))[0];
 
         self::assertSame(OperationStatus::RecoveryRequired, $result->status);
         self::assertFalse($result->isResolved());
@@ -234,7 +234,7 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($operation->intent->assetId),
             $this->authorization($asset, $operation->intent->actor, true),
             $asset,
-        )->recover()[0];
+        )->recover(100, $this->reviewed($operation, OperationStatus::Completed, 'The persisted move postcondition is satisfied.'))[0];
 
         self::assertSame(OperationStatus::Completed, $result->status);
         self::assertFalse($result->journalUpdated);
@@ -256,9 +256,47 @@ final class OperationRecoveryServiceTest extends TestCase
             $this->availableLock($reviewed->intent->assetId),
             $this->authorization($asset, $reviewed->intent->actor, true),
             $asset,
-        )->recover(100, [91]);
+        )->recover(100, [
+            91 => $this->fingerprint($reviewed, OperationStatus::Completed, 'The persisted move postcondition is satisfied.'),
+        ]);
 
         self::assertSame([91], array_column($results, 'operationId'));
+    }
+
+    #[Test]
+    public function reviewedRecoveryRejectsAChangedClassificationBeforeUpdatingTheJournal(): void
+    {
+        $operation = $this->operation(OperationKind::Move);
+        $asset = $this->asset('/source/a.jpg');
+        $journal = $this->journal([$operation]);
+        $journal->expects(self::never())->method('complete');
+
+        $service = $this->service(
+            $journal,
+            $this->availableLock($operation->intent->assetId, refresh: false),
+            $this->authorization($asset, $operation->intent->actor, true),
+            $asset,
+        );
+
+        $this->expectException(\Oronts\AssetPilotBundle\Exception\StaleApplyPlanException::class);
+        $service->recover(100, [
+            91 => $this->fingerprint($operation, OperationStatus::Completed, 'The persisted move postcondition is satisfied.'),
+        ]);
+    }
+
+    /** @return array<int, string> */
+    private function reviewed(OperationHandle $operation, OperationStatus $status, string $message): array
+    {
+        return [$operation->operationId => $this->fingerprint($operation, $status, $message)];
+    }
+
+    private function fingerprint(OperationHandle $operation, OperationStatus $status, string $message): string
+    {
+        return hash('sha256', json_encode([
+            'intent' => $operation->intent->toArray(),
+            'classification' => $status->value,
+            'message' => $message,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
     /** @param list<OperationHandle> $operations */

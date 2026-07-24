@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\EmptyFolderSweepService;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -69,7 +70,7 @@ class EmptyFolderSweepServiceTest extends TestCase
              */
             public function __construct(private readonly array $foldersById, private readonly \ArrayObject $deleted, private readonly array $rows, Connection $connection, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, $workspaceScope);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope);
             }
 
             protected function loadFolder(int $id): ?Asset\Folder
@@ -140,7 +141,7 @@ class EmptyFolderSweepServiceTest extends TestCase
         $service = new class ($connection, $folder, $deleted, $authorization, $loopGuard, $workspaceScope) extends EmptyFolderSweepService {
             public function __construct(Connection $connection, private readonly Asset\Folder $folder, private readonly \ArrayObject $deleted, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, $workspaceScope);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope);
             }
 
             protected function loadFolder(int $id): Asset\Folder

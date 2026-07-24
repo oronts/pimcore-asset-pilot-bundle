@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
-use Oronts\AssetPilotBundle\Service\DependencyUsageScannerInterface;
+use Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -73,12 +74,12 @@ final class AssetMutationFingerprintServiceTest extends TestCase
         $content = $this->createMock(ContentUsageScanner::class);
         $content->method('canVerify')->willReturn(true);
         $content->method('isReferencedInContent')->willReturn($contentReferenced);
-        $dependency = $this->createMock(DependencyUsageScannerInterface::class);
-        $dependency->method('isReferenced')->willReturn($liveReferenced);
+        $dependency = $this->createMock(DependencyUsageVerifierInterface::class);
+        $dependency->method('verdict')->willReturn($liveReferenced ? DependencyUsageVerdict::Referenced : DependencyUsageVerdict::Safe);
 
         return new class ($this->createMock(Connection::class), $content, $dependency, $asset, $dependencies) extends AssetMutationFingerprintService {
             /** @param list<array{sourcetype: string, sourceid: int}> $dependencies */
-            public function __construct(Connection $connection, ContentUsageScanner $content, DependencyUsageScannerInterface $dependency, private readonly Asset $asset, private readonly array $dependencies)
+            public function __construct(Connection $connection, ContentUsageScanner $content, DependencyUsageVerifierInterface $dependency, private readonly Asset $asset, private readonly array $dependencies)
             {
                 parent::__construct($connection, $content, $dependency);
             }

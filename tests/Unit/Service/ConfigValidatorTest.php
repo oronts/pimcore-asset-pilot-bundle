@@ -216,6 +216,7 @@ class ConfigValidatorTest extends TestCase
     public function validateCallbackExistsPasses(): void
     {
         $this->container->method('has')->with('app.my_callback')->willReturn(true);
+        $this->container->method('get')->with('app.my_callback')->willReturn(static fn (): bool => true);
 
         $rule = $this->createRule(strategy: MoveStrategy::Callback, callback: 'app.my_callback');
         $results = $this->validator->validate([$rule]);
@@ -224,6 +225,24 @@ class ConfigValidatorTest extends TestCase
         $cbResult = array_values($cbResults)[0];
 
         self::assertSame('pass', $cbResult->status);
+    }
+
+    #[Test]
+    public function validateExistingCallbackWithWrongTypeFails(): void
+    {
+        $this->container->method('has')->with('app.broken')->willReturn(true);
+        $this->container->method('get')->with('app.broken')->willReturn(new \stdClass());
+
+        $results = $this->validator->validate([
+            $this->createRule(strategy: MoveStrategy::Callback, callback: 'app.broken'),
+        ]);
+        $callback = array_values(array_filter(
+            $results,
+            static fn (ValidationResult $result): bool => $result->check === 'callback_service',
+        ))[0];
+
+        self::assertSame('fail', $callback->status);
+        self::assertStringContainsString('CallbackDecisionInterface', $callback->message);
     }
 
     #[Test]

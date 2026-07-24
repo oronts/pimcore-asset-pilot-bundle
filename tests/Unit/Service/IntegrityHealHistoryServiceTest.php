@@ -9,7 +9,7 @@ use Oronts\AssetPilotBundle\Enum\UndoHealReason;
 use Oronts\AssetPilotBundle\Model\UndoHealResult;
 use Oronts\AssetPilotBundle\Service\IntegrityHealHistoryService;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
-use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
+use Oronts\AssetPilotBundle\Service\UndoHealEligibilityProbeInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -32,13 +32,13 @@ class IntegrityHealHistoryServiceTest extends TestCase
             'page' => 1,
             'pages' => 1,
         ]);
-        $healer = $this->createMock(VersionRollbackHealer::class);
-        $healer->method('undoDetailed')->willReturnMap([
-            [10, true, new UndoHealResult(UndoHealOutcome::WouldReverse, dryRun: true)],
-            [40, true, new UndoHealResult(UndoHealOutcome::Skipped, 'Asset is locked.', true, UndoHealReason::AssetLocked)],
+        $probe = $this->createMock(UndoHealEligibilityProbeInterface::class);
+        $probe->expects(self::exactly(2))->method('assessUndoEligibility')->willReturnMap([
+            [10, 11, new UndoHealResult(UndoHealOutcome::WouldReverse, dryRun: true)],
+            [40, 41, new UndoHealResult(UndoHealOutcome::Skipped, 'Asset is locked.', true, UndoHealReason::AssetLocked)],
         ]);
 
-        $items = (new IntegrityHealHistoryService($log, $healer))->getPaginated()['items'];
+        $items = (new IntegrityHealHistoryService($log, $probe, new \Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter()))->getPaginated()['items'];
 
         self::assertTrue($items[0]['eligible']);
         self::assertNull($items[0]['eligibilityReason']);

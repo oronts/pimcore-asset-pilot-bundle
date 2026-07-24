@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service\Query;
 
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -17,7 +18,7 @@ class ConfidenceFilterTest extends TestCase
 
     private function build(ConfidenceLevel $level): array
     {
-        return ConfidenceFilter::build($level, 'asset_pilot_locked', 'asset_pilot_audit_log', self::NOW, 30, 90);
+        return ConfidenceFilter::build($level, AssetProtection::DEFAULT_LOCK_PROPERTY, 'asset_pilot_audit_log', self::NOW, 30, 90);
     }
 
     #[Test]
@@ -28,7 +29,7 @@ class ConfidenceFilterTest extends TestCase
         self::assertCount(1, $spec['conditions']);
         self::assertStringContainsString('EXISTS', $spec['conditions'][0]);
         self::assertStringNotContainsString('NOT EXISTS', $spec['conditions'][0]);
-        self::assertSame('asset_pilot_locked', $spec['params']['cf_lock_prop']);
+        self::assertSame(AssetProtection::DEFAULT_LOCK_PROPERTY, $spec['params']['cf_lock_prop']);
     }
 
     #[Test]

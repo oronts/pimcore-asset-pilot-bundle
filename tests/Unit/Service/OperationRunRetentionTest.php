@@ -50,6 +50,16 @@ final class OperationRunRetentionTest extends TestCase
     }
 
     #[Test]
+    public function retentionCutoffFallsBackToUtcWhenNoClockIsInjected(): void
+    {
+        $retention = new OperationRunRetention($this->connection, 30, 100);
+
+        $now = (new \ReflectionMethod(OperationRunRetention::class, 'now'))->invoke($retention);
+
+        self::assertSame('UTC', $now->getTimezone()->getName(), 'the retention cutoff must anchor to UTC to match UTC-persisted run timestamps');
+    }
+
+    #[Test]
     public function respectsTheConfiguredBatchLimit(): void
     {
         $this->insertRun('old-one', OperationRunStatus::Completed, '2026-01-01 00:00:00');

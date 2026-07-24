@@ -9,7 +9,9 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetMetadataFingerprintService;
 use Oronts\AssetPilotBundle\Service\AssetMetadataMutationService;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -29,11 +31,14 @@ final class AssetMetadataMutationServiceTest extends TestCase
     {
         $fingerprints = $this->createMock(AssetMetadataFingerprintService::class);
         $fingerprints->expects(self::never())->method('tagTargets');
+        $loopGuard = $this->createMock(LoopGuard::class);
         $service = new class (
-            $this->createMock(LoopGuard::class),
+            $loopGuard,
+            new ReviewedAssetLockCoordinator($loopGuard),
             $this->createMock(ElementAuthorization::class),
             $this->createMock(AssetPropertyService::class),
             $fingerprints,
+            AssetProtection::DEFAULT_LOCK_PROPERTY,
         ) extends AssetMetadataMutationService {
             protected function loadTag(int $tagId, bool $force = false): ?Tag
             {
@@ -87,7 +92,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly Asset $asset,
             ) {
-                parent::__construct($loopGuard, $authorization, $properties, $fingerprints);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -111,6 +116,40 @@ final class AssetMetadataMutationServiceTest extends TestCase
     }
 
     #[Test]
+    public function applyRejectsAProtectedAssetAtTheBackendAuthorityBoundary(): void
+    {
+        $loopGuard = new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()));
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(5);
+        $asset->method('hasProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+        $asset->method('getProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+        $asset->expects(self::never())->method('setProperty');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->with($asset, 'publish')->willReturn(true);
+        $properties = new AssetPropertyService($loopGuard, $authorization, new NullLogger(), new EventDispatcher());
+        $service = new class ($loopGuard, $authorization, $properties, $this->createMock(AssetMetadataFingerprintService::class), $asset) extends AssetMetadataMutationService {
+            public function __construct(
+                LoopGuard $loopGuard,
+                ElementAuthorization $authorization,
+                AssetPropertyService $properties,
+                AssetMetadataFingerprintService $fingerprints,
+                private readonly Asset $asset,
+            ) {
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
+            }
+
+            protected function loadAsset(int $assetId): ?Asset
+            {
+                return $assetId === 5 ? $this->asset : null;
+            }
+        };
+
+        $this->expectException(\Oronts\AssetPilotBundle\Exception\StaleApplyPlanException::class);
+        $this->expectExceptionMessage('Asset 5 is protected');
+        $service->applyProperty([5], 'source', 'text', 'catalog', ['asset:5' => 'fp']);
+    }
+
+    #[Test]
     public function plansBindSortedExactRequestsActorsAndMetadataTargets(): void
     {
         $actor = ActorContext::user(7);
@@ -123,11 +162,14 @@ final class AssetMetadataMutationServiceTest extends TestCase
             ->method('propertyTargets')
             ->with([1, 2], 'source')
             ->willReturn($propertyTargets);
+        $loopGuard = $this->createMock(LoopGuard::class);
         $service = new class (
-            $this->createMock(LoopGuard::class),
+            $loopGuard,
+            new ReviewedAssetLockCoordinator($loopGuard),
             $this->createMock(ElementAuthorization::class),
             $this->createMock(AssetPropertyService::class),
             $fingerprints,
+            AssetProtection::DEFAULT_LOCK_PROPERTY,
         ) extends AssetMetadataMutationService {
             protected function loadTag(int $tagId, bool $force = false): ?Tag
             {
@@ -199,7 +241,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly array $assets,
             ) {
-                parent::__construct($loopGuard, $authorization, $properties, $fingerprints);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -257,7 +299,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly Asset $asset,
             ) {
-                parent::__construct($loopGuard, $authorization, $properties, $fingerprints);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -308,7 +350,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                     private readonly string $scenario,
                     private readonly Asset $asset,
                 ) {
-                    parent::__construct($loopGuard, $authorization, $properties, $fingerprints);
+                    parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
                 }
 
                 protected function loadAsset(int $assetId): ?Asset

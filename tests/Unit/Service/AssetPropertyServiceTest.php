@@ -8,6 +8,7 @@ use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -50,7 +51,7 @@ class AssetPropertyServiceTest extends TestCase
     public function lockAssetUsesNativePropertySaveInsideLoopGuard(): void
     {
         [$asset, $loopGuard, $authorization] = $this->mutableAsset();
-        $asset->expects(self::once())->method('setProperty')->with('asset_pilot_locked', 'bool', true)->willReturnSelf();
+        $asset->expects(self::once())->method('setProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY, 'bool', true)->willReturnSelf();
         $asset->expects(self::once())->method('save');
         $authorization->expects(self::exactly(2))->method('isAllowed')->with($asset, 'publish')->willReturn(true);
         $loopGuard->expects(self::once())->method('markAssetProcessing')->with(5);
@@ -64,7 +65,7 @@ class AssetPropertyServiceTest extends TestCase
             $captured = $event;
         });
 
-        $this->service($asset, $loopGuard, $authorization, $dispatcher)->lockAsset(5, '/Products/a.jpg');
+        $this->service($asset, $loopGuard, $authorization, $dispatcher)->lockAsset(5);
 
         self::assertSame([5], $captured->assetIds);
     }
@@ -73,7 +74,7 @@ class AssetPropertyServiceTest extends TestCase
     public function unlockAssetUsesNativeRemovalAndSave(): void
     {
         [$asset, $loopGuard, $authorization] = $this->mutableAsset();
-        $asset->expects(self::once())->method('removeProperty')->with('asset_pilot_locked');
+        $asset->expects(self::once())->method('removeProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY);
         $asset->expects(self::once())->method('save');
 
         $dispatcher = new EventDispatcher();
@@ -95,7 +96,7 @@ class AssetPropertyServiceTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         $this->service($asset, $loopGuard, $authorization, new EventDispatcher())
-            ->setProperty(5, '/Products/a.jpg', 'safe', 'object', '1');
+            ->setProperty(5, 'safe', 'object', '1');
     }
 
     #[Test]
@@ -109,7 +110,7 @@ class AssetPropertyServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service($asset, $loopGuard, $authorization, new EventDispatcher())
-            ->setProperty(5, '/Products/a.jpg', 'safe', 'text', 'value');
+            ->setProperty(5, 'safe', 'text', 'value');
     }
     #[Test]
     public function observerFailuresDoNotFailCommittedPropertyMutations(): void
@@ -128,11 +129,11 @@ class AssetPropertyServiceTest extends TestCase
         [$asset, $loopGuard, $authorization] = $this->mutableAsset();
         $asset->expects(self::once())->method('setProperty')->willReturnSelf();
         $asset->expects(self::once())->method('save');
-        $lockWarnings = $this->service($asset, $loopGuard, $authorization, $dispatcher)->lockAsset(5, '/Products/a.jpg');
+        $lockWarnings = $this->service($asset, $loopGuard, $authorization, $dispatcher)->lockAsset(5);
         self::assertSame(['Asset-lock observer delivery failed.'], $lockWarnings);
 
         [$asset, $loopGuard, $authorization] = $this->mutableAsset();
-        $asset->expects(self::once())->method('removeProperty')->with('asset_pilot_locked');
+        $asset->expects(self::once())->method('removeProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY);
         $asset->expects(self::once())->method('save');
         $unlockWarnings = $this->service($asset, $loopGuard, $authorization, $dispatcher)->unlockAsset(5);
         self::assertSame(['Asset-unlock observer delivery failed.'], $unlockWarnings);

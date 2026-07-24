@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -39,10 +40,228 @@ final class OperationRunStoreTest extends TestCase
     }
 
     #[Test]
+    public function rootIdWalksTheRetryChainToItsOriginAndIsStableAcrossRetryOfRetry(): void
+    {
+        $item = [['key' => 'object:10', 'type' => 'data_object', 'id' => 10]];
+        $root = $this->store->create(OperationRunKind::Organize, ActorContext::user(7), $item);
+        $child = $this->store->create(OperationRunKind::Organize, ActorContext::user(7), $item, retryOf: $root);
+        $grandchild = $this->store->create(OperationRunKind::Organize, ActorContext::user(7), $item, retryOf: $child);
+
+        self::assertSame($root, $this->store->rootId($root));
+        self::assertSame($root, $this->store->rootId($child));
+        self::assertSame($root, $this->store->rootId($grandchild), 'retry-of-retry must resolve to the same root');
+        self::assertSame('unknown-run', $this->store->rootId('unknown-run'), 'a missing run roots to itself');
+    }
+
+    #[Test]
+    public function dueForDispatchReturnsOnlyPendingRunsAndMarkDispatchedIsIdempotent(): void
+    {
+        $actor = ActorContext::user(7);
+        $pending = $this->store->create(
+            OperationRunKind::Organize,
+            $actor,
+            [['key' => 'object:10', 'type' => 'data_object', 'id' => 10, 'fingerprint' => 'fp10', 'payload' => ['trigger' => 'object_save']]],
+            ['trigger' => 'object_save'],
+            null,
+            OperationRunStatus::PendingDispatch,
+        );
+        $this->store->create(OperationRunKind::Organize, $actor, [['key' => 'object:20', 'type' => 'data_object', 'id' => 20]]);
+
+        $due = $this->store->dueForDispatch(50);
+        self::assertCount(1, $due, 'only pending-dispatch runs are due; a Queued run is not');
+        self::assertSame($pending, $due[0]['id']);
+        self::assertSame('object_save', $due[0]['trigger']);
+        self::assertSame(7, $due[0]['actorUserId']);
+        self::assertSame([['id' => 10, 'fingerprint' => 'fp10']], $due[0]['targets']);
+
+        self::assertTrue($this->store->markDispatched($pending), 'the first mark owns the transition');
+        self::assertFalse($this->store->markDispatched($pending), 'a duplicate mark is a no-op');
+        self::assertSame([], $this->store->dueForDispatch(50), 'a dispatched run is no longer due');
+    }
+
+    #[Test]
+    public function cancellingAPendingDispatchRunTerminatesItImmediatelyAndStopsItBeingRelayed(): void
+    {
+        $actor = ActorContext::user(7);
+        $run = $this->store->create(
+            OperationRunKind::Organize,
+            $actor,
+            [['key' => 'object:10', 'type' => 'data_object', 'id' => 10]],
+            [],
+            null,
+            OperationRunStatus::PendingDispatch,
+        );
+
+        // A pending run has no worker to resolve a CancelRequested, so cancellation terminates it directly and
+        // it is never relayed.
+        self::assertTrue($this->store->requestCancellation($run, $actor));
+        self::assertSame(OperationRunStatus::Cancelled, $this->store->finish($run));
+        self::assertSame([], $this->store->dueForDispatch(50), 'a cancelled pending run is no longer due for dispatch');
+    }
+
+    #[Test]
+    public function resumeAcceptsAPendingDispatchRunSoAFastWorkerNeverStrandsItInThePublishWindow(): void
+    {
+        $run = $this->store->create(
+            OperationRunKind::Organize,
+            ActorContext::user(7),
+            [['key' => 'object:10', 'type' => 'data_object', 'id' => 10]],
+            [],
+            null,
+            OperationRunStatus::PendingDispatch,
+        );
+
+        // The relay publishes the message just before markDispatched; a fast worker that resumes the still
+        // pending run in that window must start it, and the relay's later markDispatched must then no-op.
+        self::assertTrue($this->store->resume($run), 'a fast worker must be able to start a still-pending run');
+        self::assertFalse($this->store->markDispatched($run), 'markDispatched is a no-op once the run is running');
+    }
+
+    #[Test]
+    public function reconcileExpiredItemLeasesFailsAnExpiredItemAndFinishesItsRunButLeavesALiveOneRunning(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+
+        $expired = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10, 'payload' => ['trigger' => 'api']],
+        ]);
+        $healthy = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:11', 'type' => 'data_object', 'id' => 11, 'payload' => ['trigger' => 'api']],
+        ]);
+
+        self::assertTrue($store->start($expired));
+        self::assertTrue($store->startItem($expired, 'object:10', 'token-expired'));
+        self::assertTrue($store->start($healthy));
+        self::assertTrue($store->startItem($healthy, 'object:11', 'token-healthy'));
+
+        // The expired item's worker died, so its lease elapsed; the healthy item is mid-flight with a live lease.
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET lease_expires_at = ? WHERE run_id = ?', ['2020-01-01 00:00:00', $expired]);
+
+        self::assertSame(1, $store->reconcileExpiredItemLeases(100));
+
+        self::assertSame(OperationRunItemStatus::Failed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$expired]));
+        self::assertNull($this->connection->fetchOne('SELECT claim_token FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$expired]), 'the expired lease is cleared');
+        self::assertSame(OperationRunStatus::Partial->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$expired]), 'the run terminalizes from its item outcomes');
+        self::assertSame(1, (int) $this->connection->fetchOne('SELECT failed_count FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$expired]), 'counts are refreshed');
+
+        self::assertSame(OperationRunItemStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$healthy]), 'a live-lease item keeps running');
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$healthy]));
+    }
+
+    #[Test]
+    public function reconcileExpiredItemLeasesLeavesALongRunningItemWithAFreshLeaseUntouched(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+        ]);
+        self::assertTrue($store->start($runId));
+        self::assertTrue($store->startItem($runId, 'object:10', 'token-live'));
+
+        // The item has processed for over an hour (old updated_at) but the worker keeps renewing its lease,
+        // so the lease is still in the future. The old age-based reconcile failed this legitimate work.
+        $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET updated_at = ?, lease_expires_at = ? WHERE run_id = ?',
+            ['2020-01-01 00:00:00', '2999-01-01 00:00:00', $runId],
+        );
+
+        self::assertSame(0, $store->reconcileExpiredItemLeases(100));
+        self::assertSame(OperationRunItemStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$runId]));
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$runId]));
+    }
+
+    #[Test]
+    public function reconcileExpiredItemLeasesDoesNotFailAQueuedBacklogRun(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+        ]);
+
+        // A queued message can wait in a broker backlog for over an hour before a worker claims it. Its item
+        // has no lease yet, so reconciliation must not terminalize it (the old age-based reconcile did).
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET updated_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $runId]);
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET updated_at = ? WHERE run_id = ?', ['2020-01-01 00:00:00', $runId]);
+
+        self::assertSame(0, $store->reconcileExpiredItemLeases(100));
+        self::assertSame(OperationRunStatus::Queued->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$runId]));
+        self::assertSame(OperationRunItemStatus::Queued->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$runId]));
+    }
+
+    #[Test]
+    public function aReclaimedItemLeaseFencesThePreviousWorkersRenewalAndCompletion(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+        ]);
+        self::assertTrue($store->start($runId));
+        self::assertTrue($store->startItem($runId, 'object:10', 'worker-one'));
+
+        // A redelivery hands the item to a second worker, which reclaims it under its own token.
+        self::assertTrue($store->resumeItem($runId, 'object:10', 'worker-two'));
+
+        // The original worker is now a zombie: it can neither renew nor complete the item.
+        self::assertFalse($store->renewItemLease($runId, 'object:10', 'worker-one'));
+        self::assertFalse($store->completeItem($runId, 'object:10', OperationRunItemStatus::Completed, token: 'worker-one'));
+        self::assertSame(OperationRunItemStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$runId]));
+
+        // The current owner controls the item.
+        self::assertTrue($store->renewItemLease($runId, 'object:10', 'worker-two'));
+        self::assertTrue($store->completeItem($runId, 'object:10', OperationRunItemStatus::Completed, token: 'worker-two'));
+        self::assertSame(OperationRunItemStatus::Completed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$runId]));
+    }
+
+    #[Test]
+    public function reconcileUnfinalizedRunsFinalizesARunWhoseItemsAreAllTerminalButWasNeverFinished(): void
+    {
+        $store = new OperationRunStore($this->connection);
+
+        $stranded = $store->create(OperationRunKind::Organize, ActorContext::user(7), [['key' => 'object:10', 'type' => 'data_object', 'id' => 10]]);
+        $active = $store->create(OperationRunKind::Organize, ActorContext::user(7), [['key' => 'object:11', 'type' => 'data_object', 'id' => 11]]);
+
+        // The stranded run's only item completed, but finish() was never called (a throw or a process restart
+        // between completeItem and finish leaves the run non-terminal with all-terminal items).
+        self::assertTrue($store->start($stranded));
+        self::assertTrue($store->startItem($stranded, 'object:10', 'token'));
+        self::assertTrue($store->completeItem($stranded, 'object:10', OperationRunItemStatus::Completed, token: 'token'));
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$stranded]), 'precondition: the run is stranded in Running');
+
+        // The active run is still processing (its item is running), so it must NOT be finalized.
+        self::assertTrue($store->start($active));
+        self::assertTrue($store->startItem($active, 'object:11', 'token'));
+
+        self::assertSame(1, $store->reconcileUnfinalizedRuns(100));
+
+        self::assertSame(OperationRunStatus::Completed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$stranded]), 'the stranded run is finalized from its item outcomes');
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$active]), 'a run with an in-flight item is left running');
+    }
+
+    #[Test]
+    public function countRunsQueuedLongerThanCountsAwaitingDispatchAndQueuedRuns(): void
+    {
+        $store = new OperationRunStore($this->connection);
+
+        $stale = $store->create(OperationRunKind::Organize, ActorContext::user(7), [['key' => 'object:10', 'type' => 'data_object', 'id' => 10]]);
+        $store->create(OperationRunKind::Organize, ActorContext::user(7), [['key' => 'object:11', 'type' => 'data_object', 'id' => 11]]);
+        $running = $store->create(OperationRunKind::Organize, ActorContext::user(7), [['key' => 'object:12', 'type' => 'data_object', 'id' => 12]]);
+        $pending = $store->create(OperationRunKind::Organize, ActorContext::user(7), [['key' => 'object:13', 'type' => 'data_object', 'id' => 13]], [], null, OperationRunStatus::PendingDispatch);
+
+        // The stale (queued), running, and pending-dispatch runs were created two hours ago; the second run
+        // just arrived. The running one started, so it is no longer queued even though it was created long ago.
+        $twoHoursAgo = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->modify('-2 hours')->format('Y-m-d H:i:s');
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET created_at = ? WHERE id IN (?, ?, ?)', [$twoHoursAgo, $stale, $running, $pending]);
+        self::assertTrue($store->start($running));
+
+        self::assertSame(2, $store->countRunsQueuedLongerThan(3600), 'the long-queued AND the long pending-dispatch runs count (2h old > 1h window)');
+        self::assertSame(0, $store->countRunsQueuedLongerThan(864000), 'the 2h-old runs are inside the 10-day window, so nothing counts');
+    }
+
+    #[Test]
     public function createPersistsRequestTargetsAndPayloads(): void
     {
         $runId = $this->store->create(
-            'organize',
+            OperationRunKind::Organize,
             ActorContext::user(7),
             [
                 ['key' => 'object:10', 'type' => 'data_object', 'id' => 10, 'fingerprint' => 'version:4', 'payload' => ['trigger' => 'api']],
@@ -53,7 +272,7 @@ final class OperationRunStoreTest extends TestCase
 
         self::assertMatchesRegularExpression('/^[a-f0-9]{32}$/D', $runId);
         $run = $this->requiredRun($runId, ActorContext::user(7));
-        self::assertSame('organize', $run['kind']);
+        self::assertSame(OperationRunKind::Organize->value, $run['kind']);
         self::assertSame(OperationRunStatus::Queued->value, $run['status']);
         self::assertSame(2, (int) $run['total_count']);
         self::assertSame(0, (int) $run['processed_count']);
@@ -69,7 +288,7 @@ final class OperationRunStoreTest extends TestCase
     public function invalidItemRollsBackTheEntireCreate(): void
     {
         try {
-            $this->store->create('organize', ActorContext::system(), [
+            $this->store->create(OperationRunKind::Organize, ActorContext::system(), [
                 ['key' => 'object:10', 'type' => 'data_object'],
                 ['key' => '', 'type' => 'data_object'],
             ]);
@@ -87,7 +306,7 @@ final class OperationRunStoreTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         $this->store->create(
-            'organize',
+            OperationRunKind::Organize,
             ActorContext::system(),
             [['key' => 'object:1', 'type' => 'data_object']],
             retryOf: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -130,7 +349,7 @@ final class OperationRunStoreTest extends TestCase
     #[Test]
     public function lifecycleTracksAttemptsResultsCountsAndTerminalFinish(): void
     {
-        $runId = $this->store->create('organize', ActorContext::system(), [
+        $runId = $this->store->create(OperationRunKind::Organize, ActorContext::system(), [
             ['key' => 'object:10', 'type' => 'data_object'],
             ['key' => 'object:11', 'type' => 'data_object'],
         ]);
@@ -165,7 +384,7 @@ final class OperationRunStoreTest extends TestCase
     #[Test]
     public function terminalFinishReconcilesPersistedCountersFromItems(): void
     {
-        $runId = $this->store->create('organize', ActorContext::system(), [
+        $runId = $this->store->create(OperationRunKind::Organize, ActorContext::system(), [
             ['key' => 'object:10', 'type' => 'data_object'],
             ['key' => 'object:11', 'type' => 'data_object'],
         ]);
@@ -222,7 +441,7 @@ final class OperationRunStoreTest extends TestCase
     #[Test]
     public function cancellationFinalizesEveryOpenItemAndRefreshesCounts(): void
     {
-        $runId = $this->store->create('organize', ActorContext::user(7), [
+        $runId = $this->store->create(OperationRunKind::Organize, ActorContext::user(7), [
             ['key' => 'object:10', 'type' => 'data_object', 'payload' => ['position' => 1]],
             ['key' => 'object:11', 'type' => 'data_object', 'payload' => ['position' => 2]],
             ['key' => 'object:12', 'type' => 'data_object', 'payload' => ['position' => 3]],
@@ -256,7 +475,7 @@ final class OperationRunStoreTest extends TestCase
     #[Test]
     public function cancellationWaitsForRunningBatchItemsBeforeTerminalizing(): void
     {
-        $runId = $this->store->create('organize', ActorContext::user(7), [
+        $runId = $this->store->create(OperationRunKind::Organize, ActorContext::user(7), [
             ['key' => 'object:10', 'type' => 'data_object'],
             ['key' => 'object:11', 'type' => 'data_object'],
         ]);
@@ -296,7 +515,7 @@ final class OperationRunStoreTest extends TestCase
     #[Test]
     public function failureFinalizesOpenItemsWithoutOverwritingCompletedOnes(): void
     {
-        $runId = $this->store->create('organize', ActorContext::system(), [
+        $runId = $this->store->create(OperationRunKind::Organize, ActorContext::system(), [
             ['key' => 'object:10', 'type' => 'data_object'],
             ['key' => 'object:11', 'type' => 'data_object'],
         ]);
@@ -323,7 +542,7 @@ final class OperationRunStoreTest extends TestCase
     #[Test]
     public function retryPreservesLineageRequestFingerprintsAndItemPayloads(): void
     {
-        $runId = $this->store->create('organize', ActorContext::user(7), [
+        $runId = $this->store->create(OperationRunKind::Organize, ActorContext::user(7), [
             ['key' => 'object:10', 'type' => 'data_object', 'id' => 10, 'fingerprint' => 'version:1', 'payload' => ['trigger' => 'api', 'position' => 1]],
             ['key' => 'object:11', 'type' => 'data_object', 'id' => 11, 'fingerprint' => 'version:2', 'payload' => ['trigger' => 'api', 'position' => 2]],
             ['key' => 'object:12', 'type' => 'data_object', 'id' => 12, 'fingerprint' => 'version:3', 'payload' => ['trigger' => 'api', 'position' => 3]],
@@ -355,6 +574,30 @@ final class OperationRunStoreTest extends TestCase
         self::assertSame(3, (int) $secondRetry['attempt']);
         self::assertSame($retryId, $secondRetry['retry_of']);
         self::assertSame($retry['items'][0]['payload'], $secondRetry['items'][0]['payload']);
+    }
+
+    #[Test]
+    public function retryCreatesAtMostOneDirectChild(): void
+    {
+        $runId = $this->createRun(ActorContext::user(7));
+        self::assertTrue($this->store->completeItem($runId, 'object:1', OperationRunItemStatus::Failed));
+        self::assertSame(OperationRunStatus::Partial, $this->store->finish($runId));
+
+        $retryId = $this->store->retry($runId, ActorContext::user(7));
+        self::assertNotNull($retryId);
+        self::assertNull($this->store->retry($runId, ActorContext::user(7)));
+        self::assertSame(1, (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE retry_of = ?',
+            [$runId],
+        ));
+
+        $this->expectException(\LogicException::class);
+        $this->store->create(
+            OperationRunKind::Organize,
+            ActorContext::user(7),
+            [['key' => 'object:1', 'type' => 'data_object', 'id' => 1]],
+            retryOf: $runId,
+        );
     }
 
     #[Test]
@@ -412,6 +655,17 @@ final class OperationRunStoreTest extends TestCase
         self::assertSame(['trigger' => 'api', 'position' => 1], $retry['items'][0]['payload']);
     }
 
+    #[Test]
+    public function retryRejectsAnUnknownPersistedKindWithoutCreatingAChildRun(): void
+    {
+        $runId = $this->createRun(ActorContext::user(7));
+        $this->store->fail($runId, 'The original run failed.');
+        $this->connection->update(Installer::TABLE_OPERATION_RUN, ['kind' => 'unsupported'], ['id' => $runId]);
+
+        self::assertNull($this->store->retry($runId, ActorContext::user(7)));
+        self::assertSame(1, (int) $this->connection->fetchOne('SELECT COUNT(*) FROM ' . Installer::TABLE_OPERATION_RUN));
+    }
+
     /** @param array<string, mixed> $request */
     private function createRun(
         ActorContext $actor,
@@ -419,7 +673,7 @@ final class OperationRunStoreTest extends TestCase
         string $key = 'object:1',
         array $payload = [],
     ): string {
-        return $this->store->create('organize', $actor, [[
+        return $this->store->create(OperationRunKind::Organize, $actor, [[
             'key' => $key,
             'type' => 'data_object',
             'id' => 1,

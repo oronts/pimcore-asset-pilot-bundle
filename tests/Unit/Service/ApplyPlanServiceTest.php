@@ -8,13 +8,12 @@ use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
+use Oronts\AssetPilotBundle\Service\ApplyPlanClaimStoreInterface;
 use Oronts\AssetPilotBundle\Service\ApplyPlanService;
+use Oronts\AssetPilotBundle\Tests\Support\InMemoryApplyPlanClaimStore;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Cache\Adapter\ArrayAdapter;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\InMemoryStore;
 
 #[CoversClass(ApplyPlanService::class)]
 #[CoversClass(ApplyPlan::class)]
@@ -151,10 +150,9 @@ final class ApplyPlanServiceTest extends TestCase
     #[Test]
     public function sharedStoresAllowOnlyOneServiceToClaimAToken(): void
     {
-        $cache = new ArrayAdapter();
-        $lockStore = new InMemoryStore();
-        $first = $this->service(cache: $cache, lockStore: $lockStore);
-        $second = $this->service(cache: $cache, lockStore: $lockStore);
+        $claims = $this->claims();
+        $first = $this->service(claims: $claims);
+        $second = $this->service(claims: $claims);
         $plan = $this->plan();
         $token = $first->issue($plan);
 
@@ -164,24 +162,22 @@ final class ApplyPlanServiceTest extends TestCase
     }
 
     #[Test]
-    public function concurrentClaimCannotEnterWhileTheTokenClaimLockIsHeld(): void
+    public function storeConflictIsReportedAsAlreadyClaimed(): void
     {
-        $cache = new ArrayAdapter();
-        $lockStore = new InMemoryStore();
-        $lockFactory = new LockFactory($lockStore);
-        $service = $this->service(cache: $cache, lockStore: $lockStore);
+        $claims = $this->createMock(ApplyPlanClaimStoreInterface::class);
+        $claims->expects(self::once())
+            ->method('claim')
+            ->with(
+                self::matchesRegularExpression('/^[a-f0-9]{64}$/D'),
+                self::callback(static fn (\DateTimeImmutable $value): bool => $value->getTimestamp() === 1_000),
+                self::callback(static fn (\DateTimeImmutable $value): bool => $value->getTimestamp() === 1_300),
+            )
+            ->willReturn(false);
+        $service = $this->service(claims: $claims);
         $plan = $this->plan();
         $token = $service->issue($plan);
-        $claimLock = $lockFactory->createLock('asset_pilot_apply_plan_claim_' . hash('sha256', $token), 10.0);
-        self::assertTrue($claimLock->acquire());
 
-        try {
-            self::assertSame(ApplyPlanStatus::AlreadyClaimed, $service->claim($token, $plan));
-        } finally {
-            $claimLock->release();
-        }
-
-        self::assertSame(ApplyPlanStatus::Claimed, $service->claim($token, $plan));
+        self::assertSame(ApplyPlanStatus::AlreadyClaimed, $service->claim($token, $plan));
     }
 
     #[Test]
@@ -216,17 +212,20 @@ final class ApplyPlanServiceTest extends TestCase
     private function service(
         int &$now = 1_000,
         int $ttlSeconds = 300,
-        ?ArrayAdapter $cache = null,
-        ?InMemoryStore $lockStore = null,
+        ?ApplyPlanClaimStoreInterface $claims = null,
     ): ApplyPlanService {
         return new ApplyPlanService(
             self::SECRET,
-            $cache ?? new ArrayAdapter(),
-            new LockFactory($lockStore ?? new InMemoryStore()),
+            $claims ?? $this->claims(),
             ttlSeconds: $ttlSeconds,
             clock: static function () use (&$now): int {
                 return $now;
             },
         );
+    }
+
+    private function claims(): ApplyPlanClaimStoreInterface
+    {
+        return new InMemoryApplyPlanClaimStore();
     }
 }

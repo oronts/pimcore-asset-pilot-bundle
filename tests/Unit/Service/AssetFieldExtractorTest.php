@@ -10,7 +10,9 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\ClassDefinition\Data;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Classificationstore as ClassificationstoreDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
+use Pimcore\Model\DataObject\Classificationstore as ClassificationstoreValue;
 use Pimcore\Model\DataObject\Concrete;
 use Pimcore\Model\DataObject\Data\BlockElement;
 use Pimcore\Model\DataObject\Data\ElementMetadata;
@@ -57,6 +59,141 @@ class AssetFieldExtractorTest extends TestCase
                 return $this->localizedFieldsOf($holder);
             }
         };
+    }
+
+    #[Test]
+    public function classificationStoreAssetIdsFailsClosedOnAnUnrecognizedAssetValueShape(): void
+    {
+        $imageKey = $this->createMock(Data::class);
+        $imageKey->method('getFieldType')->willReturn('image');
+
+        $extractor = new class (new NullLogger()) extends AssetFieldExtractor {
+            /** @var array<int, Data> */
+            public array $keyDefinitions = [];
+            /** @var array<string, Data> */
+            public array $fieldDefinitions = [];
+            public mixed $storeValue = null;
+
+            protected function classFieldDefinitions(Concrete $object): array
+            {
+                return $this->fieldDefinitions;
+            }
+
+            protected function readField(object $holder, string $fieldName): mixed
+            {
+                return $this->storeValue;
+            }
+
+            protected function classificationKeyDefinition(int $keyId): ?Data
+            {
+                return $this->keyDefinitions[$keyId] ?? null;
+            }
+        };
+        $extractor->keyDefinitions = [10 => $imageKey, 20 => $imageKey];
+
+        $store = $this->createMock(ClassificationstoreValue::class);
+        // key 10 (asset field) is an empty value, which is a recognized "no asset" form; key 20 holds a
+        // non-numeric string, which is NOT a recognized asset reference and must fail the traversal closed.
+        $store->method('getItems')->willReturn([1 => [10 => ['default' => null], 20 => ['default' => 'not-an-asset-id']]]);
+        $extractor->storeValue = $store;
+
+        $csField = $this->createMock(ClassificationstoreDefinition::class);
+        $csField->method('getName')->willReturn('cs');
+        $extractor->fieldDefinitions = ['cs' => $csField];
+
+        $extraction = $extractor->classificationStoreAssetIds($this->createMock(Concrete::class));
+        self::assertSame([], $extraction->targetIds);
+        self::assertFalse($extraction->complete, 'an unrecognized asset-field value shape fails closed');
+    }
+
+    #[Test]
+    public function classificationStoreAssetIdsExtractsAssetKeyValuesAndSkipsNonAssetKeys(): void
+    {
+        $imageKey = $this->createMock(Data::class);
+        $imageKey->method('getFieldType')->willReturn('image');
+        $inputKey = $this->createMock(Data::class);
+        $inputKey->method('getFieldType')->willReturn('input');
+
+        $extractor = new class (new NullLogger()) extends AssetFieldExtractor {
+            /** @var array<int, Data> */
+            public array $keyDefinitions = [];
+            /** @var array<string, Data> */
+            public array $fieldDefinitions = [];
+            public mixed $storeValue = null;
+
+            protected function classFieldDefinitions(Concrete $object): array
+            {
+                return $this->fieldDefinitions;
+            }
+
+            protected function readField(object $holder, string $fieldName): mixed
+            {
+                return $this->storeValue;
+            }
+
+            protected function classificationKeyDefinition(int $keyId): ?Data
+            {
+                return $this->keyDefinitions[$keyId] ?? null;
+            }
+        };
+        $extractor->keyDefinitions = [10 => $imageKey, 20 => $inputKey];
+
+        $store = $this->createMock(ClassificationstoreValue::class);
+        // group 1: key 10 (image) holds asset id 42; key 20 (input) holds 99, which is not an asset reference.
+        $store->method('getItems')->willReturn([1 => [10 => ['default' => 42], 20 => ['default' => 99]]]);
+        $extractor->storeValue = $store;
+
+        $csField = $this->createMock(ClassificationstoreDefinition::class);
+        $csField->method('getName')->willReturn('cs');
+        $extractor->fieldDefinitions = ['cs' => $csField];
+
+        $extraction = $extractor->classificationStoreAssetIds($this->createMock(Concrete::class));
+        self::assertSame([42], $extraction->targetIds);
+        self::assertTrue($extraction->complete, 'every key resolved, so the traversal is complete');
+    }
+
+    #[Test]
+    public function classificationStoreAssetIdsFailsClosedWhenAKeyCannotBeResolved(): void
+    {
+        $imageKey = $this->createMock(Data::class);
+        $imageKey->method('getFieldType')->willReturn('image');
+
+        $extractor = new class (new NullLogger()) extends AssetFieldExtractor {
+            /** @var array<int, Data> */
+            public array $keyDefinitions = [];
+            /** @var array<string, Data> */
+            public array $fieldDefinitions = [];
+            public mixed $storeValue = null;
+
+            protected function classFieldDefinitions(Concrete $object): array
+            {
+                return $this->fieldDefinitions;
+            }
+
+            protected function readField(object $holder, string $fieldName): mixed
+            {
+                return $this->storeValue;
+            }
+
+            protected function classificationKeyDefinition(int $keyId): ?Data
+            {
+                return $this->keyDefinitions[$keyId] ?? null;
+            }
+        };
+        $extractor->keyDefinitions = [10 => $imageKey];
+
+        $store = $this->createMock(ClassificationstoreValue::class);
+        // key 10 resolves to asset 42; key 99 has no resolvable definition, so it might itself be an asset ref.
+        $store->method('getItems')->willReturn([1 => [10 => ['default' => 42], 99 => ['default' => 500]]]);
+        $extractor->storeValue = $store;
+
+        $csField = $this->createMock(ClassificationstoreDefinition::class);
+        $csField->method('getName')->willReturn('cs');
+        $extractor->fieldDefinitions = ['cs' => $csField];
+
+        $extraction = $extractor->classificationStoreAssetIds($this->createMock(Concrete::class));
+        self::assertSame([42], $extraction->targetIds, 'the resolved ids are still returned as a lower bound');
+        self::assertFalse($extraction->complete, 'an unresolvable key marks the traversal incomplete so callers fail closed');
     }
 
     #[Test]

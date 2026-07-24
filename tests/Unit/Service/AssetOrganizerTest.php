@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Audit\AuditWriterInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
@@ -14,11 +14,13 @@ use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
+use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\AssetFieldInfo;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\DriftAssessment;
+use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\MovePlan;
 use Oronts\AssetPilotBundle\Model\OperationHandle;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
@@ -30,9 +32,11 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
 use Oronts\AssetPilotBundle\Service\MovePlanner;
 use Oronts\AssetPilotBundle\Service\OperationJournalInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
+use Oronts\AssetPilotBundle\Service\RuleExecutionFingerprint;
 use Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -53,13 +57,14 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             $dispatcher,
             $this->createMock(LoopGuard::class),
             new NullLogger(),
             $authorization ?? $this->authorization(),
             new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($this->createMock(LoopGuard::class)),
         );
     }
 
@@ -125,7 +130,7 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $this->createMock(LoopGuard::class),
@@ -138,7 +143,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngine $engine,
                 AssetFieldExtractor $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -146,7 +151,7 @@ class AssetOrganizerTest extends TestCase
                 ElementAuthorization $authorization,
                 private readonly array $objects,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint());
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
             }
 
             protected function loadObject(int $objectId): ?AbstractObject
@@ -199,6 +204,60 @@ class AssetOrganizerTest extends TestCase
     }
 
     #[Test]
+    public function organizeBulkDetailedAbortsWhenAnItemCompletionLosesOwnership(): void
+    {
+        $object = $this->createMock(AbstractObject::class);
+        $object->method('getId')->willReturn(5);
+        $authorization = $this->authorization();
+        $organizer = new class (
+            $this->createMock(RuleEngine::class),
+            $this->createMock(AssetFieldExtractor::class),
+            $this->createMock(MovePlanner::class),
+            $this->createMock(AuditWriterInterface::class),
+            $this->journal(),
+            new EventDispatcher(),
+            $this->createMock(LoopGuard::class),
+            new NullLogger(),
+            $authorization,
+            [5 => $object],
+        ) extends AssetOrganizer {
+            /** @param array<int, AbstractObject> $objects */
+            public function __construct(
+                RuleEngine $engine,
+                AssetFieldExtractor $extractor,
+                MovePlanner $planner,
+                AuditWriterInterface $audit,
+                OperationJournalInterface $journal,
+                EventDispatcher $dispatcher,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                ElementAuthorization $authorization,
+                private readonly array $objects,
+            ) {
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
+            }
+
+            protected function loadObject(int $objectId): ?AbstractObject
+            {
+                return $this->objects[$objectId] ?? null;
+            }
+
+            public function organize(AbstractObject $object, TriggerType $triggerType = TriggerType::ObjectSave, ?string $ruleName = null, ?string $expectedFingerprint = null): array
+            {
+                return [];
+            }
+        };
+
+        $this->expectException(LostRunItemOwnershipException::class);
+
+        $organizer->organizeBulkDetailed(
+            [5],
+            TriggerType::BulkOperation,
+            afterObject: static fn (BulkObjectResult $result): bool => false,
+        );
+    }
+
+    #[Test]
     public function organizeBulkRethrowsRetryableInfrastructureFailures(): void
     {
         $object = $this->createMock(AbstractObject::class);
@@ -207,7 +266,7 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $this->createMock(LoopGuard::class),
@@ -219,7 +278,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngine $engine,
                 AssetFieldExtractor $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -227,7 +286,7 @@ class AssetOrganizerTest extends TestCase
                 ElementAuthorization $authorization,
                 private readonly AbstractObject $object,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint());
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
             }
 
             protected function loadObject(int $objectId): ?AbstractObject
@@ -287,7 +346,7 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngineInterface::class),
             $extractor,
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $loopGuard,
@@ -300,7 +359,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngineInterface $engine,
                 AssetFieldExtractorInterface $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -309,7 +368,7 @@ class AssetOrganizerTest extends TestCase
                 private readonly AbstractObject $live,
                 OrganizePlanFingerprint $fingerprints,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, $fingerprints);
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, $fingerprints, new LoopGuardedAssetSaver($loopGuard));
             }
 
             protected function reloadObject(int $objectId): ?AbstractObject
@@ -321,6 +380,200 @@ class AssetOrganizerTest extends TestCase
         $this->expectException(StaleApplyPlanException::class);
 
         $organizer->organize($initial, TriggerType::Api, expectedFingerprint: $expected);
+    }
+
+    #[Test]
+    public function reviewedApplyRevalidatesUnderAssetLocksAndSkipsAStaleAssetDerivedPlan(): void
+    {
+        $object = $this->reviewedObject(42);
+        $fingerprints = new OrganizePlanFingerprint();
+        $planned = $this->reviewedPendingOperation(7, '/organized/a/7.jpg');
+        $drifted = $this->reviewedPendingOperation(7, '/organized/b/7.jpg');
+        $expected = $fingerprints->forOperations($object, [$planned]);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        // The object fingerprint still matches on the first pass, but the asset's canonical target drifts
+        // before the asset lock; the re-validation under the lock must catch it and skip.
+        $organizer = $this->reviewedOrganizer($object, $loopGuard, $fingerprints, [[$planned], [$drifted]]);
+
+        $this->expectException(StaleApplyPlanException::class);
+
+        $organizer->organize($object, TriggerType::Api, expectedFingerprint: $expected);
+    }
+
+    #[Test]
+    public function reviewedApplyAcquiresEveryPlanAssetLockInStableIdOrderBeforeMutating(): void
+    {
+        $object = $this->reviewedObject(42);
+        $fingerprints = new OrganizePlanFingerprint();
+        $plan = [$this->reviewedPendingOperation(9, '/o/9.jpg'), $this->reviewedPendingOperation(3, '/o/3.jpg'), $this->reviewedPendingOperation(7, '/o/7.jpg')];
+        $expected = $fingerprints->forOperations($object, $plan);
+        $acquired = [];
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('acquireAsset')->willReturnCallback(function (int $assetId) use (&$acquired): bool {
+            $acquired[] = $assetId;
+
+            return true;
+        });
+        // A stable plan: the extractor yields no fields so nothing is mutated after locking, isolating the
+        // lock-acquisition order.
+        $organizer = $this->reviewedOrganizer($object, $loopGuard, $fingerprints, [$plan, $plan]);
+
+        $organizer->organize($object, TriggerType::Api, expectedFingerprint: $expected);
+
+        self::assertSame([3, 7, 9], $acquired, 'every plan asset is locked once, in ascending id order');
+    }
+
+    #[Test]
+    public function reviewedApplySkipsAnAssetWhoseLiveTargetDivergedFromTheReviewedTarget(): void
+    {
+        $object = $this->reviewedObject(7);
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(20);
+        $asset->method('getRealFullPath')->willReturn('/source/f.jpg');
+        $asset->method('isAllowed')->willReturn(true);
+        $rule = Rule::fromConfig('r', ['class' => 'Product', 'fields' => ['images'], 'target_path' => '/{{ date }}']);
+        $engine = $this->createMock(RuleEngineInterface::class);
+        $engine->method('matchField')->willReturn([new RuleMatch($rule, $object, $asset, '/reviewed')]);
+        $extractor = $this->createMock(AssetFieldExtractorInterface::class);
+        $extractor->method('extract')->willReturn([new AssetFieldInfo('images', null, 'image', [$asset])]);
+        // The target template renders one path at review/validate time and a later one at execute time
+        // (dryRun=false), modelling a non-deterministic {{ date }} crossing a bucket under the lock.
+        $planner = $this->createMock(MovePlanner::class);
+        $planner->method('plan')->willReturnCallback(
+            static fn (Asset $a, AbstractObject $o, Rule $ru, string $path, TriggerType $t, bool $dryRun): MovePlan => $dryRun
+                ? MovePlan::proceed('/reviewed', 'f.jpg', '/reviewed/f.jpg')
+                : MovePlan::proceed('/diverged', 'f.jpg', '/diverged/f.jpg'),
+        );
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->expects(self::never())->method('acquireTarget');
+        $organizer = new class (
+            $engine,
+            $extractor,
+            $planner,
+            $this->createMock(AuditWriterInterface::class),
+            $this->journal(),
+            new EventDispatcher(),
+            $loopGuard,
+            new NullLogger(),
+            $this->authorization(),
+            new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($loopGuard),
+            $object,
+        ) extends AssetOrganizer {
+            public function __construct(
+                RuleEngineInterface $engine,
+                AssetFieldExtractorInterface $extractor,
+                MovePlanner $planner,
+                AuditWriterInterface $audit,
+                OperationJournalInterface $journal,
+                EventDispatcher $dispatcher,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                ElementAuthorization $authorization,
+                OrganizePlanFingerprint $fingerprints,
+                LoopGuardedAssetSaver $saver,
+                private readonly AbstractObject $live,
+            ) {
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, $fingerprints, $saver);
+            }
+
+            protected function reloadObject(int $objectId): ?AbstractObject
+            {
+                return $this->live;
+            }
+        };
+        $expected = (new OrganizePlanFingerprint())->forOperations($object, $organizer->dryRun($object, TriggerType::Manual));
+
+        $results = $organizer->organize($object, TriggerType::Manual, expectedFingerprint: $expected);
+
+        self::assertCount(1, $results);
+        self::assertSame(OperationStatus::Skipped, $results[0]->status, 'the divergent target must not be executed');
+        self::assertSame('Asset target changed after review', $results[0]->message);
+    }
+
+    #[Test]
+    public function reviewedApplySkipsWhenTheLiveRuleBehaviourDivergesEvenAtTheSameTarget(): void
+    {
+        $object = $this->reviewedObject(7);
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(20);
+        $asset->method('getRealFullPath')->willReturn('/source/f.jpg');
+        $asset->method('isAllowed')->willReturn(true);
+        // Two rules with the same name AND the same resolved target, differing only in execution behaviour
+        // (strategy). The reviewed plan committed to rule A; a non-deterministic provider returns rule B at
+        // execution. The target tripwire cannot tell them apart, so the execution fingerprint must.
+        $ruleA = Rule::fromConfig('r', ['class' => 'Product', 'fields' => ['images'], 'target_path' => '/same', 'strategy' => 'first_assignment']);
+        $ruleB = Rule::fromConfig('r', ['class' => 'Product', 'fields' => ['images'], 'target_path' => '/same', 'strategy' => 'always']);
+        $reviewedOp = new MoveOperation(20, '/source/f.jpg', '/same/f.jpg', 7, 'Product', 'r', OperationStatus::Pending, TriggerType::Manual, executionFingerprint: (new RuleExecutionFingerprint())->forRule($ruleA));
+        $liveMatch = new RuleMatch($ruleB, $object, $asset, '/same');
+        $planner = $this->createMock(MovePlanner::class);
+        $planner->method('plan')->willReturn(MovePlan::proceed('/same', 'f.jpg', '/same/f.jpg'));
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->expects(self::never())->method('acquireTarget');
+        $organizer = new class (
+            $this->createMock(RuleEngineInterface::class),
+            $this->createMock(AssetFieldExtractorInterface::class),
+            $planner,
+            $this->createMock(AuditWriterInterface::class),
+            $this->journal(),
+            new EventDispatcher(),
+            $loopGuard,
+            new NullLogger(),
+            $this->authorization(),
+            new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($loopGuard),
+            $object,
+            $reviewedOp,
+            $liveMatch,
+        ) extends AssetOrganizer {
+            public function __construct(
+                RuleEngineInterface $engine,
+                AssetFieldExtractorInterface $extractor,
+                MovePlanner $planner,
+                AuditWriterInterface $audit,
+                OperationJournalInterface $journal,
+                EventDispatcher $dispatcher,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                ElementAuthorization $authorization,
+                OrganizePlanFingerprint $fingerprints,
+                LoopGuardedAssetSaver $saver,
+                private readonly AbstractObject $live,
+                private readonly MoveOperation $reviewedOperation,
+                private readonly RuleMatch $liveMatch,
+            ) {
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, $fingerprints, $saver);
+            }
+
+            protected function reloadObject(int $objectId): ?AbstractObject
+            {
+                return $this->live;
+            }
+
+            public function dryRun(AbstractObject $object, TriggerType $triggerType = TriggerType::Manual, ?string $ruleName = null): array
+            {
+                return [$this->reviewedOperation];
+            }
+
+            protected function bestMatches(AbstractObject $object, iterable $fieldInfos, ?string $ruleName): array
+            {
+                return [['asset' => $this->liveMatch->asset, 'match' => $this->liveMatch, 'field' => 'images', 'locale' => null]];
+            }
+        };
+        $expected = (new OrganizePlanFingerprint())->forOperations($object, [$reviewedOp]);
+
+        $results = $organizer->organize($object, TriggerType::Manual, expectedFingerprint: $expected);
+
+        self::assertCount(1, $results);
+        self::assertSame(OperationStatus::Skipped, $results[0]->status, 'a same-target rule whose behaviour changed after review must not execute');
+        self::assertSame('Asset operation changed after review', $results[0]->message);
     }
 
     #[Test]
@@ -343,7 +596,7 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngineInterface::class),
             $extractor,
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $loopGuard,
@@ -355,7 +608,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngineInterface $engine,
                 AssetFieldExtractorInterface $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -363,7 +616,7 @@ class AssetOrganizerTest extends TestCase
                 ElementAuthorization $authorization,
                 private readonly AbstractObject $latest,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint());
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
             }
 
             protected function reloadObject(int $objectId): ?AbstractObject
@@ -390,13 +643,14 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngineInterface::class),
             $this->createMock(AssetFieldExtractorInterface::class),
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $loopGuard,
             new NullLogger(),
             $authorization,
             new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($loopGuard),
             maxObjectReplays: 1,
         );
 
@@ -421,13 +675,14 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngineInterface::class),
             $this->createMock(AssetFieldExtractorInterface::class),
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $loopGuard,
             new NullLogger(),
             $authorization,
             new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($loopGuard),
         );
 
         $results = $organizer->organizeWithHeartbeat(
@@ -470,13 +725,14 @@ class AssetOrganizerTest extends TestCase
             $engine,
             $extractor,
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $this->createMock(LoopGuard::class),
             new NullLogger(),
             $authorization,
             new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($this->createMock(LoopGuard::class)),
         );
 
         self::assertSame([], $organizer->dryRun($object));
@@ -640,6 +896,26 @@ class AssetOrganizerTest extends TestCase
     }
 
     #[Test]
+    public function executeMoveSkipsAnAssetThatBecameProtectedBetweenPlanningAndTheAssetLock(): void
+    {
+        // a user locks the asset after MovePlanner planned it; the organizer reloads under the
+        // asset lock and must skip as protected, never taking the target lock or moving it.
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->expects(self::once())->method('releaseAsset')->with(1);
+        $loopGuard->expects(self::never())->method('acquireTarget');
+
+        $result = $this->executeMove(
+            $loopGuard,
+            MovePlan::proceed('/target', 'f.jpg', '/target/f.jpg'),
+            movedAssetLocked: true,
+        );
+
+        self::assertSame(OperationStatus::Skipped, $result->status);
+        self::assertSame('Asset is protected from automated changes', $result->message);
+    }
+
+    #[Test]
     public function postMoveObserverFailureDoesNotMisreportTheCommittedMoveAsFailed(): void
     {
         $loopGuard = $this->createMock(LoopGuard::class);
@@ -749,13 +1025,14 @@ class AssetOrganizerTest extends TestCase
             $engine,
             $extractor,
             $planner,
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $this->createMock(LoopGuard::class),
             new NullLogger(),
             $this->authorization(),
             new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($this->createMock(LoopGuard::class)),
         );
 
         $operations = $organizer->dryRun($object);
@@ -783,13 +1060,14 @@ class AssetOrganizerTest extends TestCase
             $engine,
             $extractor,
             $planner,
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $this->createMock(LoopGuard::class),
             new NullLogger(),
             $this->authorization(),
             new OrganizePlanFingerprint(),
+            new LoopGuardedAssetSaver($this->createMock(LoopGuard::class)),
         );
 
         $items = $organizer->analyzeDrift($object);
@@ -816,7 +1094,7 @@ class AssetOrganizerTest extends TestCase
         $loopGuard->expects(self::once())->method('releaseTarget')->with('/target/f.jpg');
 
         $folder = $this->createMock(Asset\Folder::class);
-        $audit = $this->createMock(AuditLogger::class);
+        $audit = $this->createMock(AuditWriterInterface::class);
         $organizer = new class (
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
@@ -834,7 +1112,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngine $engine,
                 AssetFieldExtractor $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -843,7 +1121,7 @@ class AssetOrganizerTest extends TestCase
                 private readonly Asset $liveAsset,
                 private readonly Asset\Folder $folder,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint());
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
             }
 
             public function run(Asset $asset, MovePlan $plan, AbstractObject $object, Rule $rule): OperationResult
@@ -906,13 +1184,14 @@ class AssetOrganizerTest extends TestCase
         ?Asset $assetAtTarget = null,
         ?Asset\Folder $targetParent = null,
         ?ElementAuthorization $authorization = null,
-        ?AuditLogger $audit = null,
+        ?AuditWriterInterface $audit = null,
         ?OperationJournalInterface $journal = null,
         ?EventDispatcher $dispatcher = null,
+        bool $movedAssetLocked = false,
     ): OperationResult {
         $authorization ??= $this->authorization();
         if ($audit === null) {
-            $audit = $this->createMock(AuditLogger::class);
+            $audit = $this->createMock(AuditWriterInterface::class);
         }
         $journal ??= $this->journal();
         $dispatcher ??= new EventDispatcher();
@@ -935,7 +1214,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngine $engine,
                 AssetFieldExtractor $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -945,7 +1224,7 @@ class AssetOrganizerTest extends TestCase
                 private readonly ?Asset\Folder $targetParent,
                 private readonly Asset\Folder $folder,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint());
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
             }
 
             public function runMove(Asset $a, MovePlan $p, AbstractObject $o, Rule $r): OperationResult
@@ -980,18 +1259,20 @@ class AssetOrganizerTest extends TestCase
         };
 
         return $organizer->runMove(
-            $this->asset('/source/f.jpg'),
+            $this->asset('/source/f.jpg', $movedAssetLocked),
             $plan,
             $this->createMock(AbstractObject::class),
             Rule::fromConfig('r', ['class' => 'Product', 'target_path' => '/target']),
         );
     }
 
-    private function asset(string $path): Asset
+    private function asset(string $path, bool $locked = false): Asset
     {
         $asset = $this->createMock(Asset::class);
         $asset->method('getId')->willReturn(1);
         $asset->method('getRealFullPath')->willReturn($path);
+        $asset->method('hasProperty')->willReturn($locked);
+        $asset->method('getProperty')->willReturn($locked ? true : null);
 
         return $asset;
     }
@@ -1019,7 +1300,7 @@ class AssetOrganizerTest extends TestCase
             $this->createMock(RuleEngineInterface::class),
             $this->createMock(AssetFieldExtractorInterface::class),
             $this->createMock(MovePlanner::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditWriterInterface::class),
             $this->journal(),
             new EventDispatcher(),
             $this->createMock(LoopGuard::class),
@@ -1032,7 +1313,7 @@ class AssetOrganizerTest extends TestCase
                 RuleEngineInterface $engine,
                 AssetFieldExtractorInterface $extractor,
                 MovePlanner $planner,
-                AuditLogger $audit,
+                AuditWriterInterface $audit,
                 OperationJournalInterface $journal,
                 EventDispatcher $dispatcher,
                 LoopGuard $loopGuard,
@@ -1041,7 +1322,7 @@ class AssetOrganizerTest extends TestCase
                 private readonly ?Asset $asset,
                 private readonly ?Asset\Folder $targetParent,
             ) {
-                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint());
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, new OrganizePlanFingerprint(), new LoopGuardedAssetSaver($loopGuard));
             }
 
             protected function loadAssetById(int $assetId): ?Asset
@@ -1063,6 +1344,79 @@ class AssetOrganizerTest extends TestCase
         $authorization->method('isAllowed')->willReturn(true);
 
         return $authorization;
+    }
+
+    private function reviewedObject(int $id): Concrete
+    {
+        $object = $this->createMock(Concrete::class);
+        $object->method('getId')->willReturn($id);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getRealFullPath')->willReturn('/products/' . $id);
+        $object->method('getModificationDate')->willReturn(100);
+        $object->method('getType')->willReturn('object');
+        $object->method('getVersionCount')->willReturn(1);
+
+        return $object;
+    }
+
+    private function reviewedPendingOperation(int $assetId, string $targetPath): MoveOperation
+    {
+        return new MoveOperation($assetId, '/in/' . $assetId . '.jpg', $targetPath, 42, 'Product', 'r', OperationStatus::Pending, TriggerType::Api);
+    }
+
+    /** @param list<list<MoveOperation>> $dryRunResults consecutive dryRun() results (pre-lock, under-lock) */
+    private function reviewedOrganizer(AbstractObject $object, LoopGuard $loopGuard, OrganizePlanFingerprint $fingerprints, array $dryRunResults): AssetOrganizer
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
+
+        return new class (
+            $this->createMock(RuleEngineInterface::class),
+            $this->createMock(AssetFieldExtractorInterface::class),
+            $this->createMock(MovePlanner::class),
+            $this->createMock(AuditWriterInterface::class),
+            $this->journal(),
+            new EventDispatcher(),
+            $loopGuard,
+            new NullLogger(),
+            $authorization,
+            $fingerprints,
+            $object,
+            $dryRunResults,
+        ) extends AssetOrganizer {
+            private int $dryRunCalls = 0;
+
+            /** @param list<list<MoveOperation>> $dryRunResults */
+            public function __construct(
+                RuleEngineInterface $engine,
+                AssetFieldExtractorInterface $extractor,
+                MovePlanner $planner,
+                AuditWriterInterface $audit,
+                OperationJournalInterface $journal,
+                EventDispatcher $dispatcher,
+                LoopGuard $loopGuard,
+                NullLogger $logger,
+                ElementAuthorization $authorization,
+                OrganizePlanFingerprint $fingerprints,
+                private readonly AbstractObject $live,
+                private readonly array $dryRunResults,
+            ) {
+                parent::__construct($engine, $extractor, $planner, $audit, $journal, $dispatcher, $loopGuard, $logger, $authorization, $fingerprints, new LoopGuardedAssetSaver($loopGuard));
+            }
+
+            protected function reloadObject(int $objectId): ?AbstractObject
+            {
+                return $this->live;
+            }
+
+            public function dryRun(AbstractObject $object, TriggerType $triggerType = TriggerType::Manual, ?string $ruleName = null): array
+            {
+                $result = $this->dryRunResults[$this->dryRunCalls] ?? [];
+                ++$this->dryRunCalls;
+
+                return $result;
+            }
+        };
     }
 
     private function journal(): OperationJournalInterface

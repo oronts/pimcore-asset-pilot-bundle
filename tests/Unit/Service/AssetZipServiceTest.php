@@ -16,6 +16,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
 
 #[CoversClass(AssetZipService::class)]
@@ -111,6 +113,31 @@ class AssetZipServiceTest extends TestCase
         self::assertSame('a-3.png', $service->unique('a.png', $used));
         self::assertSame('dir/b', $service->unique('dir/b', $used));
         self::assertSame('dir/b-2', $service->unique('dir/b', $used));
+    }
+
+    #[Test]
+    public function buildFromObjectsSkipsAnObjectTheActorCannotView(): void
+    {
+        $object = $this->createMock(Concrete::class);
+        $object->method('getId')->willReturn(9);
+        $extractor = $this->createMock(AssetFieldExtractorInterface::class);
+        $extractor->expects(self::never())->method('extract');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+
+        $service = new class (new NullLogger(), $extractor, $authorization, $object) extends AssetZipService {
+            public function __construct(NullLogger $logger, AssetFieldExtractorInterface $extractor, ElementAuthorization $authorization, private readonly ?Concrete $object)
+            {
+                parent::__construct($logger, $extractor, $authorization, [], 'flat', 1000, 536870912);
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->object;
+            }
+        };
+
+        self::assertInstanceOf(ZipBuildResult::class, $service->buildFromObjects([9]));
     }
 
     /** @param array<int, ?Asset> $map */

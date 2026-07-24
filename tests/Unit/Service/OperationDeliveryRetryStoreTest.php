@@ -59,6 +59,7 @@ final class OperationDeliveryRetryStoreTest extends TestCase
         self::assertNull($row['locked_until']);
         self::assertNull($row['last_error']);
         self::assertNull($row['delivered_at']);
+        self::assertNull($row['audit_reconciled_at']);
         self::assertFalse($this->store->hasDead(71));
         self::assertTrue($this->store->hasUnresolved(71));
         self::assertSame([$deliveryId], $this->store->due());
@@ -94,6 +95,9 @@ final class OperationDeliveryRetryStoreTest extends TestCase
         $delivery = $this->store->claim($deliveryId, 'worker', 300);
         self::assertNotNull($delivery);
         self::assertTrue($this->store->markDead($delivery, 'permanent failure'));
+        $dead = $this->store->awaitingAudit($deliveryId);
+        self::assertNotNull($dead);
+        self::assertTrue($this->store->markAuditReconciled($dead));
 
         return $deliveryId;
     }
