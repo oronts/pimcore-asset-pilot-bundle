@@ -9,7 +9,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface as SymfonyEventDispatcherInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-final class NonFatalEventDispatcher
+class NonFatalEventDispatcher
 {
     /** @return list<string> */
     public static function dispatch(

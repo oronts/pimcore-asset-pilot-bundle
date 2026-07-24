@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Exception;
 
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 
-final class DeliveryRetryPlanException extends \RuntimeException
+class DeliveryRetryPlanException extends \RuntimeException
 {
     public function __construct(public readonly ApplyPlanStatus $status)
     {

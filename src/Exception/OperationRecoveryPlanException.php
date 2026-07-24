@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Exception;
 
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 
-final class OperationRecoveryPlanException extends \RuntimeException
+class OperationRecoveryPlanException extends \RuntimeException
 {
     public function __construct(public readonly ApplyPlanStatus $status)
     {

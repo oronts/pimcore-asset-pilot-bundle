@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Message;
 
-final readonly class OperationDeliveryMessage
+readonly class OperationDeliveryMessage
 {
     public function __construct(public string $deliveryId)
     {

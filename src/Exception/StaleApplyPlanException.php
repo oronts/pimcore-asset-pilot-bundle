@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Exception;
 
-final class StaleApplyPlanException extends \RuntimeException
+class StaleApplyPlanException extends \RuntimeException
 {
     public readonly ?int $objectId;
 

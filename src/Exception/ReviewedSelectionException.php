@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Exception;
 
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
 
-final class ReviewedSelectionException extends \RuntimeException
+class ReviewedSelectionException extends \RuntimeException
 {
     public function __construct(
         public readonly ReviewedSelectionError $error,
