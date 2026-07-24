@@ -4,6 +4,7 @@ import type { ExplainResponse, RuleEvaluation, ExplainOperation } from '../../ty
 import { OpenButton } from '../shared/open-button'
 import { ExpandablePath } from '../shared/expandable-path'
 import { useModalDismiss } from '../../hooks/use-modal-dismiss'
+import { modalOverlayStyle, modalSurfaceStyle } from '../shared/modal-styles'
 
 interface ExplainModalProps {
   data: ExplainResponse
@@ -58,25 +59,24 @@ export const ExplainModal: React.FC<ExplainModalProps> = ({ data, onClose }) => 
   }, [data.operations])
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
+    <div role="presentation" style={modalOverlayStyle} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label={t('asset-pilot.explain.title', { id: data.objectId })} tabIndex={-1} style={modalStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#262626' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--ap-color-text)' }}>
             {t('asset-pilot.explain.title', { id: data.objectId })}
           </h3>
           <button onClick={onClose} style={closeBtnStyle}>{t('asset-pilot.explain.close')}</button>
         </div>
 
-        {/* Summary bar */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={summaryBadge('#f6ffed', '#52c41a')}>
+          <span style={summaryBadge('var(--ap-color-success-bg)', 'var(--ap-color-success)')}>
             {matched} {t('asset-pilot.explain.matched')}
           </span>
-          <span style={summaryBadge('#f5f5f5', '#8c8c8c')}>
+          <span style={summaryBadge('var(--ap-color-fill-secondary)', 'var(--ap-color-text-secondary)')}>
             {skipped} {t('asset-pilot.explain.skipped')}
           </span>
           {data.operations.length > 0 && (
-            <span style={{ fontSize: 12, color: '#1677ff', fontWeight: 500 }}>
+            <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-primary)', fontWeight: 500 }}>
               {t('asset-pilot.explain.operations-preview', { count: data.operations.length })}
             </span>
           )}
@@ -97,10 +97,9 @@ export const ExplainModal: React.FC<ExplainModalProps> = ({ data, onClose }) => 
           </div>
         </div>
 
-        {/* Content */}
         <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
           {data.evaluations.length === 0 ? (
-            <p style={{ color: '#8c8c8c', fontSize: 13, textAlign: 'center', padding: 24 }}>
+            <p style={{ color: 'var(--ap-color-text-secondary)', fontSize: 13, textAlign: 'center', padding: 24 }}>
               {t('asset-pilot.explain.no-evaluations')}
             </p>
           ) : groupMode === 'asset' ? (
@@ -130,7 +129,7 @@ const AssetGroupView: React.FC<{
             <ExpandablePath path={first.assetPath} maxLength={50} />
             <span style={fieldBadge}>{first.fieldName}{first.locale ? ` (${first.locale})` : ''}</span>
             {op != null && (
-              <span style={{ fontSize: 11, color: '#1677ff', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-primary)', fontFamily: 'monospace' }}>
                 → {op.targetPath}
               </span>
             )}
@@ -152,11 +151,11 @@ const RuleGroupView: React.FC<{
       return (
         <div key={ruleName} style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-            <span style={{ fontWeight: 600, fontSize: 13, color: '#262626' }}>{ruleName}</span>
-            <span style={{ fontSize: 11, color: '#8c8c8c' }}>
-              (p{evals[0].priority}, {evals[0].enabled ? 'enabled' : 'disabled'})
+            <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--ap-color-text)' }}>{ruleName}</span>
+            <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)' }}>
+              (p{evals[0].priority}, {t(evals[0].enabled ? 'asset-pilot.explain.enabled' : 'asset-pilot.explain.disabled')})
             </span>
-            <span style={summaryBadge('#f6ffed', '#52c41a')}>
+            <span style={summaryBadge('var(--ap-color-success-bg)', 'var(--ap-color-success)')}>
               {matchedCount}/{evals.length}
             </span>
           </div>
@@ -179,7 +178,7 @@ const RuleGroupView: React.FC<{
                   </td>
                   <td style={tdStyle}><ResultBadge matched={ev.matched} t={t} /></td>
                   <td style={tdStyle}><ReasonCell ev={ev} t={t} /></td>
-                  <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>
+                  <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>
                     {ev.resolvedPath ?? '-'}
                   </td>
                 </tr>
@@ -200,7 +199,7 @@ const EvalTable: React.FC<{
     <thead>
       <tr style={headerRow}>
         <th style={thStyle}>{t('asset-pilot.explain.rule')}</th>
-        <th style={{ ...thStyle, width: 50, textAlign: 'center' }}>P</th>
+        <th style={{ ...thStyle, width: 50, textAlign: 'center' }}>{t('asset-pilot.columns.priority-short')}</th>
         <th style={thStyle}>{t('asset-pilot.explain.result')}</th>
         <th style={thStyle}>{t('asset-pilot.explain.reason')}</th>
         <th style={thStyle}>{t('asset-pilot.explain.target')}</th>
@@ -210,10 +209,10 @@ const EvalTable: React.FC<{
       {evals.map((ev, i) => (
         <tr key={i} style={rowStyle}>
           <td style={{ ...tdStyle, fontWeight: 500 }}>{ev.ruleName}</td>
-          <td style={{ ...tdStyle, textAlign: 'center', color: '#8c8c8c' }}>{ev.priority}</td>
+          <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--ap-color-text-secondary)' }}>{ev.priority}</td>
           <td style={tdStyle}><ResultBadge matched={ev.matched} t={t} /></td>
           <td style={tdStyle}><ReasonCell ev={ev} t={t} /></td>
-          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>
+          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>
             {ev.resolvedPath ?? '-'}
           </td>
         </tr>
@@ -227,10 +226,10 @@ const ResultBadge: React.FC<{ matched: boolean; t: (key: string) => string }> = 
     display: 'inline-block',
     padding: '1px 8px',
     borderRadius: 4,
-    fontSize: 11,
+    fontSize: 'var(--ap-font-size)',
     fontWeight: 600,
-    background: matched ? '#f6ffed' : '#f5f5f5',
-    color: matched ? '#52c41a' : '#8c8c8c',
+    background: matched ? 'var(--ap-color-success-bg)' : 'var(--ap-color-fill-secondary)',
+    color: matched ? 'var(--ap-color-success)' : 'var(--ap-color-text-secondary)',
   }}>
     {matched ? t('asset-pilot.explain.matched') : t('asset-pilot.explain.skipped')}
   </span>
@@ -240,22 +239,22 @@ const ReasonCell: React.FC<{
   ev: RuleEvaluation
   t: (key: string) => string
 }> = ({ ev, t }) => {
-  if (ev.matched) return <span style={{ color: '#52c41a', fontSize: 11 }}>—</span>
+  if (ev.matched) return <span style={{ color: 'var(--ap-color-success-text)', fontSize: 'var(--ap-font-size)' }}>—</span>
 
   const reasonKey = ev.rejectionReason != null ? reasonLabels[ev.rejectionReason] : undefined
   const reasonText = reasonKey != null ? t(reasonKey) : (ev.rejectionReason ?? '—')
 
   return (
-    <div style={{ fontSize: 11 }}>
-      <span style={{ color: '#8c8c8c' }}>{reasonText}</span>
+    <div style={{ fontSize: 'var(--ap-font-size)' }}>
+      <span style={{ color: 'var(--ap-color-text-secondary)' }}>{reasonText}</span>
       {ev.filterDetails != null && (
-        <div style={{ color: '#bfbfbf', fontSize: 10, marginTop: 1 }}>{ev.filterDetails}</div>
+        <div style={{ color: 'var(--ap-color-text-tertiary)', fontSize: 'var(--ap-font-size)', marginTop: 1 }}>{ev.filterDetails}</div>
       )}
       {ev.conditionError != null && (
-        <div style={{ color: '#ff4d4f', fontSize: 10, marginTop: 1 }}>{ev.conditionError}</div>
+        <div style={{ color: 'var(--ap-color-error-text)', fontSize: 'var(--ap-font-size)', marginTop: 1 }}>{ev.conditionError}</div>
       )}
       {ev.conditionExpression != null && ev.rejectionReason === 'condition_failed' && (
-        <div style={{ color: '#bfbfbf', fontSize: 10, fontFamily: 'monospace', marginTop: 1 }}>
+        <div style={{ color: 'var(--ap-color-text-tertiary)', fontSize: 'var(--ap-font-size)', fontFamily: 'monospace', marginTop: 1 }}>
           {ev.conditionExpression}
         </div>
       )}
@@ -263,41 +262,36 @@ const ReasonCell: React.FC<{
   )
 }
 
-// Styles
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex',
-  alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-}
 const modalStyle: React.CSSProperties = {
-  background: '#fff', borderRadius: 12, padding: 24,
+  ...modalSurfaceStyle,
   width: 900, maxWidth: '95vw', maxHeight: '90vh',
-  boxShadow: '0 8px 32px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column',
+  display: 'flex', flexDirection: 'column',
 }
 const closeBtnStyle: React.CSSProperties = {
-  padding: '4px 14px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff',
-  cursor: 'pointer', fontSize: 12, color: '#595959',
+  padding: '4px 14px', border: '1px solid var(--ap-color-border)', borderRadius: 6, background: 'var(--ap-color-bg-container)',
+  cursor: 'pointer', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)',
 }
 const groupBtn: React.CSSProperties = {
-  padding: '3px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
-  cursor: 'pointer', fontSize: 11, color: '#595959',
+  padding: '3px 10px', border: '1px solid var(--ap-color-border)', borderRadius: 4, background: 'var(--ap-color-bg-container)',
+  cursor: 'pointer', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)',
 }
 const activeGroupBtn: React.CSSProperties = {
-  ...groupBtn, background: '#1677ff', color: '#fff', borderColor: '#1677ff',
+  ...groupBtn, background: 'var(--ap-color-primary)', color: 'var(--ap-color-text-light-solid)', borderColor: 'var(--ap-color-primary)',
 }
 const tableStyle: React.CSSProperties = {
-  width: '100%', borderCollapse: 'collapse', fontSize: 12,
+  width: '100%', borderCollapse: 'collapse', fontSize: 'var(--ap-font-size)',
 }
-const headerRow: React.CSSProperties = { borderBottom: '2px solid #f0f0f0' }
-const rowStyle: React.CSSProperties = { borderBottom: '1px solid #f5f5f5' }
+const headerRow: React.CSSProperties = { borderBottom: '2px solid var(--ap-color-border-secondary)' }
+const rowStyle: React.CSSProperties = { borderBottom: '1px solid var(--ap-color-fill-secondary)' }
 const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '5px 6px', fontSize: 11, color: '#8c8c8c', fontWeight: 500, whiteSpace: 'nowrap',
+  textAlign: 'left', padding: '5px 6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500, whiteSpace: 'nowrap',
 }
 const tdStyle: React.CSSProperties = { padding: '5px 6px' }
 const fieldBadge: React.CSSProperties = {
-  display: 'inline-block', padding: '0 6px', borderRadius: 3, fontSize: 11,
-  background: '#e6f7ff', color: '#1677ff', fontFamily: 'monospace',
+  display: 'inline-block', padding: '0 6px', borderRadius: 3, fontSize: 'var(--ap-font-size)',
+  background: 'var(--ap-color-info-bg)', color: 'var(--ap-color-primary)', fontFamily: 'monospace',
 }
 const summaryBadge = (bg: string, color: string): React.CSSProperties => ({
-  display: 'inline-block', padding: '2px 10px', borderRadius: 4, fontSize: 12,
+  display: 'inline-block', padding: '2px 10px', borderRadius: 4, fontSize: 'var(--ap-font-size)',
   fontWeight: 600, background: bg, color,
 })

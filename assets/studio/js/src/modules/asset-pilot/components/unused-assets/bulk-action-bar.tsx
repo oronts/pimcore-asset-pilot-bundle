@@ -1,43 +1,63 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
+import type { PlannedBulkActionResult } from '../../types'
 import { ConfirmDialog } from '../shared/confirm-dialog'
 import { useToast } from '../../hooks/use-toast'
 import { usePermissions } from '../../hooks/use-permissions'
+import { useReviewedOperation } from '../../hooks/use-reviewed-operation'
 
 interface BulkActionBarProps {
   count: number
-  loading: boolean
   assetIds: number[]
-  onDelete: () => void
-  onMove: (targetFolder: string) => void
-  onQuarantine: () => void
+  lockedIds?: number[]
+  onActionComplete: (action: PlannedAction, result: PlannedBulkActionResult) => void
   onDeselect: () => void
   onLockDone?: () => void
 }
 
-export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, assetIds, onDelete, onMove, onQuarantine, onDeselect, onLockDone }) => {
+export type PlannedAction = 'delete' | 'move' | 'quarantine'
+
+interface ReviewedBulkPlan {
+  planToken: string | null
+  action: PlannedAction
+  assetIds: number[]
+  targetFolder?: string
+  result: PlannedBulkActionResult
+}
+
+export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, assetIds, lockedIds = [], onActionComplete, onDeselect, onLockDone }) => {
   const { t } = useTranslation()
   const toast = useToast()
   const { operate } = usePermissions()
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showMoveForm, setShowMoveForm] = useState(false)
-  const [targetFolder, setTargetFolder] = useState('/archive/unused')
-  const [showMoveConfirm, setShowMoveConfirm] = useState(false)
-  const [showQuarantineConfirm, setShowQuarantineConfirm] = useState(false)
+  const [targetFolder, setTargetFolder] = useState('')
   const [lockLoading, setLockLoading] = useState(false)
+  const op = useReviewedOperation<ReviewedBulkPlan>({ messageNamespace: 'asset-pilot.bulk' })
+  const lockedSet = React.useMemo(() => new Set(lockedIds), [lockedIds])
+  const mutableIds = React.useMemo(() => assetIds.filter(id => !lockedSet.has(id)), [assetIds, lockedSet])
+  const protectedCount = assetIds.length - mutableIds.length
+  const hasMutable = mutableIds.length > 0
+  const selectionKey = [...assetIds].sort((left, right) => left - right).join(',')
+
+  // Drop a reviewed plan whose selection no longer matches; op.clear also aborts an in-flight preview/apply.
+  useEffect(() => {
+    op.clear()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey])
 
   const handleBulkLock = async (): Promise<void> => {
     setLockLoading(true)
     let success = 0
-    for (const id of assetIds) {
+    for (const id of mutableIds) {
       try {
         await assetPilotApi.lockAsset(id)
         success++
-      } catch { /* skip */ }
+      } catch {
+      }
     }
     setLockLoading(false)
-    const failed = assetIds.length - success
+    const failed = mutableIds.length - success
     if (failed > 0) toast.warning(t('asset-pilot.lock.lock-partial', { success, failed }))
     else toast.success(t('asset-pilot.lock.lock-success', { count: success }))
     onLockDone?.()
@@ -50,7 +70,8 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
       try {
         await assetPilotApi.unlockAsset(id)
         success++
-      } catch { /* skip */ }
+      } catch {
+      }
     }
     setLockLoading(false)
     const failed = assetIds.length - success
@@ -59,35 +80,66 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
     onLockDone?.()
   }
 
-  const isDisabled = loading || lockLoading
+  const previewAction = async (action: PlannedAction): Promise<void> => {
+    const reviewedIds = [...mutableIds]
+    const reviewedTarget = action === 'move' ? targetFolder.trim() : undefined
+    if (reviewedIds.length === 0 || (action === 'move' && reviewedTarget === '')) return
+
+    await op.review(
+      signal => action === 'delete'
+        ? assetPilotApi.previewBulkDeleteAssets(reviewedIds, signal)
+        : action === 'move'
+          ? assetPilotApi.previewBulkMoveAssets(reviewedIds, reviewedTarget ?? '', signal)
+          : assetPilotApi.previewBulkQuarantineAssets(reviewedIds, signal),
+      result => ({ planToken: result.planToken, action, assetIds: reviewedIds, targetFolder: reviewedTarget, result }),
+    )
+  }
+
+  const applyReviewedAction = async (): Promise<void> => {
+    await op.apply(
+      (plan, signal) => plan.action === 'delete'
+        ? assetPilotApi.applyBulkDeleteAssets(plan.assetIds, plan.planToken, signal)
+        : plan.action === 'move'
+          ? assetPilotApi.applyBulkMoveAssets(plan.assetIds, plan.targetFolder ?? '', plan.planToken, signal)
+          : assetPilotApi.applyBulkQuarantineAssets(plan.assetIds, plan.planToken, signal),
+      (result, plan) => { onActionComplete(plan.action, result); setShowMoveForm(false) },
+    )
+  }
+
+  const isDisabled = op.running || lockLoading
 
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', marginBottom: 12,
-      background: '#e6f4ff', border: '1px solid #91caff', borderRadius: 8, flexWrap: 'wrap',
+      background: 'var(--ap-color-primary-bg)', border: '1px solid var(--ap-color-primary-border)', borderRadius: 8, flexWrap: 'wrap',
     }}>
-      <span style={{ fontSize: 13, fontWeight: 500, color: '#0958d9' }}>
+      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ap-color-primary-active)' }}>
         {t('asset-pilot.bulk.selected', { count })}
       </span>
 
       <div style={{ display: 'flex', gap: 8, flex: 1, flexWrap: 'wrap' }}>
         {!showMoveForm && operate && (
           <>
-            <button onClick={() => setShowDeleteConfirm(true)} disabled={isDisabled} style={deleteBtnStyle}>
-              {t('asset-pilot.bulk.delete')}
+            <button onClick={() => { void previewAction('delete') }} disabled={isDisabled || !hasMutable} style={deleteBtnStyle}>
+              {t('asset-pilot.bulk.review-delete')}
             </button>
-            <button onClick={() => setShowMoveForm(true)} disabled={isDisabled} style={moveBtnStyle}>
+            <button onClick={() => setShowMoveForm(true)} disabled={isDisabled || !hasMutable} style={moveBtnStyle}>
               {t('asset-pilot.bulk.move')}
             </button>
-            <button onClick={() => setShowQuarantineConfirm(true)} disabled={isDisabled} style={quarantineBtnStyle}>
-              {t('asset-pilot.bulk.quarantine')}
+            <button onClick={() => { void previewAction('quarantine') }} disabled={isDisabled || !hasMutable} style={quarantineBtnStyle}>
+              {t('asset-pilot.bulk.review-quarantine')}
             </button>
-            <button onClick={() => { void handleBulkLock() }} disabled={isDisabled} style={lockBtnStyle}>
+            <button onClick={() => { void handleBulkLock() }} disabled={isDisabled || !hasMutable} style={lockBtnStyle}>
               {lockLoading ? t('asset-pilot.lock.locking') : t('asset-pilot.lock.lock-selected')}
             </button>
             <button onClick={() => { void handleBulkUnlock() }} disabled={isDisabled} style={unlockBtnStyle}>
               {lockLoading ? t('asset-pilot.lock.unlocking') : t('asset-pilot.lock.unlock-selected')}
             </button>
+            {protectedCount > 0 && (
+              <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', alignSelf: 'center' }}>
+                {t('asset-pilot.bulk.protected-skipped', { count: protectedCount })}
+              </span>
+            )}
           </>
         )}
 
@@ -96,89 +148,85 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({ count, loading, as
             <input
               type="text"
               value={targetFolder}
-              onChange={e => setTargetFolder(e.target.value)}
+              onChange={e => { setTargetFolder(e.target.value); op.clear() }}
               placeholder={t('asset-pilot.bulk.target-folder')}
-              style={{ padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 12, width: 180 }}
+              style={{ padding: '4px 8px', border: '1px solid var(--ap-color-border)', borderRadius: 4, fontSize: 'var(--ap-font-size)', width: 180 }}
             />
             <button
-              onClick={() => setShowMoveConfirm(true)}
+              onClick={() => { void previewAction('move') }}
               disabled={isDisabled || !targetFolder}
               style={moveBtnStyle}
             >
-              {t('asset-pilot.bulk.confirm-move')}
+              {t('asset-pilot.bulk.review-move')}
             </button>
-            <button onClick={() => setShowMoveForm(false)} disabled={isDisabled} style={cancelBtnStyle}>
+            <button onClick={() => { setShowMoveForm(false); op.clear() }} disabled={isDisabled} style={cancelBtnStyle}>
               {t('asset-pilot.common.cancel')}
             </button>
           </div>
         )}
       </div>
 
-      <button onClick={onDeselect} style={cancelBtnStyle}>{t('asset-pilot.bulk.deselect-all')}</button>
+      <button onClick={() => { op.clear(); onDeselect() }} disabled={isDisabled} style={cancelBtnStyle}>{t('asset-pilot.bulk.deselect-all')}</button>
 
-      {showDeleteConfirm && (
+      {op.reviewedPlan != null && (
         <ConfirmDialog
-          title={t('asset-pilot.confirm.delete-title')}
-          description={t('asset-pilot.confirm.delete-description', { count })}
-          confirmLabel={t('asset-pilot.bulk.confirm-delete')}
+          title={t(`asset-pilot.confirm.${op.reviewedPlan.action}-title`)}
+          description={op.reviewedPlan.action === 'move'
+            ? t('asset-pilot.confirm.move-description', { count: op.reviewedPlan.assetIds.length, folder: op.reviewedPlan.targetFolder })
+            : t(`asset-pilot.confirm.${op.reviewedPlan.action}-description`, { count: op.reviewedPlan.assetIds.length })}
+          details={<PlanEligibility result={op.reviewedPlan.result} />}
+          confirmLabel={t(`asset-pilot.bulk.confirm-${op.reviewedPlan.action}`)}
           cancelLabel={t('asset-pilot.common.cancel')}
-          variant="danger"
-          loading={loading}
-          onConfirm={() => { onDelete(); setShowDeleteConfirm(false) }}
-          onCancel={() => setShowDeleteConfirm(false)}
-        />
-      )}
-
-      {showMoveConfirm && (
-        <ConfirmDialog
-          title={t('asset-pilot.confirm.move-title')}
-          description={t('asset-pilot.confirm.move-description', { count, folder: targetFolder })}
-          confirmLabel={t('asset-pilot.bulk.confirm-move')}
-          cancelLabel={t('asset-pilot.common.cancel')}
-          variant="warning"
-          loading={loading}
-          onConfirm={() => { onMove(targetFolder); setShowMoveConfirm(false); setShowMoveForm(false) }}
-          onCancel={() => setShowMoveConfirm(false)}
-        />
-      )}
-
-      {showQuarantineConfirm && (
-        <ConfirmDialog
-          title={t('asset-pilot.confirm.quarantine-title')}
-          description={t('asset-pilot.confirm.quarantine-description', { count })}
-          confirmLabel={t('asset-pilot.bulk.confirm-quarantine')}
-          cancelLabel={t('asset-pilot.common.cancel')}
-          variant="warning"
-          loading={loading}
-          onConfirm={() => { onQuarantine(); setShowQuarantineConfirm(false) }}
-          onCancel={() => setShowQuarantineConfirm(false)}
+          variant={op.reviewedPlan.action === 'delete' ? 'danger' : 'warning'}
+          loading={op.running}
+          confirmDisabled={op.reviewedPlan.result.eligible === 0}
+          onConfirm={() => { void applyReviewedAction() }}
+          onCancel={() => op.clear()}
         />
       )}
     </div>
   )
 }
 
+const PlanEligibility: React.FC<{ result: PlannedBulkActionResult }> = ({ result }) => {
+  const { t } = useTranslation()
+  const errors = Object.entries(result.errors)
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <p style={{ margin: '0 0 6px', fontWeight: 600 }}>
+        {t('asset-pilot.bulk.eligibility-summary', { eligible: result.eligible, failed: result.failed })}
+      </p>
+      {errors.length > 0 && (
+        <ul aria-label={t('asset-pilot.bulk.ineligible-assets')} style={{ margin: 0, paddingLeft: 20, maxHeight: 160, overflowY: 'auto' }}>
+          {errors.map(([assetId, reason]) => <li key={assetId}>{t('asset-pilot.bulk.asset-error', { id: assetId, reason })}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 const deleteBtnStyle: React.CSSProperties = {
-  padding: '4px 12px', border: '1px solid #ff7875', borderRadius: 4, background: '#fff2f0',
-  color: '#cf1322', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  padding: '4px 12px', border: '1px solid var(--ap-color-error-border-hover)', borderRadius: 4, background: 'var(--ap-color-error-bg)',
+  color: 'var(--ap-color-error-text)', cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }
 const moveBtnStyle: React.CSSProperties = {
-  padding: '4px 12px', border: '1px solid #91caff', borderRadius: 4, background: '#e6f4ff',
-  color: '#0958d9', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  padding: '4px 12px', border: '1px solid var(--ap-color-primary-border)', borderRadius: 4, background: 'var(--ap-color-primary-bg)',
+  color: 'var(--ap-color-primary-active)', cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }
 const quarantineBtnStyle: React.CSSProperties = {
-  padding: '4px 12px', border: '1px solid #ffc069', borderRadius: 4, background: '#fff7e6',
-  color: '#ad6800', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  padding: '4px 12px', border: '1px solid var(--ap-color-warning-border-hover)', borderRadius: 4, background: 'var(--ap-color-warning-bg)',
+  color: 'var(--ap-color-warning-text)', cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }
 const lockBtnStyle: React.CSSProperties = {
-  padding: '4px 12px', border: '1px solid #ffd591', borderRadius: 4, background: '#fff7e6',
-  color: '#d46b08', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  padding: '4px 12px', border: '1px solid var(--ap-color-warning-border)', borderRadius: 4, background: 'var(--ap-color-warning-bg)',
+  color: 'var(--ap-color-warning-text-active)', cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }
 const unlockBtnStyle: React.CSSProperties = {
-  padding: '4px 12px', border: '1px solid #87e8de', borderRadius: 4, background: '#e6fffb',
-  color: '#08979c', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  padding: '4px 12px', border: '1px solid var(--ap-color-info-border)', borderRadius: 4, background: 'var(--ap-color-info-bg)',
+  color: 'var(--ap-color-info-text)', cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }
 const cancelBtnStyle: React.CSSProperties = {
-  padding: '4px 12px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
-  color: '#595959', cursor: 'pointer', fontSize: 12,
+  padding: '4px 12px', border: '1px solid var(--ap-color-border)', borderRadius: 4, background: 'var(--ap-color-bg-container)',
+  color: 'var(--ap-color-text-secondary)', cursor: 'pointer', fontSize: 'var(--ap-font-size)',
 }

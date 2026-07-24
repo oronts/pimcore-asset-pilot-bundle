@@ -44,14 +44,10 @@ export const RulesTab: React.FC = () => {
   if (loading) return <TableSkeleton rows={3} columns={8} />
   if (error != null) return (
     <div>
-      <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+      <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
       <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
     </div>
   )
-
-  if (!rules || rules.length === 0) {
-    return <EmptyState variant="no-data" title={t('asset-pilot.empty.no-rules')} description={t('asset-pilot.empty.no-data-desc')} />
-  }
 
   const toggleRow = (name: string): void => {
     setExpandedRows(prev => {
@@ -73,12 +69,13 @@ export const RulesTab: React.FC = () => {
     }
   }
 
-  const sorted = sortedData(rules)
+  const sorted = sortedData(rules ?? [])
+  const hasRules = sorted.length > 0
 
   return (
     <div ref={containerRef}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.rules.configured', { count: rules.length })}</h4>
+        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.rules.configured', { count: sorted.length })}</h4>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setComparing(true)} style={btnStyle}>{t('asset-pilot.rules.diff.button')}</button>
           <button onClick={handleExport} disabled={exporting} style={btnStyle}>
@@ -87,12 +84,15 @@ export const RulesTab: React.FC = () => {
         </div>
       </div>
 
-      <RuleOverlapPanel />
+      {hasRules && <RuleOverlapPanel />}
 
-      <ResponsiveTableWrapper>
+      {!hasRules ? (
+        <EmptyState variant="no-data" title={t('asset-pilot.empty.no-rules')} description={t('asset-pilot.empty.no-data-desc')} />
+      ) : (
+      <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+            <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
               {visible.has('expand') && <th style={thStyle}></th>}
               {visible.has('name') && <SortableHeader label={t('asset-pilot.columns.name')} field="name" currentField={sortField} direction={sortDirection} onToggle={toggleSort} style={{ padding: '8px 6px' }} />}
               {visible.has('class') && <SortableHeader label={t('asset-pilot.columns.class')} field="class" currentField={sortField} direction={sortDirection} onToggle={toggleSort} style={{ padding: '8px 6px' }} />}
@@ -106,10 +106,16 @@ export const RulesTab: React.FC = () => {
           <tbody>
             {sorted.map(rule => (
               <React.Fragment key={rule.name}>
-                <tr style={{ borderBottom: '1px solid #f5f5f5' }}>
+                <tr style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
                   {visible.has('expand') && (
                     <td style={tdStyle}>
-                      <button onClick={() => toggleRow(rule.name)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#8c8c8c' }}>
+                      <button
+                        onClick={() => toggleRow(rule.name)}
+                        aria-expanded={expandedRows.has(rule.name)}
+                        aria-controls={`asset-pilot-rule-${encodeURIComponent(rule.name)}`}
+                        aria-label={t(expandedRows.has(rule.name) ? 'asset-pilot.rules.collapse-row' : 'asset-pilot.rules.expand-row', { name: rule.name })}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)' }}
+                      >
                         {expandedRows.has(rule.name) ? '\u25BC' : '\u25B6'}
                       </button>
                     </td>
@@ -117,14 +123,14 @@ export const RulesTab: React.FC = () => {
                   {visible.has('name') && <td style={{ ...tdStyle, fontWeight: 600 }}>{rule.name}</td>}
                   {visible.has('class') && <td style={tdStyle}>{rule.class}</td>}
                   {visible.has('strategy') && <td style={tdStyle}><StrategyTag strategy={rule.strategy} /></td>}
-                  {visible.has('targetPath') && <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{rule.targetPath}</td>}
+                  {visible.has('targetPath') && <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{rule.targetPath}</td>}
                   {visible.has('priority') && <td style={{ ...tdStyle, textAlign: 'center' }}>{rule.priority}</td>}
                   {visible.has('enabled') && (
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <span style={{
-                        background: rule.enabled ? '#f6ffed' : '#fff2f0',
-                        color: rule.enabled ? '#52c41a' : '#ff4d4f',
-                        padding: '1px 8px', borderRadius: 4, fontSize: 12, fontWeight: 500,
+                        background: rule.enabled ? 'var(--ap-color-success-bg)' : 'var(--ap-color-error-bg)',
+                        color: rule.enabled ? 'var(--ap-color-success-text)' : 'var(--ap-color-error-text)',
+                        padding: '1px 8px', borderRadius: 4, fontSize: 'var(--ap-font-size)', fontWeight: 500,
                       }}>
                         {rule.enabled ? t('asset-pilot.common.yes') : t('asset-pilot.common.no')}
                       </span>
@@ -140,8 +146,8 @@ export const RulesTab: React.FC = () => {
                   )}
                 </tr>
                 {expandedRows.has(rule.name) && (
-                  <tr>
-                    <td colSpan={8} style={{ padding: '8px 24px 16px', background: '#fafafa' }}>
+                  <tr id={`asset-pilot-rule-${encodeURIComponent(rule.name)}`}>
+                    <td colSpan={8} style={{ padding: '8px 24px 16px', background: 'var(--ap-color-fill-alter)' }}>
                       <ExpandedRuleDetails rule={rule} />
                     </td>
                   </tr>
@@ -151,6 +157,7 @@ export const RulesTab: React.FC = () => {
           </tbody>
         </table>
       </ResponsiveTableWrapper>
+      )}
 
       {detailRule != null && <RuleDetailModal ruleName={detailRule} onClose={() => setDetailRule(null)} />}
       {previewRule != null && <RulePreviewModal ruleName={previewRule} onClose={() => setPreviewRule(null)} />}
@@ -162,23 +169,23 @@ export const RulesTab: React.FC = () => {
 const ExpandedRuleDetails: React.FC<{ rule: RuleData }> = ({ rule }) => {
   const { t } = useTranslation()
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, fontSize: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, fontSize: 'var(--ap-font-size)' }}>
       <div>
-        <strong style={{ color: '#8c8c8c' }}>{t('asset-pilot.rules.fields')}</strong>
+        <strong style={{ color: 'var(--ap-color-text-secondary)' }}>{t('asset-pilot.rules.fields')}</strong>
         <p style={{ margin: '4px 0 0' }}>{rule.fields?.join(', ') || t('asset-pilot.rules.all')}</p>
       </div>
       {rule.condition != null && (
         <div>
-          <strong style={{ color: '#8c8c8c' }}>{t('asset-pilot.rules.condition')}</strong>
-          <p style={{ margin: '4px 0 0', fontFamily: 'monospace', fontSize: 11 }}>{rule.condition}</p>
+          <strong style={{ color: 'var(--ap-color-text-secondary)' }}>{t('asset-pilot.rules.condition')}</strong>
+          <p style={{ margin: '4px 0 0', fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{rule.condition}</p>
         </div>
       )}
       {rule.filters != null && Object.keys(rule.filters).length > 0 && (
         <div>
-          <strong style={{ color: '#8c8c8c' }}>{t('asset-pilot.rules.filters')}</strong>
+          <strong style={{ color: 'var(--ap-color-text-secondary)' }}>{t('asset-pilot.rules.filters')}</strong>
           {Object.entries(rule.filters).map(([key, val]) => (
             <p key={key} style={{ margin: '4px 0 0' }}>
-              {key}: <code style={{ fontSize: 11 }}>{JSON.stringify(val)}</code>
+              {key}: <code style={{ fontSize: 'var(--ap-font-size)' }}>{JSON.stringify(val)}</code>
             </p>
           ))}
         </div>
@@ -187,10 +194,10 @@ const ExpandedRuleDetails: React.FC<{ rule: RuleData }> = ({ rule }) => {
   )
 }
 
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 12, color: '#8c8c8c', fontWeight: 500 }
+const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500 }
 const tdStyle: React.CSSProperties = { padding: '8px 6px' }
-const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 13 }
+const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid var(--ap-color-border)', borderRadius: 6, background: 'var(--ap-color-bg-container)', cursor: 'pointer', fontSize: 13 }
 const actionBtnStyle: React.CSSProperties = {
-  padding: '3px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
-  cursor: 'pointer', fontSize: 12, color: '#1677ff',
+  padding: '3px 10px', border: '1px solid var(--ap-color-border)', borderRadius: 4, background: 'var(--ap-color-bg-container)',
+  cursor: 'pointer', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-primary)',
 }

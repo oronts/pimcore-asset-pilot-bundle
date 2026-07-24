@@ -1,45 +1,54 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import type { DuplicateFilters } from '../../types'
+import type { BrokenAssetFilters } from '../../types'
 
 const typeOptions = ['', 'image', 'document', 'video', 'audio', 'text', 'archive']
 
-interface Props {
-  filters: DuplicateFilters
-  onChange: (filters: DuplicateFilters) => void
+interface IntegrityFiltersProps {
+  filters: BrokenAssetFilters
+  onChange: (filters: BrokenAssetFilters) => void
 }
 
-export const DuplicatesFilters: React.FC<Props> = ({ filters, onChange }) => {
+export const IntegrityFilters: React.FC<IntegrityFiltersProps> = ({ filters, onChange }) => {
   const { t } = useTranslation()
-  const active = filters.minCopies != null || (filters.type != null && filters.type !== '')
+  const active = filters.folder != null || filters.type != null || filters.extension != null
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
-      <Field label={t('asset-pilot.duplicates.min-copies')}>
+      <Field label={t('asset-pilot.integrity.filter-folder')}>
         <input
-          type="number"
-          min={2}
-          value={filters.minCopies ?? ''}
-          onChange={e => {
-            const n = Number(e.target.value)
-            onChange({ ...filters, minCopies: e.target.value !== '' && Number.isFinite(n) ? Math.max(2, n) : undefined })
-          }}
-          style={{ ...inputStyle, width: 90 }}
+          type="text"
+          value={filters.folder ?? ''}
+          placeholder={t('asset-pilot.integrity.filter-folder-placeholder')}
+          onChange={event => onChange({ ...filters, folder: event.target.value || undefined })}
+          style={{ ...inputStyle, width: 190 }}
         />
       </Field>
 
       <Field label={t('asset-pilot.common.type')}>
         <select
           value={filters.type ?? ''}
-          onChange={e => onChange({ ...filters, type: e.target.value || undefined })}
+          onChange={event => onChange({ ...filters, type: event.target.value || undefined })}
           style={selectStyle}
         >
-          {typeOptions.map(tp => <option key={tp} value={tp}>{tp || t('asset-pilot.common.all-types')}</option>)}
+          {typeOptions.map(type => <option key={type} value={type}>{type || t('asset-pilot.common.all-types')}</option>)}
         </select>
       </Field>
 
+      <Field label={t('asset-pilot.integrity.filter-extension')}>
+        <input
+          type="text"
+          value={filters.extension ?? ''}
+          placeholder={t('asset-pilot.integrity.filter-extension-placeholder')}
+          onChange={event => onChange({ ...filters, extension: event.target.value || undefined })}
+          style={{ ...inputStyle, width: 110 }}
+        />
+      </Field>
+
       {active && (
-        <button onClick={() => onChange({})} style={clearBtnStyle}>{t('asset-pilot.common.clear')}</button>
+        <button type="button" onClick={() => onChange({})} style={clearBtnStyle}>
+          {t('asset-pilot.common.clear')}
+        </button>
       )}
     </div>
   )

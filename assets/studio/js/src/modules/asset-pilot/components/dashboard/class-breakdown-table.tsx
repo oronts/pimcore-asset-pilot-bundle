@@ -13,9 +13,9 @@ interface ClassBreakdownTableProps {
 }
 
 const statusColors: Record<string, string> = {
-  completed: '#52c41a',
-  failed: '#ff4d4f',
-  skipped: '#8c8c8c',
+  completed: 'var(--ap-color-success-text)',
+  failed: 'var(--ap-color-error-text)',
+  skipped: 'var(--ap-color-text-secondary)',
 }
 
 export const ClassBreakdownTable: React.FC<ClassBreakdownTableProps> = ({ stats, loading }) => {
@@ -32,11 +32,11 @@ export const ClassBreakdownTable: React.FC<ClassBreakdownTableProps> = ({ stats,
 
   return (
     <div>
-      <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.dashboard.class-breakdown')}</h4>
-      <ResponsiveTableWrapper>
+      <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: 'var(--ap-color-text)' }}>{t('asset-pilot.dashboard.class-breakdown')}</h4>
+      <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+            <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
               <SortableHeader label={t('asset-pilot.columns.class')} field="className" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />
               <SortableHeader label={t('asset-pilot.columns.total')} field="total" currentField={sortField} direction={sortDirection} onToggle={toggleSort} style={{ textAlign: 'right' }} />
               <SortableHeader label={t('asset-pilot.columns.completed')} field="completed" currentField={sortField} direction={sortDirection} onToggle={toggleSort} style={{ textAlign: 'right' }} />
@@ -47,7 +47,7 @@ export const ClassBreakdownTable: React.FC<ClassBreakdownTableProps> = ({ stats,
           </thead>
           <tbody>
             {sorted.map(stat => (
-              <tr key={stat.className} style={{ borderBottom: '1px solid #f5f5f5' }}>
+              <tr key={stat.className} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
                 <td style={{ ...tdStyle, fontWeight: 500 }}>{stat.className}</td>
                 <td style={{ ...tdStyle, textAlign: 'right' }}>{stat.total}</td>
                 <td style={{ ...tdStyle, textAlign: 'right', color: statusColors.completed }}>{stat.completed}</td>

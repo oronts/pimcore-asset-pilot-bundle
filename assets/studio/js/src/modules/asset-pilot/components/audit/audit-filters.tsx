@@ -1,6 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AuditFilters as Filters } from '../../types'
+import { theme } from 'antd'
 
 interface AuditFiltersProps {
   filters: Filters
@@ -8,56 +9,53 @@ interface AuditFiltersProps {
   onExport: () => void
 }
 
-const statusOptions = ['', 'completed', 'failed', 'skipped', 'pending', 'action_failed']
+const statusOptions = ['completed', 'completed_with_observer_error', 'failed', 'skipped', 'pending', 'in_progress', 'recovery_required']
 
 export const AuditFiltersBar: React.FC<AuditFiltersProps> = ({ filters, onChange, onExport }) => {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const controlStyle: React.CSSProperties = { padding: '6px 12px', border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadius, fontSize: token.fontSize, outline: 'none', background: token.colorBgContainer, color: token.colorText }
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
       <input
         type="text"
+        aria-label={t('asset-pilot.audit.filter-class')}
         placeholder={t('asset-pilot.audit.filter-class')}
         value={filters.class ?? ''}
         onChange={e => onChange({ ...filters, class: e.target.value || undefined, page: 1 })}
-        style={inputStyle}
+        style={{ ...controlStyle, width: 150 }}
       />
 
       <select
+        aria-label={t('asset-pilot.audit.all-statuses')}
         value={filters.status ?? ''}
         onChange={e => onChange({ ...filters, status: e.target.value || undefined, page: 1 })}
-        style={selectStyle}
+        style={controlStyle}
       >
         <option value="">{t('asset-pilot.audit.all-statuses')}</option>
-        {statusOptions.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
+        {statusOptions.map(status => <option key={status} value={status}>{t(`asset-pilot.status.${status}`)}</option>)}
       </select>
 
       <input
         type="text"
+        aria-label={t('asset-pilot.audit.filter-rule')}
         placeholder={t('asset-pilot.audit.filter-rule')}
         value={filters.ruleName ?? ''}
         onChange={e => onChange({ ...filters, ruleName: e.target.value || undefined, page: 1 })}
-        style={inputStyle}
+        style={{ ...controlStyle, width: 150 }}
       />
 
       <button
         onClick={() => onChange({ page: 1, limit: filters.limit })}
-        style={clearBtnStyle}
+        style={{ ...controlStyle, cursor: 'pointer' }}
       >
         {t('asset-pilot.common.clear')}
       </button>
 
       <div style={{ flex: 1 }} />
 
-      <button onClick={onExport} style={exportBtnStyle}>{t('asset-pilot.audit.export-csv')}</button>
+      <button onClick={onExport} style={{ ...controlStyle, paddingInline: 16, borderColor: token.colorSuccessBorder, background: token.colorSuccessBg, color: token.colorText, cursor: 'pointer', fontWeight: 500 }}>{t('asset-pilot.audit.export-csv')}</button>
     </div>
   )
-}
-
-const inputStyle: React.CSSProperties = { padding: '6px 12px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, outline: 'none', width: 150 }
-const selectStyle: React.CSSProperties = { padding: '6px 12px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, outline: 'none' }
-const clearBtnStyle: React.CSSProperties = { padding: '6px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 12 }
-const exportBtnStyle: React.CSSProperties = {
-  padding: '6px 16px', border: '1px solid #52c41a', borderRadius: 6, background: '#f6ffed', color: '#52c41a',
-  cursor: 'pointer', fontSize: 13, fontWeight: 500,
 }
