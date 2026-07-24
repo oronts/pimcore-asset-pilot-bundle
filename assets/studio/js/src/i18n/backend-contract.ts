@@ -1,6 +1,7 @@
 // Canonical backend keys the Studio translates dynamically. These mirror PHP sources of truth:
 //   OPERATION_STAT_KEYS       -> src/Enum/OperationStatus.php cases
 //   BUILTIN_HEALTH_CHECK_KEYS -> src/Health/Check/*::name()
+//   DISPOSITION_OUTCOME_KEYS  -> src/Enum/DispositionOutcome.php cases
 // Drift is caught on the PHP side by FrontendStatusContractTest and on the TS side by the
 // translations contract test, so every backend value stays localized in both locales.
 
@@ -22,4 +23,13 @@ export const BUILTIN_HEALTH_CHECK_KEYS = [
   'operation_run_backlog',
   'rule_config',
   'shared_cache',
+] as const
+
+export const DISPOSITION_OUTCOME_KEYS = [
+  'quarantined',
+  'deleted',
+  'left_referenced',
+  'left_error',
+  'blocked',
+  'skipped',
 ] as const

@@ -225,6 +225,7 @@ export const de: Record<string, string> = {
   'asset-pilot.operation-run.cancelling': 'Abbruch wird angefordert...',
   'asset-pilot.operation-run.retry': 'Unvollständige Ziele erneut versuchen',
   'asset-pilot.operation-run.retrying': 'Wiederholung wird eingereiht...',
+  'asset-pilot.operation-run.status.pending_dispatch': 'Verteilung ausstehend',
   'asset-pilot.operation-run.status.queued': 'Eingereiht',
   'asset-pilot.operation-run.status.running': 'Läuft',
   'asset-pilot.operation-run.status.cancel_requested': 'Abbruch angefordert',
@@ -533,6 +534,7 @@ export const de: Record<string, string> = {
   'asset-pilot.duplicates.outcome.deleted': 'Gelöscht',
   'asset-pilot.duplicates.outcome.left_referenced': 'Belassen (noch referenziert)',
   'asset-pilot.duplicates.outcome.left_error': 'Belassen (Fehler)',
+  'asset-pilot.duplicates.outcome.blocked': 'Blockiert',
   'asset-pilot.duplicates.outcome.skipped': 'Übersprungen (Vorschau)',
 
   // Integrität

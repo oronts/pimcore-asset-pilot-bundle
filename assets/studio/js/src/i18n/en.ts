@@ -225,6 +225,7 @@ export const en: Record<string, string> = {
   'asset-pilot.operation-run.cancelling': 'Requesting cancellation...',
   'asset-pilot.operation-run.retry': 'Retry incomplete targets',
   'asset-pilot.operation-run.retrying': 'Queueing retry...',
+  'asset-pilot.operation-run.status.pending_dispatch': 'Pending dispatch',
   'asset-pilot.operation-run.status.queued': 'Queued',
   'asset-pilot.operation-run.status.running': 'Running',
   'asset-pilot.operation-run.status.cancel_requested': 'Cancellation requested',
@@ -533,6 +534,7 @@ export const en: Record<string, string> = {
   'asset-pilot.duplicates.outcome.deleted': 'Deleted',
   'asset-pilot.duplicates.outcome.left_referenced': 'Left (still referenced)',
   'asset-pilot.duplicates.outcome.left_error': 'Left (error)',
+  'asset-pilot.duplicates.outcome.blocked': 'Blocked',
   'asset-pilot.duplicates.outcome.skipped': 'Skipped (preview)',
 
   // Integrity

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_HEALTH_CHECK_KEYS, OPERATION_STAT_KEYS } from './backend-contract'
+import { BUILTIN_HEALTH_CHECK_KEYS, DISPOSITION_OUTCOME_KEYS, OPERATION_STAT_KEYS } from './backend-contract'
 import { de } from './de'
 import { en } from './en'
 
@@ -31,6 +31,14 @@ describe('translations', () => {
   it('localizes every built-in health check in both locales', () => {
     for (const check of BUILTIN_HEALTH_CHECK_KEYS) {
       const key = `asset-pilot.health.check.${check}`
+      expect(en[key], key).toBeTypeOf('string')
+      expect(de[key], key).toBeTypeOf('string')
+    }
+  })
+
+  it('localizes every duplicate-merge disposition outcome in both locales', () => {
+    for (const outcome of DISPOSITION_OUTCOME_KEYS) {
+      const key = `asset-pilot.duplicates.outcome.${outcome}`
       expect(en[key], key).toBeTypeOf('string')
       expect(de[key], key).toBeTypeOf('string')
     }
