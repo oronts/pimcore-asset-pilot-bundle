@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Model;
 
-final readonly class ReviewedOperationRecovery
+readonly class ReviewedOperationRecovery
 {
     /** @param list<OperationRecoveryResult> $results */
     public function __construct(

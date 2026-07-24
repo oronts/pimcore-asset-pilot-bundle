@@ -6,6 +6,9 @@ namespace Oronts\AssetPilotBundle\Enum;
 
 enum OperationRunStatus: string
 {
+    // Producer-outbox state: committed with the (possibly consumer-owned) source transaction but not yet
+    // published. The dispatch relay publishes committed pending runs and transitions them to Queued.
+    case PendingDispatch = 'pending_dispatch';
     case Queued = 'queued';
     case Running = 'running';
     case CancelRequested = 'cancel_requested';

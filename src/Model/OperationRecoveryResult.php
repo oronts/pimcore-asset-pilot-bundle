@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Model;
 use Oronts\AssetPilotBundle\Enum\OperationKind;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 
-final readonly class OperationRecoveryResult
+readonly class OperationRecoveryResult
 {
     public function __construct(
         public int $operationId,

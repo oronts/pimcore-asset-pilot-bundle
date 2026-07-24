@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Model;
 
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 
-final readonly class BulkObjectResult
+readonly class BulkObjectResult
 {
     public function __construct(
         public int $objectId,

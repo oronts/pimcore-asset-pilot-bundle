@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Model;
 use Oronts\AssetPilotBundle\Enum\UndoHealOutcome;
 use Oronts\AssetPilotBundle\Enum\UndoHealReason;
 
-final readonly class UndoHealResult
+readonly class UndoHealResult
 {
     public function __construct(
         public UndoHealOutcome $outcome,

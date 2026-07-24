@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Model;
 
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 
-final readonly class BulkOrganizeReport
+readonly class BulkOrganizeReport
 {
     /**
      * @param list<OperationResult>  $results

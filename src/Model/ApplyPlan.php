@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Model;
 
-final readonly class ApplyPlan
+readonly class ApplyPlan
 {
     /**
      * @param array<string, mixed> $request

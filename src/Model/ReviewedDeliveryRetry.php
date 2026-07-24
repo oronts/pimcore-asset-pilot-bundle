@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Model;
 
-final readonly class ReviewedDeliveryRetry
+readonly class ReviewedDeliveryRetry
 {
     /** @param list<DeadOperationDelivery> $deliveries */
     public function __construct(

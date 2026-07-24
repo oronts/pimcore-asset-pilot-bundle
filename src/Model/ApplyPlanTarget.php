@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Model;
 
-final readonly class ApplyPlanTarget
+readonly class ApplyPlanTarget
 {
     public function __construct(
         public string $id,

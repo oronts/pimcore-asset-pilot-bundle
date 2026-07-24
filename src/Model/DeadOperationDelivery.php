@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Model;
 
 use Oronts\AssetPilotBundle\Enum\OperationDeliveryOutcome;
 
-final readonly class DeadOperationDelivery
+readonly class DeadOperationDelivery
 {
     public function __construct(
         public string $deliveryId,

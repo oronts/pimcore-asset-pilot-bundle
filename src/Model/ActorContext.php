@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Model;
 
 use Oronts\AssetPilotBundle\Enum\ActorType;
 
-final readonly class ActorContext
+readonly class ActorContext
 {
     public function __construct(
         public ActorType $type,

@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Model;
 
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 
-final readonly class ReviewedSelectionResult
+readonly class ReviewedSelectionResult
 {
     /**
      * @param list<MoveOperation>    $operations

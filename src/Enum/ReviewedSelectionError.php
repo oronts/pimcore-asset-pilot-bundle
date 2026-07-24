@@ -11,6 +11,7 @@ enum ReviewedSelectionError
     case MissingPlanToken;
     case MalformedPlanToken;
     case StalePlan;
+    case OwnershipLost;
     case PreflightFailed;
     case ExecutionFailed;
 }

@@ -9,7 +9,7 @@ use Oronts\AssetPilotBundle\Enum\OperationKind;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 
-final readonly class OperationIntent
+readonly class OperationIntent
 {
     /** @param array<string, mixed> $context */
     public function __construct(
