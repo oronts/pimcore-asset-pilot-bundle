@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Model\AssetFieldInfo;
+use Oronts\AssetPilotBundle\Model\DependencyExtraction;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\ClassDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Classificationstore as ClassificationstoreDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
+use Pimcore\Model\DataObject\Classificationstore as ClassificationstoreValue;
+use Pimcore\Model\DataObject\Classificationstore\KeyConfig;
+use Pimcore\Model\DataObject\Classificationstore\Service as ClassificationstoreService;
 use Pimcore\Model\DataObject\Concrete;
 use Pimcore\Model\DataObject\Data\BlockElement;
 use Pimcore\Model\DataObject\Data\ElementMetadata;
@@ -77,6 +82,135 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         ]);
 
         return $fields;
+    }
+
+    /**
+     * Asset IDs referenced through the object's classification-store fields (which Pimcore does not record as
+     * dependency edges), plus whether the traversal was complete. `complete` is false on an unresolvable key,
+     * unexpected value shape, or read error, so callers fail closed instead of deleting a still-referenced asset.
+     */
+    public function classificationStoreAssetIds(AbstractObject $object): DependencyExtraction
+    {
+        if (!$object instanceof Concrete) {
+            return new DependencyExtraction([], true);
+        }
+
+        $ids = [];
+        $complete = true;
+        foreach ($this->classFieldDefinitions($object) as $fieldDef) {
+            if (!$fieldDef instanceof ClassificationstoreDefinition) {
+                continue;
+            }
+            try {
+                $store = $this->readField($object, $fieldDef->getName());
+                if (!$store instanceof ClassificationstoreValue) {
+                    continue;
+                }
+                foreach ($store->getItems() as $keysByGroup) {
+                    if (!is_array($keysByGroup)) {
+                        $complete = false;
+                        continue;
+                    }
+                    foreach ($keysByGroup as $keyId => $valuesByLanguage) {
+                        $keyDef = $this->classificationKeyDefinition((int) $keyId);
+                        if ($keyDef === null) {
+                            // An unresolvable key might itself be an asset reference; cannot prove it is not.
+                            $complete = false;
+                            continue;
+                        }
+                        if (!$this->isAssetField($keyDef)) {
+                            continue;
+                        }
+                        if (!is_array($valuesByLanguage)) {
+                            $complete = false;
+                            continue;
+                        }
+                        foreach ($valuesByLanguage as $value) {
+                            foreach ($this->assetIdsFromClassificationValue($value, $complete) as $id) {
+                                $ids[$id] = true;
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                $complete = false;
+                $this->logger->warning('AssetFieldExtractor: failed to read classification-store field {field} on object {id}; dependency extraction is incomplete: {error}', [
+                    'field' => $fieldDef->getName(),
+                    'id' => $object->getId(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return new DependencyExtraction(array_map('intval', array_keys($ids)), $complete);
+    }
+
+    /** @return array<string, Data> */
+    protected function classFieldDefinitions(Concrete $object): array
+    {
+        return $object->getClass()->getFieldDefinitions();
+    }
+
+    protected function classificationKeyDefinition(int $keyId): ?Data
+    {
+        $keyConfig = KeyConfig::getById($keyId);
+
+        return $keyConfig === null ? null : ClassificationstoreService::getFieldDefinitionFromKeyConfig($keyConfig);
+    }
+
+    /**
+     * @param bool $complete set to false when a value shape is not a recognized asset reference, so the
+     *                       caller fails closed instead of treating an unparseable asset key as empty
+     *
+     * @return list<int>
+     */
+    private function assetIdsFromClassificationValue(mixed $value, bool &$complete): array
+    {
+        $ids = [];
+        foreach ($this->extractAssetsFromValue($value) as $asset) {
+            $id = $asset->getId();
+            if ($id !== null) {
+                $ids[] = (int) $id;
+            }
+        }
+        if ($ids !== []) {
+            return $ids;
+        }
+        // Recognized "no asset" forms stay complete; unrecognized shapes fail closed.
+        if ($value === null || $value === '') {
+            return [];
+        }
+        // Raw stored form for an asset key: a numeric id, or a list/relation of ids.
+        if (is_int($value)) {
+            return $value > 0 ? [$value] : [];
+        }
+        if (is_string($value)) {
+            if (ctype_digit($value)) {
+                return (int) $value > 0 ? [(int) $value] : [];
+            }
+            $complete = false;
+
+            return [];
+        }
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                foreach ($this->assetIdsFromClassificationValue($item, $complete) as $id) {
+                    $ids[] = $id;
+                }
+            }
+
+            return $ids;
+        }
+        // A recognized asset carrier that resolved to no asset (e.g. an empty image field) is complete.
+        if ($value instanceof Asset || $value instanceof Hotspotimage || $value instanceof ImageGallery
+            || $value instanceof ElementMetadata || $value instanceof BlockElement) {
+            return [];
+        }
+
+        // An unsupported object, bool, float, or any other unexpected shape for an asset key: fail closed.
+        $complete = false;
+
+        return [];
     }
 
     /** @return Asset[] */

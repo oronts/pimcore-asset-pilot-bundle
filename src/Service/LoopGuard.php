@@ -30,6 +30,9 @@ class LoopGuard
     /** @var array<string, positive-int> */
     private array $lockDepth = [];
 
+    /** @var array<string, string> durable operation-run-item claim tokens held by this process, keyed by "runId:itemKey" */
+    private array $operationRunItemTokens = [];
+
     public function __construct(
         private readonly CacheItemPoolInterface $cache,
         private readonly LockFactory $lockFactory,
@@ -51,9 +54,10 @@ class LoopGuard
     }
 
     /**
-     * Extend the object lock's lease so a long organize run does not let the 60s lease expire while
-     * still working. Throws if the lock was already lost (TTL expired and another job took it), which
-     * correctly aborts the now-unsafe run rather than risk a double-move.
+     * Extend the object lock's lease so a long organize run does not let the configured lease
+     * (idempotency.lock_ttl) expire while still working. Throws if the lock was already lost (TTL
+     * expired and another job took it), which correctly aborts the now-unsafe run rather than risk a
+     * double-move.
      */
     public function refreshObject(int $objectId): void
     {
@@ -112,12 +116,34 @@ class LoopGuard
 
     public function releaseOperationRunItem(string $runId, string $itemKey): void
     {
-        $this->release($this->operationRunItemResource($runId, $itemKey));
+        $resource = $this->operationRunItemResource($runId, $itemKey);
+        $this->release($resource);
+        if (!isset($this->heldLocks[$resource])) {
+            unset($this->operationRunItemTokens[$runId . ':' . $itemKey]);
+        }
     }
 
     public function refreshOperationRunItem(string $runId, string $itemKey): void
     {
         $this->refresh($this->operationRunItemResource($runId, $itemKey));
+    }
+
+    /**
+     * Mint (or return the already-held) durable claim token for an operation-run item the worker is about
+     * to begin. The worker stamps it via OperationRunStore::resumeItem and holds it for the item's
+     * lifetime so its heartbeat and completion are fenced: a redelivery that reclaims the item mints a new
+     * token, and the abandoned worker's lease renewal then fails and aborts it before its next write.
+     * Cleared when the item lock is fully released. Only claimed items get a token; pre-claim
+     * cancel/skip completions read null and stay unfenced so they still terminalize a queued item.
+     */
+    public function beginOperationRunItemLease(string $runId, string $itemKey): string
+    {
+        return $this->operationRunItemTokens[$runId . ':' . $itemKey] ??= bin2hex(random_bytes(16));
+    }
+
+    public function operationRunItemToken(string $runId, string $itemKey): ?string
+    {
+        return $this->operationRunItemTokens[$runId . ':' . $itemKey] ?? null;
     }
 
     private function acquire(string $resource): bool

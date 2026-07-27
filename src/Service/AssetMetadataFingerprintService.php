@@ -16,6 +16,8 @@ class AssetMetadataFingerprintService
 {
     private const int VERSION = 1;
 
+    public function __construct(private readonly string $lockProperty) {}
+
     /** @param list<int> $assetIds @return list<ApplyPlanTarget> */
     public function tagTargets(array $assetIds): array
     {
@@ -90,13 +92,14 @@ class AssetMetadataFingerprintService
         return $targets;
     }
 
-    /** @return array{exists: true, modifiedAt: int|null, path: string} */
+    /** @return array{exists: true, modifiedAt: int|null, path: string, locked: bool} */
     private function assetState(Asset $asset): array
     {
         return [
             'exists' => true,
             'modifiedAt' => $asset->getModificationDate(),
             'path' => $asset->getRealFullPath(),
+            'locked' => AssetProtection::isLocked($asset, $this->lockProperty),
         ];
     }
 
@@ -115,9 +118,10 @@ class AssetMetadataFingerprintService
     /** @return array<string, mixed> */
     private function propertyState(Asset $asset, string $propertyName): array
     {
+        $locked = AssetProtection::isLocked($asset, $this->lockProperty);
         $property = $asset->getProperty($propertyName, true);
         if (!$property instanceof Property) {
-            return ['exists' => false];
+            return ['exists' => false, 'locked' => $locked];
         }
 
         return [
@@ -126,6 +130,7 @@ class AssetMetadataFingerprintService
             'inheritable' => $property->getInheritable(),
             'inherited' => $property->getInherited(),
             'type' => $property->getType(),
+            'locked' => $locked,
         ];
     }
 

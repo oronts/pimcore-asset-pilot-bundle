@@ -17,8 +17,8 @@ class AssetMutationFingerprintService implements ResetInterface
 
     public function __construct(
         private readonly Connection $connection,
-        private readonly ContentUsageScanner $contentScanner,
-        private readonly DependencyUsageScannerInterface $dependencyScanner,
+        private readonly ContentUsageScannerInterface $contentScanner,
+        private readonly DependencyUsageVerifierInterface $dependencyVerifier,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
@@ -59,9 +59,6 @@ class AssetMutationFingerprintService implements ResetInterface
     public function reset(): void
     {
         $this->contentScanner->reset();
-        if ($this->dependencyScanner instanceof ResetInterface) {
-            $this->dependencyScanner->reset();
-        }
     }
 
     /** @param array<string, string> $expectedFingerprints */
@@ -104,7 +101,7 @@ class AssetMutationFingerprintService implements ResetInterface
             'contentReferenced' => $this->contentScanner->isReferencedInContent($asset),
             'dependencies' => $this->dependencyRows($assetId),
             'exists' => true,
-            'liveDependencyReferenced' => $this->dependencyScanner->isReferenced($asset),
+            'dependencyVerdict' => $this->dependencyVerifier->verdict($asset)->value,
             'locked' => AssetProtection::isLocked($asset, $this->lockProperty),
             'modifiedAt' => $asset->getModificationDate(),
             'path' => $asset->getRealFullPath(),

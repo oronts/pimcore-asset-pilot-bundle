@@ -7,18 +7,20 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Pimcore\Model\Exception\NotFoundException;
 
-class AssetMetadataMutationService
+class AssetMetadataMutationService implements AssetMetadataMutationServiceInterface
 {
     public function __construct(
         private readonly LoopGuard $loopGuard,
-        private readonly ElementAuthorization $authorization,
-        private readonly AssetPropertyService $propertyService,
+        private readonly ReviewedAssetLockCoordinator $reviewedLocks,
+        private readonly ElementAuthorizationInterface $authorization,
+        private readonly AssetPropertyServiceInterface $propertyService,
         private readonly AssetMetadataFingerprintService $fingerprints,
+        private readonly string $lockProperty,
     ) {}
 
     /** @param list<int> $assetIds @param list<int> $tagIds */
@@ -130,38 +132,31 @@ class AssetMetadataMutationService
      */
     private function withLockedAssets(array $assetIds, bool $allowFolders, callable $validate, callable $mutation): mixed
     {
-        sort($assetIds, SORT_NUMERIC);
-        $lockedIds = [];
-        $lockedAssets = [];
+        return $this->reviewedLocks->run(
+            $assetIds,
+            static fn (int $assetId): \Throwable => new StaleApplyPlanException(sprintf('Asset %d is busy. Preview the operation again.', $assetId)),
+            function (array $lockedIds) use ($allowFolders, $validate, $mutation): mixed {
+                $lockedAssets = [];
+                foreach ($lockedIds as $assetId) {
+                    $asset = $this->loadAsset($assetId);
+                    if (!$asset instanceof Asset || (!$allowFolders && $asset instanceof Asset\Folder)) {
+                        throw new StaleApplyPlanException(sprintf('Asset %d no longer exists. Preview the operation again.', $assetId));
+                    }
+                    if (!$this->authorization->isAllowed($asset, 'publish')) {
+                        throw new StaleApplyPlanException(sprintf('Asset %d is no longer eligible. Preview the operation again.', $assetId));
+                    }
+                    if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+                        throw new StaleApplyPlanException(sprintf('Asset %d is protected and cannot be modified. Preview the operation again.', $assetId));
+                    }
 
-        try {
-            foreach ($assetIds as $assetId) {
-                if (!$this->loopGuard->acquireAsset($assetId)) {
-                    throw new StaleApplyPlanException(sprintf('Asset %d is busy. Preview the operation again.', $assetId));
+                    $validate($asset);
+                    $lockedAssets[] = $asset;
+                    $this->loopGuard->refreshAsset($assetId);
                 }
-                $lockedIds[] = $assetId;
-            }
 
-            foreach ($lockedIds as $assetId) {
-                $asset = $this->loadAsset($assetId);
-                if (!$asset instanceof Asset || (!$allowFolders && $asset instanceof Asset\Folder)) {
-                    throw new StaleApplyPlanException(sprintf('Asset %d no longer exists. Preview the operation again.', $assetId));
-                }
-                if (!$this->authorization->isAllowed($asset, 'publish')) {
-                    throw new StaleApplyPlanException(sprintf('Asset %d is no longer eligible. Preview the operation again.', $assetId));
-                }
-
-                $validate($asset);
-                $lockedAssets[] = $asset;
-                $this->loopGuard->refreshAsset($assetId);
-            }
-
-            return $mutation($lockedIds, $lockedAssets);
-        } finally {
-            foreach (array_reverse($lockedIds) as $assetId) {
-                $this->loopGuard->releaseAsset($assetId);
-            }
-        }
+                return $mutation($lockedIds, $lockedAssets);
+            },
+        );
     }
 
     /** @param list<int> $tagIds */

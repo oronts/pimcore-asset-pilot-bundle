@@ -23,7 +23,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  * excluded folder) and returns a single MovePlan. AssetOrganizer's dry-run and live execution
  * both call this so the preview's skip reasons always match what the move would actually do.
  */
-class MovePlanner
+class MovePlanner implements MovePlannerInterface
 {
     /** @param string[] $excludeFolders */
     public function __construct(
@@ -45,7 +45,7 @@ class MovePlanner
         $sourcePath = $asset->getRealFullPath();
 
         $strategy = $this->strategyResolver->resolve($rule);
-        if (!$strategy->resolve($asset, $object, $rule)) {
+        if (!$strategy->resolve($asset, $object, $rule, $dryRun)) {
             return MovePlan::skip($resolvedPath, 'Strategy rejected move');
         }
 
@@ -93,7 +93,7 @@ class MovePlanner
         if (!$strategy instanceof SideEffectFreeConflictStrategyInterface) {
             return new DriftAssessment($targetPath, DriftEligibility::RuntimeCheckRequired, 'The configured strategy is evaluated only when a move is requested');
         }
-        if (!$strategy->resolve($asset, $object, $rule)) {
+        if (!$strategy->resolve($asset, $object, $rule, true)) {
             return new DriftAssessment($targetPath, DriftEligibility::Blocked, 'Strategy rejected move');
         }
 
