@@ -6,10 +6,11 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Action\RuleActionConfigValidatorInterface;
 use Oronts\AssetPilotBundle\Action\RuleActionResolver;
-use Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator;
+use Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\ValidationResult;
-use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
+use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
+use Oronts\AssetPilotBundle\Strategy\CallbackDecisionInterface;
 use Pimcore\Model\DataObject\ClassDefinition;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
@@ -19,7 +20,7 @@ use Pimcore\Model\DataObject\Objectbrick;
 use Pimcore\Tool;
 use Psr\Container\ContainerInterface;
 
-class ConfigValidator
+class ConfigValidator implements ConfigValidatorInterface
 {
     private const array VALID_FILTER_TYPES = ['image', 'video', 'document', 'audio', 'text', 'archive', 'folder', 'unknown'];
 
@@ -29,8 +30,8 @@ class ConfigValidator
      */
     public function __construct(
         private readonly ContainerInterface $callbacks,
-        private readonly ExpressionConditionEvaluator $conditionEvaluator,
-        private readonly TemplatePathResolver $pathResolver,
+        private readonly ConditionEvaluatorInterface $conditionEvaluator,
+        private readonly PathResolverInterface $pathResolver,
         private readonly ?RuleActionResolver $actionResolver = null,
     ) {}
 
@@ -218,11 +219,20 @@ class ConfigValidator
             return [new ValidationResult($rule->name, 'callback_service', 'fail', 'Callback strategy requires a callback service ID')];
         }
 
-        if ($this->callbacks->has($rule->callback)) {
-            return [new ValidationResult($rule->name, 'callback_service', 'pass', "Callback service \"{$rule->callback}\" exists")];
+        if (!$this->callbacks->has($rule->callback)) {
+            return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found. Implement CallbackDecisionInterface or tag a callable with \"oronts_asset_pilot.callback\".")];
         }
 
-        return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" not found. Tag it with \"oronts_asset_pilot.callback\".")];
+        try {
+            $callback = $this->callbacks->get($rule->callback);
+        } catch (\Throwable) {
+            return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" could not be resolved.")];
+        }
+        if (!$callback instanceof CallbackDecisionInterface && !is_callable($callback)) {
+            return [new ValidationResult($rule->name, 'callback_service', 'fail', "Callback service \"{$rule->callback}\" must implement CallbackDecisionInterface or be callable.")];
+        }
+
+        return [new ValidationResult($rule->name, 'callback_service', 'pass', "Callback service \"{$rule->callback}\" is usable")];
     }
 
     /** @return ValidationResult[] */

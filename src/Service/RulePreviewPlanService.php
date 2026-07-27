@@ -13,9 +13,12 @@ use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\DataObject\AbstractObject;
 
-final readonly class RulePreviewPlanService
+readonly class RulePreviewPlanService implements RulePreviewPlanServiceInterface
 {
-    public function __construct(private ApplyPlanServiceInterface $plans) {}
+    public function __construct(
+        private ApplyPlanServiceInterface $plans,
+        private OrganizePlanFingerprint $fingerprints,
+    ) {}
 
     /** @param list<MoveOperation> $operations */
     public function issue(Rule $rule, AbstractObject $object, ActorContext $actor, array $operations): string
@@ -60,7 +63,7 @@ final readonly class RulePreviewPlanService
         $request = [
             'objectId' => $objectId,
             'objectModifiedAt' => $object->getModificationDate(),
-            'operations' => $this->operations($operations),
+            'operations' => MoveOperationSnapshot::list($operations),
             'rule' => $rule->name,
         ];
 
@@ -69,26 +72,8 @@ final readonly class RulePreviewPlanService
             $actor,
             $request,
             ['rule' => $rule->toConfigArray()],
-            [new ApplyPlanTarget('object:' . $objectId, hash('sha256', $this->encode($request)))],
+            [new ApplyPlanTarget('object:' . $objectId, $this->fingerprints->forOperations($object, $operations))],
         );
-    }
-
-    /** @param list<MoveOperation> $operations @return list<array<string, int|string|null>> */
-    private function operations(array $operations): array
-    {
-        $snapshot = array_map(static fn (MoveOperation $operation): array => [
-            'assetId' => $operation->assetId,
-            'error' => $operation->errorMessage,
-            'objectClass' => $operation->objectClass,
-            'objectId' => $operation->objectId,
-            'rule' => $operation->ruleName,
-            'source' => $operation->sourcePath,
-            'status' => $operation->status->value,
-            'target' => $operation->targetPath,
-        ], $operations);
-        usort($snapshot, fn (array $left, array $right): int => $this->encode($left) <=> $this->encode($right));
-
-        return $snapshot;
     }
 
     private function status(ApplyPlanStatus $status): RulePreviewPlanStatus
@@ -100,8 +85,4 @@ final readonly class RulePreviewPlanService
         };
     }
 
-    private function encode(mixed $value): string
-    {
-        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    }
 }

@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Condition;
 
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Support\Regex;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\ExpressionLanguage\ExpressionFunctionProviderInterface;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
+use Symfony\Component\ExpressionLanguage\Node\ConstantNode;
+use Symfony\Component\ExpressionLanguage\Node\FunctionNode;
+use Symfony\Component\ExpressionLanguage\Node\Node;
+use Symfony\Component\ExpressionLanguage\ParsedExpression;
 
 class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
 {
@@ -75,7 +80,8 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
      */
     public function validateSyntax(string $expression): void
     {
-        $this->getExpressionLanguage()->parse($expression, ['object', 'asset', 'rule', 'locale']);
+        $parsed = $this->getExpressionLanguage()->parse($expression, ['object', 'asset', 'rule', 'locale']);
+        $this->validateLiteralRegexPatterns($parsed);
     }
 
     protected function getCompiledExpression(string $expression): \Symfony\Component\ExpressionLanguage\ParsedExpression
@@ -146,9 +152,9 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
 
         $el->register(
             'path_matches',
-            static fn (string $asset, string $pattern): string => sprintf('preg_match(%s, (%s)->getFullPath())', $pattern, $asset),
+            static fn (string $asset, string $pattern): string => sprintf('%s::matches(%s, (%s)->getFullPath())', Regex::class, $pattern, $asset),
             static function (array $vars, Asset $asset, string $pattern): bool {
-                return (bool) preg_match($pattern, $asset->getFullPath());
+                return Regex::matches($pattern, $asset->getFullPath());
             },
         );
 
@@ -169,5 +175,25 @@ class ExpressionConditionEvaluator implements ConditionEvaluatorInterface
             static fn (string $asset): string => sprintf('(%s)->getType() === "document"', $asset),
             static fn (array $vars, Asset $asset): bool => $asset->getType() === 'document',
         );
+    }
+
+    private function validateLiteralRegexPatterns(ParsedExpression $expression): void
+    {
+        $this->walkExpressionNodes($expression->getNodes());
+    }
+
+    private function walkExpressionNodes(Node $node): void
+    {
+        if ($node instanceof FunctionNode && $node->attributes['name'] === 'path_matches') {
+            $arguments = array_values($node->nodes['arguments']->nodes);
+            $pattern = $arguments[1] ?? null;
+            if ($pattern instanceof ConstantNode && is_string($pattern->attributes['value'])) {
+                Regex::assertValid($pattern->attributes['value']);
+            }
+        }
+
+        foreach ($node->nodes as $child) {
+            $this->walkExpressionNodes($child);
+        }
     }
 }

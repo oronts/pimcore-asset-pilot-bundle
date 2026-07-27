@@ -8,25 +8,25 @@ use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-class AssetPropertyService
+class AssetPropertyService implements AssetPropertyServiceInterface
 {
     public function __construct(
         private readonly LoopGuard $loopGuard,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /** @return list<string> */
-    public function lockAsset(int $assetId, string $assetPath): array
+    public function lockAsset(int $assetId): array
     {
-        $this->setProperty($assetId, $assetPath, $this->lockProperty, PropertyType::Bool->value, '1');
+        $this->setProperty($assetId, $this->lockProperty, PropertyType::Bool->value, '1');
         $this->logger->info('Asset Pilot: locked asset {id}', ['id' => $assetId]);
 
         return $this->observerWarnings(
@@ -52,9 +52,8 @@ class AssetPropertyService
         );
     }
 
-    public function setProperty(int $assetId, string $assetPath, string $name, string $type, string $data): void
+    public function setProperty(int $assetId, string $name, string $type, string $data): void
     {
-        unset($assetPath);
         [$propertyType, $value] = $this->validatedProperty($name, $type, $data);
         $asset = $this->requireMutableAsset($assetId);
         $this->mutate($asset, static fn (Asset $mutable): Asset => $mutable->setProperty($name, $propertyType->value, $value));
@@ -95,7 +94,7 @@ class AssetPropertyService
                 }
 
                 $propertyValue = $type === PropertyType::Bool->value ? ($value ? '1' : '0') : (string) $value;
-                $this->setProperty($id, $asset->getRealFullPath(), $name, $type, $propertyValue);
+                $this->setProperty($id, $name, $type, $propertyValue);
                 $updatedIds[] = $id;
             } catch (\Throwable $e) {
                 $errors[$id] = 'Failed to update the asset property.';

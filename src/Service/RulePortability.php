@@ -13,7 +13,7 @@ use Oronts\AssetPilotBundle\Model\RuleSetDiff;
  * the rules currently loaded. Rules stay config-only (Decision #11): this never writes rules, it
  * produces a paste-ready config block and a diff so a rule set can be moved between environments.
  */
-class RulePortability
+class RulePortability implements RulePortabilityInterface
 {
     public const int FORMAT_VERSION = 1;
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\PathResolver;
 
+use Oronts\AssetPilotBundle\Exception\PathResolutionException;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Asset\Service as AssetService;
@@ -51,12 +52,22 @@ class TemplatePathResolver implements PathResolverInterface
         try {
             $resolved = $this->render($template, $context);
         } catch (\Throwable $e) {
+            // Fail closed: a runtime render failure (throwing accessor, consumer Twig extension, or
+            // context provider) must NOT become a generic destination that silently misfiles the
+            // asset. The empty-segment fallback in normalizePath() still covers a *successful* render
+            // that produced no usable path.
             $this->logger->error('Asset Pilot: template rendering failed for rule "{rule}": {error}', [
                 'rule' => $rule->name,
                 'error' => $e->getMessage(),
                 'template' => $rule->targetPath,
+                'exception' => $e,
             ]);
-            $resolved = '/Assets/' . ($object->getKey() ?? 'unknown');
+
+            throw new PathResolutionException(
+                sprintf('Target path template for rule "%s" could not be rendered: %s', $rule->name, $e->getMessage()),
+                0,
+                $e,
+            );
         }
 
         $path = $this->normalizePath($resolved, $object->getKey());

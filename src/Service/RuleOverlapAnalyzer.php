@@ -13,7 +13,7 @@ use Oronts\AssetPilotBundle\Model\RuleOverlap;
  * (class, field) and so compete for the same assets. Pure, catalog-free — it inspects the rule
  * definitions only, never scans objects, so it is safe to run synchronously.
  */
-class RuleOverlapAnalyzer
+class RuleOverlapAnalyzer implements RuleOverlapAnalyzerInterface
 {
     public function __construct(
         protected readonly RuleEngineInterface $ruleEngine,
