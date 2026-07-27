@@ -100,13 +100,7 @@ class Version20260714000000 extends BundleAwareMigration
     private function collapseDuplicateSnapshots(string $capturedAt): void
     {
         $snapshots = $this->connection->createQueryBuilder()
-            ->select(
-                'MIN(id) AS canonical_id',
-                'type',
-                'COALESCE(SUM(unused_count), 0) AS unused_count',
-                'COALESCE(SUM(unused_size), 0) AS unused_size',
-                'COALESCE(SUM(unknown_size_count), 0) AS unknown_size_count',
-            )
+            ->select('MIN(id) AS canonical_id', 'type')
             ->from(Installer::TABLE_STORAGE_SNAPSHOT)
             ->where('run_id IS NULL')
             ->andWhere('captured_at = :capturedAt')
@@ -116,20 +110,9 @@ class Version20260714000000 extends BundleAwareMigration
             ->fetchAllAssociative();
 
         foreach ($snapshots as $snapshot) {
-            $canonicalId = (int) $snapshot['canonical_id'];
-            $this->connection->createQueryBuilder()
-                ->update(Installer::TABLE_STORAGE_SNAPSHOT)
-                ->set('unused_count', ':unusedCount')
-                ->set('unused_size', ':unusedSize')
-                ->set('unknown_size_count', ':unknownSizeCount')
-                ->where('id = :canonicalId')
-                ->andWhere('run_id IS NULL')
-                ->setParameter('unusedCount', (int) $snapshot['unused_count'])
-                ->setParameter('unusedSize', (int) $snapshot['unused_size'])
-                ->setParameter('unknownSizeCount', (int) $snapshot['unknown_size_count'])
-                ->setParameter('canonicalId', $canonicalId)
-                ->executeStatement();
-
+            // Retain one complete historical sample per (captured_at, type): the earliest row keeps its own
+            // values and the same-second duplicates are dropped. A legacy capture wrote one full snapshot per
+            // type, so summing repeated full captures would double-count the trend, not merge partitions.
             $this->connection->createQueryBuilder()
                 ->delete(Installer::TABLE_STORAGE_SNAPSHOT)
                 ->where('run_id IS NULL')
@@ -138,7 +121,7 @@ class Version20260714000000 extends BundleAwareMigration
                 ->andWhere('id <> :canonicalId')
                 ->setParameter('capturedAt', $capturedAt)
                 ->setParameter('type', (string) $snapshot['type'])
-                ->setParameter('canonicalId', $canonicalId)
+                ->setParameter('canonicalId', (int) $snapshot['canonical_id'])
                 ->executeStatement();
         }
     }

@@ -11,7 +11,7 @@ use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\QuarantineStatus;
-use Oronts\AssetPilotBundle\Migrations\Version20260717000000;
+use Oronts\AssetPilotBundle\Migrations\Version20260721000000;
 use Pimcore\Bundle\StaticResolverBundle\Lib\CacheResolverInterface;
 use Pimcore\Bundle\StudioBackendBundle\Util\Constant\CacheKeys;
 use Pimcore\Extension\Bundle\Installer\SettingsStoreAwareInstaller;
@@ -500,6 +500,8 @@ class Installer extends SettingsStoreAwareInstaller
             ['created_at', 'datetime', ['notnull' => true]],
             ['updated_at', 'datetime', ['notnull' => true]],
             ['completed_at', 'datetime', ['notnull' => false]],
+            ['claim_token', 'string', ['length' => 64, 'notnull' => false]],
+            ['lease_expires_at', 'datetime', ['notnull' => false]],
         ];
     }
 
@@ -509,6 +511,7 @@ class Installer extends SettingsStoreAwareInstaller
         return [
             'idx_operation_item_run_status' => ['run_id', 'status'],
             'idx_operation_item_target' => ['target_type', 'target_id'],
+            'idx_operation_item_lease' => ['status', 'lease_expires_at'],
         ];
     }
 
@@ -545,6 +548,6 @@ class Installer extends SettingsStoreAwareInstaller
      */
     public function getLastMigrationVersionClassName(): ?string
     {
-        return Version20260717000000::class;
+        return Version20260721000000::class;
     }
 }

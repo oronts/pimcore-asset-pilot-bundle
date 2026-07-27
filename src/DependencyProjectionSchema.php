@@ -8,7 +8,7 @@ use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
 
-final class DependencyProjectionSchema
+class DependencyProjectionSchema
 {
     public static function ensure(Schema $schema): void
     {

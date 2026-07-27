@@ -9,7 +9,7 @@ use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Installer;
 use Pimcore\Migrations\BundleAwareMigration;
 
-final class Version20260715170000 extends BundleAwareMigration
+class Version20260715170000 extends BundleAwareMigration
 {
     public function getDescription(): string
     {

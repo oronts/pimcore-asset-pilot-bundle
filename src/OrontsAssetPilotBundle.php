@@ -16,7 +16,7 @@ class OrontsAssetPilotBundle extends AbstractPimcoreBundle
         return \dirname(__DIR__);
     }
 
-    protected function getComposerPackageName(): string
+    public function getComposerPackageName(): string
     {
         return 'oronts/asset-pilot-bundle';
     }

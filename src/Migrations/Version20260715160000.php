@@ -8,7 +8,7 @@ use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Installer;
 use Pimcore\Migrations\BundleAwareMigration;
 
-final class Version20260715160000 extends BundleAwareMigration
+class Version20260715160000 extends BundleAwareMigration
 {
     public function getDescription(): string
     {
