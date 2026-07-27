@@ -81,7 +81,7 @@ class DurableRuleActionObserver implements DurableOperationObserverInterface
             throw new \RuntimeException('The rule action asset is unavailable.');
         }
 
-        $action->applyPrepared($asset, $payload);
+        $action->applyPrepared($asset, $payload, $delivery);
     }
 
     protected function loadAsset(int $assetId): ?Asset

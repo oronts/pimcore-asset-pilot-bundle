@@ -8,7 +8,7 @@ use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Pimcore\Model\Element\AbstractElement;
 
-class ElementAuthorization
+class ElementAuthorization implements ElementAuthorizationInterface
 {
     public function __construct(
         private readonly ActorContextStore $actors,

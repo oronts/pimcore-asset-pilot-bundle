@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Observer;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Model\PreparedDelivery;
 
-final class OperationObserverRegistry
+class OperationObserverRegistry
 {
     /** @var array<string, DurableOperationObserverInterface> */
     private array $observers = [];
@@ -19,6 +19,9 @@ final class OperationObserverRegistry
             $id = trim($observer->id());
             if ($id === '') {
                 throw new \LogicException('Durable operation observer IDs must not be empty.');
+            }
+            if (strlen($id) > PreparedDelivery::MAX_IDENTIFIER_BYTES) {
+                throw new \LogicException('Durable operation observer IDs cannot exceed 191 bytes.');
             }
             if (isset($this->observers[$id])) {
                 throw new \LogicException(sprintf('Duplicate durable operation observer ID "%s".', $id));
@@ -46,10 +49,10 @@ final class OperationObserverRegistry
                         $delivery->observerId,
                     ));
                 }
-                if (isset($keys[$delivery->deliveryKey])) {
-                    throw new \LogicException(sprintf('Duplicate durable delivery key "%s".', $delivery->deliveryKey));
+                if (isset($keys[$observerId][$delivery->deliveryKey])) {
+                    throw new \LogicException(sprintf('Observer "%s" prepared duplicate durable delivery key "%s".', $observerId, $delivery->deliveryKey));
                 }
-                $keys[$delivery->deliveryKey] = true;
+                $keys[$observerId][$delivery->deliveryKey] = true;
                 $prepared[] = $delivery;
             }
         }

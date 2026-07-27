@@ -10,10 +10,9 @@ use Oronts\AssetPilotBundle\Model\HealthCheckResult;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 
 /**
- * Surfaces operation runs stuck in the queue. Because a run is only ever failed once a worker claims it,
- * a legitimate broker backlog is never age-failed; the cost is that a genuinely lost broker message leaves
- * its run Queued indefinitely. This probe warns when a run has been Queued past the configured threshold so
- * an operator can cancel and retry it, without the maintenance task ever terminalizing a real backlog.
+ * Warns when a run has waited past the threshold before a worker processes it: queued (lost message / stalled
+ * consumer) or pending_dispatch (the pimcore:maintenance relay is not scheduled). A run is only failed once a
+ * worker claims it, so a legitimate backlog is never age-failed.
  */
 class StuckOperationRunHealthCheck implements HealthCheckInterface
 {
@@ -44,16 +43,16 @@ class StuckOperationRunHealthCheck implements HealthCheckInterface
             return new HealthCheckResult(
                 $this->name(),
                 HealthStatus::Warning,
-                sprintf('%d operation run(s) have been queued longer than %d seconds and may have lost their broker message; cancel and retry them or verify the consumers.', $stuck, $this->warningAfterSeconds),
-                ['stuck_queued_runs' => $stuck, 'warning_after_seconds' => $this->warningAfterSeconds],
+                sprintf('%d operation run(s) have been awaiting dispatch or queued longer than %d seconds; verify the pimcore:maintenance scheduler (publishes pending runs) and the asset_pilot consumer, then cancel and retry any stranded run.', $stuck, $this->warningAfterSeconds),
+                ['stuck_backlog_runs' => $stuck, 'warning_after_seconds' => $this->warningAfterSeconds],
             );
         }
 
         return new HealthCheckResult(
             $this->name(),
             HealthStatus::Ok,
-            'No operation runs are stuck in the queue beyond the backlog threshold.',
-            ['stuck_queued_runs' => 0, 'warning_after_seconds' => $this->warningAfterSeconds],
+            'No operation runs are stuck awaiting dispatch or in the queue beyond the backlog threshold.',
+            ['stuck_backlog_runs' => 0, 'warning_after_seconds' => $this->warningAfterSeconds],
         );
     }
 }

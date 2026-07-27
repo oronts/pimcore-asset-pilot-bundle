@@ -22,5 +22,6 @@ interface DurableOperationObserverInterface
      */
     public function prepare(OperationIntent $intent): iterable;
 
+    /** Long-running observers must call $delivery->heartbeat() before irreversible work. */
     public function deliver(DeliveryEnvelope $delivery): void;
 }

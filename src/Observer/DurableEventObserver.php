@@ -12,7 +12,7 @@ use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Model\PreparedDelivery;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-final class DurableEventObserver implements DurableOperationObserverInterface
+class DurableEventObserver implements DurableOperationObserverInterface
 {
     public function __construct(private readonly EventDispatcherInterface $events) {}
 
