@@ -28,7 +28,7 @@ class AssetSearchService implements AssetSearchServiceInterface
 
     /**
      * @param array{q?: string, type?: string, folder?: string, objectId?: int, extension?: string, referenced?: string} $filters
-     * @return array{items: array, total: ?int, page: int, pages: ?int, hasMore: bool}
+     * @return array{items: array, total: ?int, page: int, pages: ?int, hasMore: bool, truncated: bool}
      */
     public function search(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array
     {
@@ -46,7 +46,7 @@ class AssetSearchService implements AssetSearchServiceInterface
                     return (int) $countQb->executeQuery()->fetchOne();
                 },
                 window: function (int $offset, int $limit) use ($filters, $sortColumn, $sortDir): array {
-                    $qb = $this->createBaseQuery()->orderBy($sortColumn, $sortDir)->setFirstResult($offset)->setMaxResults($limit);
+                    $qb = $this->createBaseQuery()->orderBy($sortColumn, $sortDir)->addOrderBy('a.id', $sortDir)->setFirstResult($offset)->setMaxResults($limit);
                     $this->applySearchFilters($qb, $filters);
                     $this->workspaceScope->applyView($qb, 'a', 'assetSearch');
 
@@ -191,8 +191,8 @@ class AssetSearchService implements AssetSearchServiceInterface
     }
 
     /**
-     * @param array{items: list<array<string, mixed>>, total: ?int, hasMore: bool} $result
-     * @return array{items: array, total: ?int, page: int, pages: ?int, hasMore: bool}
+     * @param array{items: list<array<string, mixed>>, total: ?int, hasMore: bool, truncated?: bool} $result
+     * @return array{items: array, total: ?int, page: int, pages: ?int, hasMore: bool, truncated: bool}
      */
     private function paginatedResponse(array $result, int $page, int $limit): array
     {
@@ -204,6 +204,7 @@ class AssetSearchService implements AssetSearchServiceInterface
             'page' => $page,
             'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / $limit) : 0),
             'hasMore' => $result['hasMore'],
+            'truncated' => $result['truncated'] ?? false,
         ];
     }
 

@@ -80,7 +80,8 @@ class AssetZipService implements AssetZipServiceInterface
         $assets = [];
         foreach ($objectIds as $objectId) {
             $object = $this->loadObject((int) $objectId);
-            if ($object === null) {
+            // Authorize the source object, not just its assets: its asset associations disclose the object.
+            if ($object === null || !$this->authorization->isAllowed($object, 'view', $actor)) {
                 continue;
             }
             foreach ($this->fieldExtractor->extract($object) as $info) {
@@ -269,14 +270,24 @@ class AssetZipService implements AssetZipServiceInterface
                 ? ['folder' => 'folder', 'path' => Like::escape($base) . '%']
                 : ['folder' => 'folder', 'exact' => $base],
         );
-        $listing->setLimit($this->maxAssets + 1);
-
         $assets = [];
-        foreach ($listing->load() as $asset) {
-            if ($this->authorization->isAllowed($asset, 'view', $actor)) {
-                $assets[] = $asset;
-                $this->assertWithinLimit(count($assets));
+        $offset = 0;
+        $pageSize = $this->maxAssets + 1;
+        while (true) {
+            $listing->setOffset($offset);
+            $listing->setLimit($pageSize);
+            $page = $listing->load();
+            foreach ($page as $asset) {
+                // Page then authorize, so unauthorized rows do not drop authorized assets later in a folder.
+                if ($this->authorization->isAllowed($asset, 'view', $actor)) {
+                    $assets[] = $asset;
+                    $this->assertWithinLimit(count($assets));
+                }
             }
+            if (count($page) < $pageSize) {
+                break;
+            }
+            $offset += $pageSize;
         }
 
         return $assets;

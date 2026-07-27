@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Model\DriftItem;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Listing;
 
-class LocationDriftService
+class LocationDriftService implements LocationDriftServiceInterface
 {
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly int $defaultLimit = 50,
     ) {}
 
