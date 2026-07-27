@@ -6,9 +6,10 @@ namespace Oronts\AssetPilotBundle\Merge\Strategy;
 
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
 use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 
 /**
  * The default, reversible policy: once a copy's references are fully repointed onto the canonical
@@ -18,7 +19,7 @@ use Oronts\AssetPilotBundle\Service\QuarantineService;
 class RepointAndQuarantineStrategy implements ResumableDuplicateMergeStrategyInterface
 {
     public function __construct(
-        protected readonly QuarantineService $quarantine,
+        protected readonly QuarantineServiceInterface $quarantine,
     ) {}
 
     public function name(): string
@@ -31,8 +32,9 @@ class RepointAndQuarantineStrategy implements ResumableDuplicateMergeStrategyInt
         return true;
     }
 
-    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+    public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
     {
+        $copyId = $context->copyId();
         if (!$report->fullyRepointed) {
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, $this->blockedReason($report));
         }

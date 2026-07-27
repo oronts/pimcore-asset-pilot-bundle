@@ -101,6 +101,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 'page' => max(1, $page),
                 'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / max(1, $limit)) : 0),
                 'hasMore' => $result['hasMore'],
+                'truncated' => $result['truncated'],
             ];
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to find unused assets: {error}', [
@@ -108,7 +109,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 'exception' => $e,
             ]);
 
-            return ['items' => [], 'total' => 0, 'page' => max(1, $page), 'pages' => 0, 'hasMore' => false];
+            return ['items' => [], 'total' => 0, 'page' => max(1, $page), 'pages' => 0, 'hasMore' => false, 'truncated' => false];
         }
     }
 
@@ -144,11 +145,12 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
     }
 
     /**
-     * Stream every natively-visible unused asset for a CSV export, to exhaustion.
+     * Stream every natively-visible unused asset for a CSV export. The generator return value is `true` when
+     * the export was cut short by the row ceiling, so the caller can read `->getReturn()` and flag it.
      *
      * @param array<string, mixed> $filters
      *
-     * @return \Generator<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>, mixed, bool>
      */
     public function iterateForExport(array $filters = [], ?string $sort = null, ?string $order = null): \Generator
     {
@@ -157,7 +159,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
         $this->validateConfidenceFilter($filters);
         [$sortColumn, $sortDir] = SortWhitelist::resolve($sort, $order, AssetSortColumns::MAP, AssetSortColumns::DEFAULT);
 
-        yield from $this->authorizedPage->iterateAuthorized(
+        return yield from $this->authorizedPage->iterateAuthorized(
             $this->unusedWindow($filters, $sortColumn, $sortDir),
             static fn (array $row): ?int => isset($row['id']) ? (int) $row['id'] : null,
         );

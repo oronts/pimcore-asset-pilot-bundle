@@ -13,10 +13,13 @@ use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\DuplicateMergeEvent;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
+use Oronts\AssetPilotBundle\Exception\MergeLeaseLostException;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContext;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
 use Oronts\AssetPilotBundle\Merge\ReferrerSnapshot;
@@ -30,6 +33,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Support\UniqueServiceMap;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Lock\Exception\LockConflictedException;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class DuplicateMergeService implements DuplicateMergeServiceInterface
@@ -322,14 +326,15 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
                 if (!$this->loopGuard->acquireOperationRunItem($runId, $itemKey)) {
                     continue;
                 }
+                $token = $this->loopGuard->beginOperationRunItemLease($runId, $itemKey);
                 try {
                     $this->refreshLocks($locks);
                     $this->loopGuard->refreshOperationRunItem($runId, $itemKey);
-                    if (!$this->runs->resumeItem($runId, $itemKey)) {
+                    if (!$this->runs->resumeItem($runId, $itemKey, $token)) {
                         continue;
                     }
 
-                    $this->processOpenItem($runId, $item, $request, $strategy);
+                    $this->processOpenItem($runId, $item, $request, $strategy, $this->mergeContext($runId, $item, $request, $locks));
                 } finally {
                     $this->loopGuard->releaseOperationRunItem($runId, $itemKey);
                 }
@@ -377,9 +382,10 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         array $item,
         array $request,
         DuplicateMergeStrategyInterface $strategy,
+        DuplicateMergeContextInterface $context,
     ): void {
         try {
-            $this->processItem($runId, $item, $request, $strategy);
+            $this->processItem($runId, $item, $request, $strategy, $context);
         } catch (NotPermittedException|StaleApplyPlanException $e) {
             $this->completeItem(
                 $runId,
@@ -445,6 +451,7 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         array $item,
         array $request,
         DuplicateMergeStrategyInterface $strategy,
+        DuplicateMergeContextInterface $context,
     ): void {
         $copyId = (int) $item['target_id'];
         $phase = $this->resumePhase($item);
@@ -515,7 +522,7 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         $this->assertDispositionSafe($item, $request, $strategy);
         $this->persistState($runId, $item, DuplicateMergePhase::Disposing, $report);
         $this->loopGuard->refreshAsset($copyId);
-        $disposition = $strategy->disposeCopy($copyId, $report);
+        $disposition = $strategy->disposeCopy($report, $context);
         $terminalPhase = match ($this->itemStatus($disposition)) {
             OperationRunItemStatus::Completed => DuplicateMergePhase::Committed,
             OperationRunItemStatus::Blocked, OperationRunItemStatus::Skipped => DuplicateMergePhase::Blocked,
@@ -628,7 +635,12 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         if ($resumePhase !== null) {
             $state['resumePhase'] = $resumePhase->value;
         }
-        $this->runs->updateItemState($runId, (string) $item['item_key'], $state);
+        $this->runs->updateItemState(
+            $runId,
+            (string) $item['item_key'],
+            $state,
+            $this->loopGuard->operationRunItemToken($runId, (string) $item['item_key']),
+        );
 
         $status = $this->itemStatus($disposition);
         $completed = $this->runs->completeItem(
@@ -642,6 +654,7 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
                 'repointReport' => $this->serializeReport($report),
             ],
             $status === OperationRunItemStatus::Failed ? $disposition->reason : null,
+            $this->loopGuard->operationRunItemToken($runId, (string) $item['item_key']),
         );
         if (!$completed || $status !== OperationRunItemStatus::Completed) {
             return;
@@ -715,6 +728,62 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         }
     }
 
+    /**
+     * @param array<string, mixed> $item
+     * @param array{assetIds: list<int>, canonicalId: int, checksum: string, strategy: string, reviewedFingerprints: array<string, string>} $request
+     * @param list<array{type: string, id: int}> $locks
+     */
+    private function mergeContext(string $runId, array $item, array $request, array $locks): DuplicateMergeContextInterface
+    {
+        $itemKey = (string) $item['item_key'];
+        $copyId = (int) $item['target_id'];
+
+        return new DuplicateMergeContext(
+            $runId,
+            $itemKey,
+            $copyId,
+            $request['canonicalId'],
+            (int) ($item['attempts'] ?? 1),
+            $this->authorization->currentActor(),
+            // Anchor the external idempotency key to the ROOT run of the retry_of chain, not the current run:
+            // a retry creates a new child run, so keying on the current id would change the key across attempts
+            // and let an external deduplicator repeat a committed side effect. The root is stable across
+            // attempt/resume/retry and new for a separately reviewed merge.
+            sprintf('duplicate-merge:%s:%s:%d', $this->runs->rootId($runId), $request['checksum'], $copyId),
+            function () use ($runId, $itemKey, $copyId, $locks): void {
+                try {
+                    $this->loopGuard->refreshOperationRunItem($runId, $itemKey);
+                    $this->refreshLocks($locks);
+                    $this->loopGuard->refreshAsset($copyId);
+                } catch (LockConflictedException $e) {
+                    throw new MergeLeaseLostException('A duplicate-merge lock was lost during disposition; aborting to avoid a double disposition.', 0, $e);
+                }
+                $token = $this->loopGuard->operationRunItemToken($runId, $itemKey);
+                if ($token !== null && !$this->runs->renewItemLease($runId, $itemKey, $token)) {
+                    throw new MergeLeaseLostException('The duplicate-merge run-item lease was lost during disposition; aborting to avoid a double disposition.');
+                }
+            },
+            fn (callable $mutator) => $this->guardedMergeSave($copyId, $mutator),
+        );
+    }
+
+    /** @param callable(Asset): void $mutator */
+    private function guardedMergeSave(int $copyId, callable $mutator): void
+    {
+        $asset = $this->loadAsset($copyId);
+        if ($asset === null) {
+            throw new \RuntimeException(sprintf('Duplicate copy asset %d is no longer available to save.', $copyId));
+        }
+        $this->loopGuard->markAssetProcessing($copyId);
+        try {
+            $this->loopGuard->refreshAsset($copyId);
+            $mutator($asset);
+            $this->saveAsset($asset);
+        } finally {
+            $this->loopGuard->unmarkAssetProcessing($copyId);
+        }
+    }
+
     /** @param list<array{type: string, id: int}> $locks */
     private function releaseLocks(array $locks): void
     {
@@ -750,6 +819,11 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         $asset = Asset::getById($assetId, ['force' => true]);
 
         return $asset instanceof Asset && !$asset instanceof Asset\Folder ? $asset : null;
+    }
+
+    protected function saveAsset(Asset $asset): void
+    {
+        $asset->save();
     }
 
     protected function assetAllows(int $assetId, string $permission): bool
@@ -858,11 +932,16 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         DuplicateMergePhase $phase,
         RepointReport $report,
     ): void {
-        $this->loopGuard->refreshOperationRunItem($runId, (string) $item['item_key']);
-        if (!$this->runs->updateItemState($runId, (string) $item['item_key'], [
+        $itemKey = (string) $item['item_key'];
+        $this->loopGuard->refreshOperationRunItem($runId, $itemKey);
+        $token = $this->loopGuard->operationRunItemToken($runId, $itemKey);
+        if ($token !== null && !$this->runs->renewItemLease($runId, $itemKey, $token)) {
+            throw new MergeLeaseLostException('The duplicate-merge run-item lease was lost while persisting phase state; aborting to avoid a double disposition.');
+        }
+        if (!$this->runs->updateItemState($runId, $itemKey, [
             'phase' => $phase->value,
             'repointReport' => $this->serializeReport($report),
-        ])) {
+        ], $token)) {
             throw new \RuntimeException('Duplicate merge item state could not be persisted.');
         }
     }

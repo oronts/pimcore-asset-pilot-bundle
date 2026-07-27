@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Merge;
 
-final readonly class ReferrerSnapshot
+readonly class ReferrerSnapshot
 {
     public function __construct(
         public string $type,

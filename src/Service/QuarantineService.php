@@ -18,6 +18,7 @@ use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
+use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -44,6 +45,7 @@ class QuarantineService implements QuarantineServiceInterface
         protected readonly ElementAuthorizationInterface $authorization,
         protected readonly DependencyUsageVerifierInterface $dependencyVerifier,
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
+        protected readonly AuthorizedAssetPage $authorizedPage,
         protected readonly AssetMutationFingerprintService $mutationFingerprints,
         protected readonly LoopGuardedAssetSaver $assetSaver,
         protected readonly AssetDeletionFenceInterface $deletionFence,
@@ -149,11 +151,34 @@ class QuarantineService implements QuarantineServiceInterface
     {
         $record = $this->findQuarantineRecord($assetId);
         $asset = $this->loadAsset($assetId);
-        if ($record === null || $asset === null || !$this->isInQuarantine($asset)) {
+        if ($record === null || $asset === null) {
             return false;
+        }
+        if (!$this->isInQuarantine($asset)) {
+            return $this->finalizeRestoredRecord($asset, $assetId, $record['originalPath']);
         }
         if ($record['status'] === QuarantineStatus::Pending) {
             $this->markQuarantineCommitted($assetId);
+        }
+
+        return true;
+    }
+
+    /**
+     * Reconcile a record whose asset already sits outside quarantine. A prior restore commits the move
+     * and then deletes the record in two steps; if the delete did not complete, the asset is back at its
+     * original path but the row lingers (listing shows it, purge rejects it as a path mismatch). When the
+     * live path matches the recorded original path, finalize the row idempotently. Any other location is
+     * left untouched so an unrelated later move is never mistaken for a completed restore.
+     */
+    protected function finalizeRestoredRecord(Asset $asset, int $assetId, string $originalPath): bool
+    {
+        if ($asset->getRealFullPath() !== $originalPath) {
+            return false;
+        }
+
+        if ($this->deleteQuarantineRecord($assetId) > 0) {
+            $this->dispatchRestored($assetId, $originalPath);
         }
 
         return true;
@@ -247,8 +272,13 @@ class QuarantineService implements QuarantineServiceInterface
     {
         $record = $this->findQuarantineRecord($assetId);
         $asset = $this->loadAsset($assetId);
-        if ($record === null || $asset === null || !$this->isInQuarantine($asset)) {
+        if ($record === null || $asset === null) {
             return false;
+        }
+        if (!$this->isInQuarantine($asset)) {
+            // A prior restore already committed the move; if only the record delete failed, finalize the
+            // row idempotently so the retry reports success instead of a false failure.
+            return $this->finalizeRestoredRecord($asset, $assetId, $record['originalPath']);
         }
         if (AssetProtection::isLocked($asset, $this->lockProperty)) {
             return false;
@@ -289,7 +319,24 @@ class QuarantineService implements QuarantineServiceInterface
             $asset->setParent($folder);
             $asset->setFilename($filename);
         }, 'Asset Pilot: restored from quarantine', $originalPath);
-        $this->deleteQuarantineRecord($assetId);
+        if ($this->deleteQuarantineRecord($assetId) > 0) {
+            $this->dispatchRestored($assetId, $originalPath);
+        }
+
+        return true;
+    }
+
+    /**
+     * Emit RESTORED best-effort, at most once. The emit is gated on the record deletion actually removing the
+     * row, so a recovery that finalizes a lingering record (after a crash between move and delete) publishes the
+     * event the failed attempt missed, and a repeated recovery over an already-deleted row publishes nothing.
+     * It is a consumer notification dispatched through NonFatalEventDispatcher: a listener failure, or a crash
+     * after the record is deleted but before dispatch, drops the notification. The restore itself is already
+     * durable in Pimcore, so a consumer needing a guaranteed signal reconciles from asset/audit state rather
+     * than relying on this event.
+     */
+    private function dispatchRestored(int $assetId, string $originalPath): void
+    {
         NonFatalEventDispatcher::dispatch(
             $this->eventDispatcher,
             new AssetMutationEvent([$assetId], 'restore', ['to' => $originalPath]),
@@ -297,8 +344,6 @@ class QuarantineService implements QuarantineServiceInterface
             $this->logger,
             ['asset_id' => $assetId],
         );
-
-        return true;
     }
 
     protected function assetAtPath(string $path): ?Asset
@@ -309,15 +354,56 @@ class QuarantineService implements QuarantineServiceInterface
     /**
      * @param array{type?: string, before?: string, after?: string} $filters
      *
-     * @return array{items: array<int, array<string, mixed>>, total: int, page: int, pages: int}
+     * @return array{items: array<int, array<string, mixed>>, total: ?int, page: int, pages: ?int, hasMore: bool, truncated: bool}
      */
     public function listQuarantined(int $page = 1, int $limit = 50, array $filters = []): array
     {
-        $page = max(1, $page);
-        $limit = max(1, $limit);
-        $offset = ($page - 1) * $limit;
-
         try {
+            $result = $this->authorizedPage->paginate(
+                $page,
+                $limit,
+                exactTotal: function () use ($filters): int {
+                    // Count joins assets too, so the total matches the list (and orphan rows are excluded).
+                    $countQb = $this->connection->createQueryBuilder()
+                        ->select('COUNT(*)')
+                        ->from(Installer::TABLE_QUARANTINE, 'q')
+                        ->innerJoin('q', PimcoreSchema::TABLE_ASSETS, 'a', 'q.asset_id = a.id');
+                    $this->applyQuarantineFilters($countQb, $filters);
+                    $this->workspaceScope->applyView($countQb, 'a', 'quarantineCount');
+
+                    return (int) $countQb->executeQuery()->fetchOne();
+                },
+                window: $this->quarantineWindow($filters),
+                assetIdOf: static fn (array $row): ?int => isset($row['asset_id']) ? (int) $row['asset_id'] : null,
+            );
+            $total = $result['total'];
+
+            return [
+                'items' => $result['items'],
+                'total' => $total,
+                'page' => max(1, $page),
+                'pages' => $total === null ? null : (int) ceil($total / max(1, $limit)),
+                'hasMore' => $result['hasMore'],
+                'truncated' => $result['truncated'],
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: failed to list quarantined assets: {error}', [
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            return ['items' => [], 'total' => 0, 'page' => max(1, $page), 'pages' => 0, 'hasMore' => false, 'truncated' => false];
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     *
+     * @return callable(int, int): list<array<string, mixed>>
+     */
+    private function quarantineWindow(array $filters): callable
+    {
+        return function (int $offset, int $limit) use ($filters): array {
             $qb = $this->connection->createQueryBuilder()
                 ->select('q.asset_id, q.original_path, q.quarantined_at, a.path, a.filename, a.type, a.mimetype')
                 ->from(Installer::TABLE_QUARANTINE, 'q')
@@ -329,29 +415,29 @@ class QuarantineService implements QuarantineServiceInterface
             $this->applyQuarantineFilters($qb, $filters);
             $this->workspaceScope->applyView($qb, 'a', 'quarantineList');
 
-            // Count joins assets too, so the total matches the list (and orphan rows are excluded).
-            $countQb = $this->connection->createQueryBuilder()
-                ->select('COUNT(*)')
-                ->from(Installer::TABLE_QUARANTINE, 'q')
-                ->innerJoin('q', PimcoreSchema::TABLE_ASSETS, 'a', 'q.asset_id = a.id');
-            $this->applyQuarantineFilters($countQb, $filters);
-            $this->workspaceScope->applyView($countQb, 'a', 'quarantineCount');
-            $total = (int) $countQb->executeQuery()->fetchOne();
-
             $items = $qb->executeQuery()->fetchAllAssociative();
             foreach ($items as &$item) {
                 $item['asset_id'] = (int) $item['asset_id'];
             }
 
-            return ['items' => $items, 'total' => $total, 'page' => $page, 'pages' => (int) ceil($total / $limit)];
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: failed to list quarantined assets: {error}', [
-                'error' => $e->getMessage(),
-                'exception' => $e,
-            ]);
+            return $items;
+        };
+    }
 
-            return ['items' => [], 'total' => 0, 'page' => $page, 'pages' => 0];
-        }
+    /**
+     * Stream every natively-visible quarantined asset for a CSV export. The generator return value is `true`
+     * when the export was cut short by the row ceiling, so the caller can read `->getReturn()` and flag it.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return \Generator<int, array<string, mixed>, mixed, bool>
+     */
+    public function iterateForExport(array $filters = []): \Generator
+    {
+        return yield from $this->authorizedPage->iterateAuthorized(
+            $this->quarantineWindow($filters),
+            static fn (array $row): ?int => isset($row['asset_id']) ? (int) $row['asset_id'] : null,
+        );
     }
 
     /**
@@ -460,7 +546,7 @@ class QuarantineService implements QuarantineServiceInterface
     /** @return list<int> */
     private function expiredAssetIds(int $graceDays): array
     {
-        $cutoff = (new \DateTimeImmutable())->modify(sprintf('-%d days', $graceDays))->format('Y-m-d H:i:s');
+        $cutoff = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->modify(sprintf('-%d days', $graceDays))->format('Y-m-d H:i:s');
         $assetIds = array_values(array_unique($this->findExpired($cutoff, self::PURGE_BATCH)));
         sort($assetIds, SORT_NUMERIC);
 
@@ -595,7 +681,13 @@ class QuarantineService implements QuarantineServiceInterface
 
             return ['purged' => true, 'deleted' => true];
         } finally {
-            $this->deletionFence->release($assetId, $fenceToken);
+            // Best-effort: the purge already succeeded, so a throwing fence release must not turn a
+            // completed deletion into a reported failure; a leaked fence row is reaped by maintenance.
+            try {
+                $this->deletionFence->release($assetId, $fenceToken);
+            } catch (\Throwable $e) {
+                $this->logger->error('Asset Pilot: failed to release deletion fence for asset {id}', ['id' => $assetId, 'exception' => $e]);
+            }
         }
     }
 
@@ -796,12 +888,12 @@ class QuarantineService implements QuarantineServiceInterface
 
     protected function now(): string
     {
-        return (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s');
     }
 
-    protected function deleteQuarantineRecord(int $assetId): void
+    protected function deleteQuarantineRecord(int $assetId): int
     {
-        $this->connection->delete(Installer::TABLE_QUARANTINE, ['asset_id' => $assetId]);
+        return (int) $this->connection->delete(Installer::TABLE_QUARANTINE, ['asset_id' => $assetId]);
     }
 
     /**

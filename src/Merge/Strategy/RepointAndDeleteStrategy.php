@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Merge\Strategy;
 use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
 use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
@@ -44,8 +45,9 @@ class RepointAndDeleteStrategy implements ResumableDuplicateMergeStrategyInterfa
         return true;
     }
 
-    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+    public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
     {
+        $copyId = $context->copyId();
         if (!$report->fullyRepointed) {
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, sprintf(
                 '%d reference(s) could not be repointed: %s',
@@ -83,7 +85,13 @@ class RepointAndDeleteStrategy implements ResumableDuplicateMergeStrategyInterfa
 
             return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'the copy could not be deleted');
         } finally {
-            $this->deletionFence->release($copyId, $fenceToken);
+            // Best-effort: the delete already succeeded, so a throwing fence release must not turn a
+            // completed deletion into a reported failure; a leaked fence row is reaped by maintenance.
+            try {
+                $this->deletionFence->release($copyId, $fenceToken);
+            } catch (\Throwable $e) {
+                $this->logger->error('Asset Pilot: failed to release deletion fence for copy {id}', ['id' => $copyId, 'exception' => $e]);
+            }
         }
     }
 

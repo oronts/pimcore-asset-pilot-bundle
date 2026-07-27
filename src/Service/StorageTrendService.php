@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Service\Query\ByteFormat;
 use Psr\Log\LoggerInterface;
 
-class StorageTrendService
+class StorageTrendService implements StorageTrendServiceInterface
 {
     private const string STATUS_RUNNING = 'running';
     private const string STATUS_COMPLETED = 'completed';
@@ -186,7 +186,7 @@ class StorageTrendService
 
     protected function now(): string
     {
-        return (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s');
     }
 
     private function beginRun(string $startedAt): int
@@ -238,7 +238,7 @@ class StorageTrendService
             return false;
         }
 
-        return strtotime((string) $run['completed_at']) >= time() - $this->minimumIntervalSeconds;
+        return (new \DateTimeImmutable((string) $run['completed_at'], new \DateTimeZone('UTC')))->getTimestamp() >= time() - $this->minimumIntervalSeconds;
     }
 
     private function prune(): void
@@ -246,7 +246,7 @@ class StorageTrendService
         if ($this->retentionDays <= 0) {
             return;
         }
-        $cutoff = (new \DateTimeImmutable())->modify(sprintf('-%d days', $this->retentionDays))->format('Y-m-d H:i:s');
+        $cutoff = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->modify(sprintf('-%d days', $this->retentionDays))->format('Y-m-d H:i:s');
         $ids = array_map('intval', $this->connection->createQueryBuilder()
             ->select('id')
             ->from(Installer::TABLE_STORAGE_RUN)

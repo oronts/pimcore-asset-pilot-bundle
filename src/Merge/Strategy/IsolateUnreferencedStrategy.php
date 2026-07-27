@@ -6,10 +6,11 @@ namespace Oronts\AssetPilotBundle\Merge\Strategy;
 
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
 use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
-use Oronts\AssetPilotBundle\Service\AssetDependencyResolver;
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\AssetDependencyResolverInterface;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 
 /**
  * The lowest-risk policy: never repoints references. It quarantines only a copy that is already
@@ -19,8 +20,8 @@ use Oronts\AssetPilotBundle\Service\QuarantineService;
 class IsolateUnreferencedStrategy implements ResumableDuplicateMergeStrategyInterface
 {
     public function __construct(
-        protected readonly AssetDependencyResolver $dependencies,
-        protected readonly QuarantineService $quarantine,
+        protected readonly AssetDependencyResolverInterface $dependencies,
+        protected readonly QuarantineServiceInterface $quarantine,
     ) {}
 
     public function name(): string
@@ -40,8 +41,9 @@ class IsolateUnreferencedStrategy implements ResumableDuplicateMergeStrategyInte
             : null;
     }
 
-    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+    public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
     {
+        $copyId = $context->copyId();
         if ($this->dependencies->dependentObjectIds($copyId, 1) !== []) {
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, 'still referenced by at least one object');
         }

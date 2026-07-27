@@ -9,7 +9,7 @@ use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\Like;
@@ -28,7 +28,7 @@ use Psr\Log\LoggerInterface;
  * Detection only: merging duplicates (re-pointing references, deleting the copy) is a separate,
  * guarded operation.
  */
-class DuplicateDetectionService
+class DuplicateDetectionService implements DuplicateDetectionServiceInterface
 {
     /** Assets indexed per page during a scan — bounds the work and memory of one batch. */
     private const int SCAN_BATCH = 200;
@@ -39,8 +39,10 @@ class DuplicateDetectionService
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoggerInterface $logger,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
+        private readonly int $groupScanBudget = 5000,
+        private readonly int $exportGroupScanBudget = 500_000,
     ) {}
 
     /**
@@ -111,16 +113,139 @@ class DuplicateDetectionService
 
         $groups = [];
         foreach ($this->fetchDuplicateRows(($page - 1) * $limit, $limit, $minCopies, $type, $filters) as $row) {
-            $checksum = (string) $row['checksum'];
-            $groups[] = new DuplicateGroup(
-                $checksum,
-                (int) $row['file_size'],
-                (int) $row['cnt'],
-                $this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP, $type, $filters),
-            );
+            $group = $this->visibleGroupFromRow($row, $minCopies, $type, $filters);
+            if ($group !== null) {
+                $groups[] = $group;
+            }
         }
 
         return $groups;
+    }
+
+    /**
+     * A bounded scan-and-fill authorized page of duplicate groups: hasMore is set only on a genuine visible
+     * surplus, never from a raw row, and no coarse total is disclosed. `truncated` is true when the group
+     * scan budget was hit before the page could be resolved, so a caller can tell "budget gave up" apart from
+     * a real end instead of reading an unproven hasMore: false.
+     *
+     * @return array{groups: list<DuplicateGroup>, hasMore: bool, truncated: bool}
+     */
+    public function findDuplicatePage(int $page = 1, int $limit = 50, int $minCopies = 2, ?string $type = null, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $limit = max(1, $limit);
+        $filters = $this->normalizeFilters($filters, $type);
+
+        $needed = $page * $limit + 1;
+        $ceiling = $this->groupScanBudget;
+        $visible = [];
+        $scanned = 0;
+        $offset = 0;
+        $exhausted = false;
+
+        while (count($visible) < $needed && $scanned < $ceiling) {
+            $rows = $this->fetchDuplicateRows($offset, self::SCAN_BATCH, $minCopies, $type, $filters);
+            foreach ($rows as $row) {
+                ++$scanned;
+                $group = $this->visibleGroupFromRow($row, $minCopies, $type, $filters);
+                if ($group !== null) {
+                    $visible[] = $group;
+                    if (count($visible) >= $needed) {
+                        break;
+                    }
+                }
+                if ($scanned >= $ceiling) {
+                    break;
+                }
+            }
+            $offset += count($rows);
+            if (count($rows) < self::SCAN_BATCH) {
+                $exhausted = true;
+                break;
+            }
+        }
+
+        $hitBudget = !$exhausted && count($visible) < $needed;
+
+        return [
+            'groups' => array_values(array_slice($visible, ($page - 1) * $limit, $limit)),
+            'hasMore' => count($visible) > $page * $limit,
+            'truncated' => $hitBudget && $this->hasFurtherVisibleGroup($scanned, $minCopies, $type, $filters),
+        ];
+    }
+
+    /**
+     * Stream every visible duplicate group for a CSV export. Terminating on the raw page (not a coarse count)
+     * keeps the export complete and never streams a header-only CSV on a count error. The generator return
+     * value is `true` when the group scan ceiling cut the export short, so the caller can read `->getReturn()`
+     * and mark it truncated.
+     *
+     * @return \Generator<int, DuplicateGroup, mixed, bool>
+     */
+    public function iterateForExport(int $minCopies = 2, ?string $type = null, array $filters = []): \Generator
+    {
+        $filters = $this->normalizeFilters($filters, $type);
+        $offset = 0;
+        $scanned = 0;
+
+        while ($scanned < $this->exportGroupScanBudget) {
+            $rows = $this->fetchDuplicateRows($offset, self::SCAN_BATCH, $minCopies, $type, $filters);
+            if ($rows === []) {
+                return false;
+            }
+            foreach ($rows as $row) {
+                ++$scanned;
+                $group = $this->visibleGroupFromRow($row, $minCopies, $type, $filters);
+                if ($group !== null) {
+                    yield $group;
+                }
+            }
+            $offset += count($rows);
+            if (count($rows) < self::SCAN_BATCH) {
+                return false;
+            }
+        }
+
+        return $this->hasFurtherVisibleGroup($scanned, $minCopies, $type, $filters);
+    }
+
+    /**
+     * Probe whether a natively-visible duplicate group exists past $offset, so a tail of hidden groups is not
+     * misreported as truncated. Bounded to one batch: a visible group in the window is a real remainder, an
+     * empty/short window is a genuine end, and a full all-hidden window reports "more" conservatively.
+     *
+     * @param array<string, mixed> $filters
+     */
+    private function hasFurtherVisibleGroup(int $offset, int $minCopies, ?string $type, array $filters): bool
+    {
+        $rows = $this->fetchDuplicateRows($offset, self::SCAN_BATCH, $minCopies, $type, $filters);
+        if ($rows === []) {
+            return false;
+        }
+        foreach ($rows as $row) {
+            if ($this->visibleGroupFromRow($row, $minCopies, $type, $filters) !== null) {
+                return true;
+            }
+        }
+
+        return count($rows) === self::SCAN_BATCH;
+    }
+
+    /**
+     * Recompute one duplicate group from its natively-visible members, or null when fewer than $minCopies
+     * are visible.
+     *
+     * @param array{checksum: string, file_size: int|string, cnt: int|string} $row
+     */
+    private function visibleGroupFromRow(array $row, int $minCopies, ?string $type, array $filters): ?DuplicateGroup
+    {
+        $checksum = (string) $row['checksum'];
+        $visibleIds = $this->visibleAssetIds($this->assetIdsForChecksum($checksum, self::IDS_PER_GROUP, $type, $filters));
+        if (count($visibleIds) < $minCopies) {
+            return null;
+        }
+
+        return new DuplicateGroup($checksum, (int) $row['file_size'], count($visibleIds), $visibleIds);
     }
 
     public function countDuplicateGroups(int $minCopies = 2, ?string $type = null, array $filters = []): int
@@ -258,7 +383,7 @@ class DuplicateDetectionService
                  ON DUPLICATE KEY UPDATE checksum = VALUES(checksum), file_size = VALUES(file_size), size_known = VALUES(size_known), indexed_at = VALUES(indexed_at)',
                 Installer::TABLE_CHECKSUM,
             ),
-            [$assetId, $checksum, $fileSize ?? 0, $fileSize !== null ? 1 : 0, (new \DateTimeImmutable())->format('Y-m-d H:i:s')],
+            [$assetId, $checksum, $fileSize ?? 0, $fileSize !== null ? 1 : 0, (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s')],
         );
     }
 
@@ -335,14 +460,14 @@ class DuplicateDetectionService
     {
         if (!empty($filters['folder'])) {
             $folder = Like::escape(rtrim((string) $filters['folder'], '/') . '/') . '%';
-            $qb->andWhere('a.path LIKE :folderPath')->setParameter('folderPath', $folder);
+            $qb->andWhere('a.path LIKE :folderPath' . Like::CLAUSE)->setParameter('folderPath', $folder);
         }
         if (!empty($filters['type'])) {
             $qb->andWhere('a.type = :type')->setParameter('type', (string) $filters['type']);
         }
         if (!empty($filters['extension'])) {
             $extension = '%.' . Like::escape(ltrim((string) $filters['extension'], '.'));
-            $qb->andWhere('a.filename LIKE :extension')->setParameter('extension', $extension);
+            $qb->andWhere('a.filename LIKE :extension' . Like::CLAUSE)->setParameter('extension', $extension);
         }
     }
 

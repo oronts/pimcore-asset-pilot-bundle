@@ -9,7 +9,7 @@ use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -24,7 +24,7 @@ use Psr\Log\LoggerInterface;
  * recursively deleted. One pass removes the current leaf-empty folders; a parent that only held
  * those is swept on the next run.
  */
-class EmptyFolderSweepService
+class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
 {
     /** The asset tree root (id 1, path '/') is never a sweep candidate. */
     private const int ROOT_ID = 1;
@@ -33,9 +33,11 @@ class EmptyFolderSweepService
     public function __construct(
         protected readonly Connection $connection,
         protected readonly LoggerInterface $logger,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly LoopGuard $loopGuard,
+        protected readonly ReviewedAssetLockCoordinator $reviewedLocks,
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
@@ -47,7 +49,16 @@ class EmptyFolderSweepService
         $limit = max(1, $limit);
 
         $items = [];
+        $position = 0;
+        $hasMore = false;
         foreach ($this->listEmptyFolderRows($root, ($page - 1) * $limit, $limit + 1) as $row) {
+            // hasMore is driven by the raw window (the limit+1 probe row), not the natively-filtered
+            // count, so a denied folder never makes a further page unreachable.
+            if ($position >= $limit) {
+                $hasMore = true;
+                break;
+            }
+            ++$position;
             $folder = $this->loadFolder((int) $row['id']);
             if ($folder === null || !$this->authorization->isAllowed($folder, 'view')) {
                 continue;
@@ -55,9 +66,7 @@ class EmptyFolderSweepService
             $items[] = ['id' => (int) $row['id'], 'path' => (string) $row['full_path']];
         }
 
-        $hasMore = count($items) > $limit;
-
-        return ['items' => array_slice($items, 0, $limit), 'page' => $page, 'limit' => $limit, 'hasMore' => $hasMore];
+        return ['items' => $items, 'page' => $page, 'limit' => $limit, 'hasMore' => $hasMore];
     }
 
     /** @param list<int> $folderIds */
@@ -99,6 +108,10 @@ class EmptyFolderSweepService
                 ++$skipped;
                 continue;
             }
+            if (AssetProtection::isLocked($folder, $this->lockProperty)) {
+                ++$skipped;
+                continue;
+            }
             if (!$this->authorization->isAllowed($folder, 'delete')) {
                 $errors[$id] = 'Not permitted to delete this folder';
                 ++$failed;
@@ -118,28 +131,18 @@ class EmptyFolderSweepService
      */
     public function deleteEmpty(array $folderIds, array $expectedFingerprints): array
     {
-        sort($folderIds, SORT_NUMERIC);
-        $lockedIds = [];
-
-        try {
-            foreach ($folderIds as $id) {
-                if (!$this->loopGuard->acquireAsset($id)) {
-                    throw new StaleApplyPlanException(sprintf('Folder %d is busy. Preview the operation again.', $id));
+        return $this->reviewedLocks->run(
+            $folderIds,
+            static fn (int $folderId): \Throwable => new StaleApplyPlanException(sprintf('Folder %d is busy. Preview the operation again.', $folderId)),
+            function (array $lockedIds) use ($expectedFingerprints): array {
+                foreach ($lockedIds as $folderId) {
+                    $this->assertUnchanged($folderId, $expectedFingerprints);
+                    $this->loopGuard->refreshAsset($folderId);
                 }
-                $lockedIds[] = $id;
-            }
 
-            foreach ($folderIds as $id) {
-                $this->assertUnchanged($id, $expectedFingerprints);
-                $this->loopGuard->refreshAsset($id);
-            }
-
-            return $this->deleteValidatedFolders($folderIds);
-        } finally {
-            foreach (array_reverse($lockedIds) as $id) {
-                $this->loopGuard->releaseAsset($id);
-            }
-        }
+                return $this->deleteValidatedFolders($lockedIds);
+            },
+        );
     }
 
     /**
@@ -168,6 +171,11 @@ class EmptyFolderSweepService
                 }
 
                 if ($folder->hasChildren()) {
+                    ++$skipped;
+                    continue;
+                }
+
+                if (AssetProtection::isLocked($folder, $this->lockProperty)) {
                     ++$skipped;
                     continue;
                 }
@@ -216,6 +224,7 @@ class EmptyFolderSweepService
             ? [
                 'exists' => true,
                 'hasChildren' => $folder->hasChildren(),
+                'locked' => AssetProtection::isLocked($folder, $this->lockProperty),
                 'modifiedAt' => $folder->getModificationDate(),
                 'path' => $folder->getRealFullPath(),
             ]
@@ -245,7 +254,7 @@ class EmptyFolderSweepService
             ->setMaxResults($limit);
 
         if ($root !== null && $root !== '' && $root !== '/') {
-            $qb->andWhere('a.path LIKE :path')->setParameter('path', Like::escape(rtrim($root, '/') . '/') . '%');
+            $qb->andWhere('a.path LIKE :path' . Like::CLAUSE)->setParameter('path', Like::escape(rtrim($root, '/') . '/') . '%');
         }
         $this->workspaceScope->applyView($qb, 'a', 'emptyFolderList');
 

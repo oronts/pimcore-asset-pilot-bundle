@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Merge;
 
-final readonly class RepointPreflight
+readonly class RepointPreflight
 {
     /**
      * @param list<ReferrerSnapshot> $referrers

@@ -5,19 +5,21 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Enum\HealOutcome;
+use Oronts\AssetPilotBundle\Enum\NotificationSeverity;
 use Oronts\AssetPilotBundle\Enum\UndoHealOutcome;
 use Oronts\AssetPilotBundle\Enum\UndoHealReason;
 use Oronts\AssetPilotBundle\Event\AssetHealEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
-use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
+use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerResolverInterface;
 use Oronts\AssetPilotBundle\Model\HealResult;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
 use Oronts\AssetPilotBundle\Model\UndoHealResult;
-use Oronts\AssetPilotBundle\Notification\NotificationDispatcher;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Notification\Notification;
+use Oronts\AssetPilotBundle\Notification\NotificationDispatcherInterface;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Version;
 use Psr\Log\LoggerInterface;
@@ -31,18 +33,20 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  * still be the wrong content). When nothing renders the asset is reported (and optionally
  * quarantined) for human review, never silently left or destroyed.
  */
-class VersionRollbackHealer
+class VersionRollbackHealer implements VersionRollbackHealerInterface
 {
     public function __construct(
-        protected readonly CompositeIntegrityChecker $checker,
+        protected readonly IntegrityCheckerResolverInterface $checker,
         protected readonly LoopGuard $loopGuard,
+        protected readonly ReviewedAssetLockCoordinator $reviewedLocks,
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly IntegrityHealLog $healLog,
         protected readonly LoggerInterface $logger,
-        protected readonly ElementAuthorization $authorization,
-        protected readonly ?QuarantineService $quarantine = null,
+        protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly LoopGuardedAssetSaver $assetSaver,
+        protected readonly ?QuarantineServiceInterface $quarantine = null,
         protected readonly string $onUnrecoverable = 'report',
-        protected readonly ?NotificationDispatcher $notifier = null,
+        protected readonly ?NotificationDispatcherInterface $notifier = null,
         protected readonly array $excludeFolders = [],
         protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
         protected readonly ?IntegrityHealFingerprintService $healFingerprints = null,
@@ -78,50 +82,25 @@ class VersionRollbackHealer
             throw new StaleApplyPlanException('Integrity plan validation is unavailable. Preview the heal again.');
         }
 
-        sort($assetIds, SORT_NUMERIC);
-        $lockedIds = $this->acquirePlannedAssetLocks($assetIds);
+        return $this->reviewedLocks->run(
+            $assetIds,
+            static fn (int $assetId): \Throwable => new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the heal again.', $assetId)),
+            function (array $lockedIds) use ($expectedFingerprints): array {
+                $this->validatePlannedBatch($lockedIds, $expectedFingerprints);
 
-        try {
-            $this->validatePlannedBatch($assetIds, $lockedIds, $expectedFingerprints);
-
-            return $this->applyPlannedBatch($assetIds, $lockedIds, $expectedFingerprints);
-        } finally {
-            $this->releaseAssetLocks($lockedIds);
-        }
+                return $this->applyPlannedBatch($lockedIds, $expectedFingerprints);
+            },
+        );
     }
 
     /**
-     * @param list<int> $assetIds
-     * @return list<int>
-     */
-    private function acquirePlannedAssetLocks(array $assetIds): array
-    {
-        $lockedIds = [];
-        try {
-            foreach ($assetIds as $assetId) {
-                if (!$this->loopGuard->acquireAsset($assetId)) {
-                    throw new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the heal again.', $assetId));
-                }
-                $lockedIds[] = $assetId;
-            }
-
-            return $lockedIds;
-        } catch (\Throwable $e) {
-            $this->releaseAssetLocks($lockedIds);
-
-            throw $e;
-        }
-    }
-
-    /**
-     * @param list<int> $assetIds
      * @param list<int> $lockedIds
      * @param array<string, string> $expectedFingerprints
      */
-    private function validatePlannedBatch(array $assetIds, array $lockedIds, array $expectedFingerprints): void
+    private function validatePlannedBatch(array $lockedIds, array $expectedFingerprints): void
     {
-        foreach ($assetIds as $assetId) {
-            $this->refreshAssetLocks($lockedIds);
+        foreach ($lockedIds as $assetId) {
+            $this->reviewedLocks->refresh($lockedIds);
             $expected = $this->expectedFingerprint($assetId, $expectedFingerprints);
             $preview = $this->previewLockedById($assetId);
             $this->healFingerprints?->assertUnchanged(
@@ -134,16 +113,15 @@ class VersionRollbackHealer
     }
 
     /**
-     * @param list<int> $assetIds
      * @param list<int> $lockedIds
      * @param array<string, string> $expectedFingerprints
      * @return array<int, HealResult>
      */
-    private function applyPlannedBatch(array $assetIds, array $lockedIds, array $expectedFingerprints): array
+    private function applyPlannedBatch(array $lockedIds, array $expectedFingerprints): array
     {
         $results = [];
-        foreach ($assetIds as $assetId) {
-            $this->refreshAssetLocks($lockedIds);
+        foreach ($lockedIds as $assetId) {
+            $this->reviewedLocks->refresh($lockedIds);
             $results[$assetId] = $this->healById(
                 $assetId,
                 false,
@@ -164,15 +142,6 @@ class VersionRollbackHealer
 
         return $expected;
     }
-
-    /** @param list<int> $assetIds */
-    private function releaseAssetLocks(array $assetIds): void
-    {
-        foreach (array_reverse($assetIds) as $assetId) {
-            $this->loopGuard->releaseAsset($assetId);
-        }
-    }
-
 
     public function heal(Asset $asset, bool $dryRun = false): HealResult
     {
@@ -257,14 +226,6 @@ class VersionRollbackHealer
         }
 
         return null;
-    }
-
-    /** @param list<int> $assetIds */
-    private function refreshAssetLocks(array $assetIds): void
-    {
-        foreach ($assetIds as $assetId) {
-            $this->loopGuard->refreshAsset($assetId);
-        }
     }
 
     private function healLocked(Asset $asset, bool $dryRun, ?string $expectedFingerprint = null): HealResult
@@ -524,6 +485,25 @@ class VersionRollbackHealer
         return $this->undoDetailed($assetId)->isSuccessful();
     }
 
+    public function assessUndoEligibility(int $assetId, int $fromVersionId): UndoHealResult
+    {
+        $asset = $this->loadAsset($assetId);
+        $preflight = $this->undoPreflightResult($asset, true);
+        if ($preflight !== null) {
+            return $preflight;
+        }
+        if ($fromVersionId <= 0 || $this->loadVersion($fromVersionId) === null) {
+            return new UndoHealResult(
+                UndoHealOutcome::Skipped,
+                'The pre-heal version is no longer available.',
+                true,
+                UndoHealReason::VersionMissing,
+            );
+        }
+
+        return new UndoHealResult(UndoHealOutcome::WouldReverse, dryRun: true);
+    }
+
     public function undoDetailed(int $assetId, bool $dryRun = false): UndoHealResult
     {
         if (!$this->loopGuard->acquireAsset($assetId)) {
@@ -663,17 +643,13 @@ class VersionRollbackHealer
             throw new \RuntimeException(sprintf('Version %d has no readable binary.', (int) $version->getId()));
         }
 
-        // LoopGuard window: mark processing before the save (so the AssetUploadListener short-circuits
-        // its own postUpdate) and recently-moved after, mirroring the move pipeline's guarded save.
-        $this->loopGuard->markAssetProcessing($assetId);
-        try {
-            $this->loopGuard->refreshAsset($assetId);
-            $asset->setStream($stream);
-            $asset->save(['versionNote' => 'asset-pilot integrity heal: rollback to version ' . $version->getId()]);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
-        }
+        $this->assetSaver->save(
+            $asset,
+            static function (Asset $mutable) use ($stream): void {
+                $mutable->setStream($stream);
+            },
+            ['versionNote' => 'asset-pilot integrity heal: rollback to version ' . $version->getId()],
+        );
     }
 
     private function routeUnrecoverable(Asset $asset, bool $notify): void
@@ -682,7 +658,7 @@ class VersionRollbackHealer
             'id' => $asset->getId(),
         ]);
 
-        // Best-effort quarantine: QuarantineService re-verifies the asset is unused, so a still-referenced
+        // Best-effort quarantine: QuarantineServiceInterface re-verifies the asset is unused, so a still-referenced
         // broken asset stays put and is only reported (the report row is already written above).
         $quarantined = false;
         if ($this->onUnrecoverable === 'quarantine' && $this->quarantine !== null) {
@@ -694,15 +670,20 @@ class VersionRollbackHealer
             return;
         }
 
-        $this->notifier?->dispatch(
-            'Asset Pilot: unrecoverable broken asset',
-            sprintf(
-                'Asset %d (%s) is broken and no stored version renders. %s',
+        $this->notifier?->dispatch(new Notification(
+            kind: 'integrity.unrecoverable',
+            severity: NotificationSeverity::Critical,
+            title: 'Asset Pilot: unrecoverable broken asset',
+            message: sprintf(
+                'Asset %d is broken and no stored version renders. %s',
                 $asset->getId(),
-                $asset->getRealFullPath(),
                 $quarantined ? 'It was moved to quarantine for review.' : 'It was left in place and reported for review.',
             ),
-        );
+            context: [
+                'assetId' => (int) $asset->getId(),
+                'quarantined' => $quarantined,
+            ],
+        ));
     }
 
     /**

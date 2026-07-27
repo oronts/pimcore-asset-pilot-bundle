@@ -4,21 +4,25 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
 use Oronts\AssetPilotBundle\Enum\UndoHealReason;
 
-class IntegrityHealHistoryService
+class IntegrityHealHistoryService implements IntegrityHealHistoryServiceInterface
 {
     public function __construct(
         private readonly IntegrityHealLog $healLog,
-        private readonly VersionRollbackHealer $healer,
+        private readonly UndoHealEligibilityProbeInterface $eligibilityProbe,
+        private readonly ApiDateFormatterInterface $dates,
     ) {}
 
     /**
      * @return array{
      *     items: list<array{id: int, assetId: int, path: string, fromVersion: int, toVersion: ?int, checker: string, status: string, createdAt: string, eligible: bool, eligibilityReason: ?string, reason: ?string}>,
-     *     total: int,
+     *     total: ?int,
      *     page: int,
-     *     pages: int
+     *     pages: ?int,
+     *     hasMore: bool,
+     *     truncated: bool
      * }
      */
     public function getPaginated(int $page = 1, int $limit = 25): array
@@ -48,7 +52,7 @@ class IntegrityHealHistoryService
             $reason = 'A newer reversible heal supersedes this record.';
             $reasonCode = UndoHealReason::Superseded;
         } else {
-            $assessment = $this->healer->undoDetailed($row['asset_id'], true);
+            $assessment = $this->eligibilityProbe->assessUndoEligibility($row['asset_id'], $row['from_version']);
             $eligible = $assessment->isSuccessful();
             if (!$eligible) {
                 $reason = $assessment->reason;
@@ -64,7 +68,7 @@ class IntegrityHealHistoryService
             'toVersion' => $row['to_version'],
             'checker' => $row['checker'],
             'status' => $row['status'],
-            'createdAt' => $row['created_at'],
+            'createdAt' => $this->dates->fromDatabase($row['created_at']),
             'eligible' => $eligible,
             'eligibilityReason' => $reasonCode?->value,
             'reason' => $reason,

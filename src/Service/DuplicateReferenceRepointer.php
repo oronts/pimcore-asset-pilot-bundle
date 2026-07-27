@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Merge\ReferrerSnapshot;
 use Oronts\AssetPilotBundle\Merge\RepointPreflight;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
@@ -29,7 +29,7 @@ use Psr\Log\LoggerInterface;
  * LoopGuard processing window so the resulting DataObject save event does not re-enter the organize
  * pipeline.
  */
-class DuplicateReferenceRepointer
+class DuplicateReferenceRepointer implements DuplicateReferenceRepointerInterface
 {
     private const int PAGE_SIZE = 100;
 
@@ -40,7 +40,7 @@ class DuplicateReferenceRepointer
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly Connection $connection,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
     ) {}
 
     public function preflight(int $fromAssetId, int $toAssetId, string $permission): RepointPreflight

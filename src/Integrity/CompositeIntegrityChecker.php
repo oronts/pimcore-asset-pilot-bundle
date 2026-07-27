@@ -13,7 +13,7 @@ use Pimcore\Model\Asset;
  * resolve-by-priority pattern the bundle uses for strategies and filters. resolve() exposes that
  * checker so a heal can reuse it to test historical version binaries via checkBinary().
  */
-class CompositeIntegrityChecker
+class CompositeIntegrityChecker implements IntegrityCheckerResolverInterface
 {
     /** @var list<IntegrityCheckerInterface> highest priority first */
     private array $checkers;

@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Enum\IntegrityStatus;
-use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
+use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerResolverInterface;
 use Oronts\AssetPilotBundle\Model\IntegrityResult;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -18,12 +18,12 @@ use Psr\Log\LoggerInterface;
  * a whole-catalog sweep pages through or runs async. Detection is read-only — the version-rollback
  * heal is a separate, explicitly-guarded operation.
  */
-class AssetIntegrityService
+class AssetIntegrityService implements AssetIntegrityServiceInterface
 {
     public function __construct(
-        protected readonly CompositeIntegrityChecker $checker,
+        protected readonly IntegrityCheckerResolverInterface $checker,
         protected readonly LoggerInterface $logger,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly bool $enabled = true,
         protected readonly array $skipExtensions = ['svg'],
     ) {}

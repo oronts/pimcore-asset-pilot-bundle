@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Service as ElementService;
@@ -17,12 +18,16 @@ use Psr\Log\LoggerInterface;
  * break, like a move), and protected by the same renewable locks as the move pipeline. Preview and
  * apply evaluate the same safety gates. The scan is paged and bounded.
  */
-class NormalizeFilenamesService
+class NormalizeFilenamesService implements NormalizeFilenamesServiceInterface
 {
     public function __construct(
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
-        protected readonly ContentUsageScanner $contentScanner,
+        protected readonly ContentUsageScannerInterface $contentScanner,
+        protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly AssetMutationFingerprintService $fingerprints,
+        protected readonly LoopGuardedAssetSaver $assetSaver,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
@@ -51,7 +56,7 @@ class NormalizeFilenamesService
      * @param int[] $assetIds
      * @return array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>}
      */
-    public function normalize(array $assetIds, bool $dryRun = true): array
+    public function normalize(array $assetIds, bool $dryRun = true, ?array $expectedFingerprints = null): array
     {
         $renamed = 0;
         $skipped = 0;
@@ -62,7 +67,7 @@ class NormalizeFilenamesService
         foreach ($assetIds as $id) {
             $id = (int) $id;
             try {
-                $outcome = $this->normalizeAsset($id, $dryRun);
+                $outcome = $this->normalizeAsset($id, $dryRun, $expectedFingerprints);
             } catch (\Throwable $e) {
                 $errors[$id] = $e->getMessage();
                 ++$failed;
@@ -96,7 +101,7 @@ class NormalizeFilenamesService
      *     change?: array{id: int, from: string, to: string}
      * }
      */
-    private function normalizeAsset(int $assetId, bool $dryRun): array
+    private function normalizeAsset(int $assetId, bool $dryRun, ?array $expectedFingerprints): array
     {
         if (!$this->loopGuard->acquireAsset($assetId)) {
             return ['state' => 'failed', 'error' => 'Asset is being processed by another job'];
@@ -108,13 +113,19 @@ class NormalizeFilenamesService
             if ($asset === null || $asset instanceof Asset\Folder) {
                 return ['state' => 'skipped'];
             }
+            if ($expectedFingerprints !== null) {
+                $this->fingerprints->assertUnchanged($assetId, $expectedFingerprints);
+            }
+            if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+                return ['state' => 'failed', 'error' => 'Asset is protected from automated changes'];
+            }
 
             $current = (string) $asset->getFilename();
             $valid = $this->validKey($current);
             if ($valid === '' || $valid === $current) {
                 return ['state' => 'skipped'];
             }
-            if (!$asset->isAllowed('publish')) {
+            if (!$this->authorization->isAllowed($asset, 'publish')) {
                 return ['state' => 'failed', 'error' => 'Not permitted to rename this asset'];
             }
             if (!$this->contentScanner->canVerify()) {
@@ -157,17 +168,20 @@ class NormalizeFilenamesService
 
     protected function renameGuarded(Asset $asset, int $assetId, string $filename, string $targetPath): void
     {
-        $this->loopGuard->markAssetProcessing($assetId);
+        unset($assetId);
         try {
-            $asset->setFilename($filename);
-            $this->loopGuard->refreshAsset($assetId);
-            $this->loopGuard->refreshTarget($targetPath);
-            $asset->save(['versionNote' => 'Asset Pilot: normalized filename to ' . $filename]);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
+            $this->assetSaver->save(
+                $asset,
+                static function (Asset $mutable) use ($filename): void {
+                    $mutable->setFilename($filename);
+                },
+                ['versionNote' => 'Asset Pilot: normalized filename to ' . $filename],
+                function () use ($targetPath): void {
+                    $this->loopGuard->refreshTarget($targetPath);
+                },
+            );
         } catch (UniqueConstraintViolationException $e) {
             throw new \RuntimeException(sprintf('An asset named "%s" already exists in this folder.', $filename), 0, $e);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
         }
     }
 

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
-use Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker;
+use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerResolverInterface;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Model\HealResult;
 use Pimcore\Model\Asset;
@@ -17,7 +17,7 @@ class IntegrityHealFingerprintService
 
     /** @param array<string, mixed> $planConfiguration */
     public function __construct(
-        private readonly CompositeIntegrityChecker $checker,
+        private readonly IntegrityCheckerResolverInterface $checker,
         private readonly array $planConfiguration,
         private readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
