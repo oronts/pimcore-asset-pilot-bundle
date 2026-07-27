@@ -23,6 +23,7 @@ class LiveDependencyUsageScanner implements ResetInterface
 
     public function __construct(
         private readonly Connection $connection,
+        private readonly AssetDependencyTargetExtractor $targetExtractor,
         private readonly LoggerInterface $logger,
         private readonly int $maxSources = 50000,
     ) {}
@@ -59,10 +60,13 @@ class LiveDependencyUsageScanner implements ResetInterface
                     throw new \RuntimeException(sprintf('Live dependency scan exceeded its %d-source safety budget.', $this->maxSources));
                 }
 
-                foreach ($source->resolveDependencies() as $dependency) {
-                    if (($dependency['type'] ?? null) === PimcoreSchema::ELEMENT_TYPE_ASSET) {
-                        $this->referencedAssetIds[(int) $dependency['id']] = true;
-                    }
+                // Same completeness-aware extractor as the projection; an incomplete source fails the scan closed.
+                $extraction = $this->targetExtractor->extract($source);
+                if (!$extraction->complete) {
+                    throw new \RuntimeException('Live dependency scan hit a source whose classification-store references could not be fully resolved.');
+                }
+                foreach ($extraction->targetIds as $assetId) {
+                    $this->referencedAssetIds[$assetId] = true;
                 }
             }
         } catch (\Throwable $e) {

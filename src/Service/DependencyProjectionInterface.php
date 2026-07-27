@@ -16,6 +16,13 @@ interface DependencyProjectionInterface
 
     public function refresh(AbstractElement $source, DependencySourceToken $token): bool;
 
+    public function retainDirtyForCommit(string $sourceType, int $sourceId, DependencySourceToken $token): DependencySourceToken;
+
+    /** @return list<array{sourceType: string, sourceId: int}> */
+    public function staleDirtySources(string $dirtyBefore, int $limit): array;
+
+    public function pruneStaleOrphanPendingSources(string $dirtyBefore): int;
+
     public function remove(string $sourceType, int $sourceId, ?DependencySourceToken $token = null): void;
 
     public function discard(DependencySourceToken $token): void;

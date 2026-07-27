@@ -18,7 +18,18 @@ class DbalAssetDeletionFence implements AssetDeletionFenceInterface
     public function __construct(
         private readonly Connection $connection,
         private readonly int $leaseSeconds = 900,
+        private readonly ?ProjectionMarkerConnectionInterface $markerConnectionProvider = null,
     ) {}
+
+    /**
+     * The fence read must run on the same connection that publishes the dirty marker. Under a consumer-owned
+     * ambient transaction that is a dedicated autocommit connection, so the LEFT JOIN sees a fence committed
+     * after the consumer's REPEATABLE READ snapshot instead of the stale in-transaction view.
+     */
+    protected function markerConnection(): Connection
+    {
+        return $this->markerConnectionProvider?->forMarker() ?? $this->connection;
+    }
 
     public function acquire(int $assetId, string $operation): ?string
     {
@@ -80,8 +91,9 @@ class DbalAssetDeletionFence implements AssetDeletionFenceInterface
             return;
         }
 
+        $connection = $this->markerConnection();
         foreach (array_chunk($targetIds, self::TARGET_BATCH) as $chunk) {
-            $rows = $this->connection->executeQuery(
+            $rows = $connection->executeQuery(
                 'SELECT a.id AS id, CASE WHEN f.asset_id IS NULL THEN 0 ELSE 1 END AS fenced'
                 . ' FROM assets a'
                 . ' LEFT JOIN ' . Installer::TABLE_ASSET_DELETION_FENCE . ' f ON f.asset_id = a.id'
