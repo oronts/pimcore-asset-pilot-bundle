@@ -13,7 +13,7 @@ use Oronts\AssetPilotBundle\Model\OperationRecoveryResult;
 use Oronts\AssetPilotBundle\Model\ReviewedOperationRecovery;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 
-final readonly class OperationRecoveryCoordinator implements OperationRecoveryCoordinatorInterface
+readonly class OperationRecoveryCoordinator implements OperationRecoveryCoordinatorInterface
 {
     /** @param array<string, mixed> $planConfiguration */
     public function __construct(
@@ -47,18 +47,14 @@ final readonly class OperationRecoveryCoordinator implements OperationRecoveryCo
             throw new OperationRecoveryPlanException($claim);
         }
 
-        $operationIds = array_map(
-            static fn (OperationRecoveryResult $result): int => $result->operationId,
-            $preview,
-        );
-        $results = $this->recovery->recover($limit, $operationIds);
-        $recoveredIds = array_map(
-            static fn (OperationRecoveryResult $result): int => $result->operationId,
-            $results,
-        );
-        sort($operationIds, SORT_NUMERIC);
-        sort($recoveredIds, SORT_NUMERIC);
-        if ($operationIds !== $recoveredIds) {
+        $reviewedFingerprints = [];
+        foreach ($preview as $result) {
+            $reviewedFingerprints[$result->operationId] = $result->fingerprint;
+        }
+
+        try {
+            $results = $this->recovery->recover($limit, $reviewedFingerprints);
+        } catch (\Oronts\AssetPilotBundle\Exception\StaleApplyPlanException) {
             throw new OperationRecoveryPlanException(ApplyPlanStatus::Stale);
         }
 

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\SQLitePlatform;
+use Oronts\AssetPilotBundle\Enum\ObserverAuditReconciliationStatus;
 use Oronts\AssetPilotBundle\Enum\OperationDeliveryOutcome;
 use Oronts\AssetPilotBundle\Enum\OperationDeliveryStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
@@ -13,7 +15,7 @@ use Oronts\AssetPilotBundle\Model\OperationHandle;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Observer\OperationObserverRegistry;
 
-final class OperationJournal implements OperationJournalInterface
+class OperationJournal implements OperationJournalInterface
 {
     private const array COMPLETABLE_STATUSES = [
         OperationStatus::Completed,
@@ -87,14 +89,27 @@ final class OperationJournal implements OperationJournalInterface
             }
 
             $now = $this->format($this->now());
-            if ($currentStatus !== $status) {
-                $updated = $this->connection->update(Installer::TABLE_AUDIT_LOG, [
-                    ...$this->operationRow($operation->intent, $status, $errorMessage, $durationMs),
-                    'updated_at' => $now,
-                    'committed_at' => $this->isSuccess($status) ? $now : null,
-                ], ['id' => $operation->operationId]);
-                if ($updated !== 1) {
-                    throw new \RuntimeException(sprintf('Operation journal entry %d could not be completed.', $operation->operationId));
+            // Persist on a real transition, and also refresh the reason + updated_at on a same-status
+            // recovery_required re-classification, so a repeated recovery diagnosis is written and the
+            // row is not left immediately eligible for the next recovery scan.
+            $mustPersist = $currentStatus !== $status || $status === OperationStatus::RecoveryRequired;
+            if ($mustPersist && !$this->compareAndSetStatus(
+                $operation,
+                $currentStatus,
+                $status,
+                $errorMessage,
+                $durationMs,
+                $now,
+            )) {
+                $winner = $this->connection->fetchOne(
+                    'SELECT status FROM ' . Installer::TABLE_AUDIT_LOG . ' WHERE id = ?',
+                    [$operation->operationId],
+                );
+                if ($winner === false || OperationStatus::from((string) $winner) !== $status) {
+                    throw new \LogicException(sprintf(
+                        'Operation %d was completed concurrently with another outcome.',
+                        $operation->operationId,
+                    ));
                 }
             }
 
@@ -105,6 +120,27 @@ final class OperationJournal implements OperationJournalInterface
 
             return true;
         });
+    }
+
+    private function compareAndSetStatus(
+        OperationHandle $operation,
+        OperationStatus $currentStatus,
+        OperationStatus $status,
+        ?string $errorMessage,
+        ?int $durationMs,
+        string $now,
+    ): bool {
+        $row = [
+            ...$this->operationRow($operation->intent, $status, $errorMessage, $durationMs),
+            'updated_at' => $now,
+            'committed_at' => $this->isSuccess($status) ? $now : null,
+        ];
+        $assignments = implode(', ', array_map(static fn (string $column): string => $column . ' = ?', array_keys($row)));
+
+        return $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_AUDIT_LOG . ' SET ' . $assignments . ' WHERE id = ? AND status = ?',
+            [...array_values($row), $operation->operationId, $currentStatus->value],
+        ) === 1;
     }
 
     public function recoverable(int $limit = 100, int $staleSeconds = 900): array
@@ -137,77 +173,92 @@ final class OperationJournal implements OperationJournalInterface
         );
     }
 
-    public function recordObserverFailure(int $operationId, string $error): bool
+    public function recordObserverFailure(int $operationId, string $observerId): ObserverAuditReconciliationStatus
     {
-        if ($operationId <= 0 || trim($error) === '') {
-            throw new \InvalidArgumentException('An observer failure requires an operation ID and error.');
+        $observerId = trim($observerId);
+        if ($operationId <= 0 || $observerId === '') {
+            throw new \InvalidArgumentException('An observer failure requires an operation ID and observer ID.');
         }
 
-        return $this->connection->transactional(function () use ($operationId, $error): bool {
-            $row = $this->connection->fetchAssociative(
-                'SELECT status, error_message FROM ' . Installer::TABLE_AUDIT_LOG . ' WHERE id = ?',
-                [$operationId],
-            );
+        return $this->connection->transactional(function () use ($operationId, $observerId): ObserverAuditReconciliationStatus {
+            $row = $this->observerFailureRow($operationId);
             if ($row === false) {
-                return false;
+                return ObserverAuditReconciliationStatus::NotApplicable;
             }
 
             $status = OperationStatus::from((string) $row['status']);
+            if (in_array($status, [OperationStatus::Failed, OperationStatus::Skipped], true)) {
+                return ObserverAuditReconciliationStatus::NotApplicable;
+            }
             if (!in_array($status, [OperationStatus::Completed, OperationStatus::CompletedWithObserverError], true)) {
-                return false;
+                return ObserverAuditReconciliationStatus::Deferred;
             }
 
-            $previous = trim((string) ($row['error_message'] ?? ''));
-            $message = $previous === '' ? $error : $previous . '; ' . $error;
+            $failures = $this->observerFailures($row);
+            if (!in_array($observerId, $failures['observerIds'], true)) {
+                $failures['observerIds'][] = $observerId;
+            }
 
-            return $this->connection->update(Installer::TABLE_AUDIT_LOG, [
+            $updated = $this->connection->update(Installer::TABLE_AUDIT_LOG, [
                 'status' => OperationStatus::CompletedWithObserverError->value,
-                'error_message' => $message,
+                'error_message' => $this->observerFailureMessage($failures),
+                'durable_observer_failures' => $this->encode($failures),
                 'updated_at' => $this->format($this->now()),
-            ], ['id' => $operationId]) === 1;
+            ], ['id' => $operationId]);
+
+            return $updated === 1
+                ? ObserverAuditReconciliationStatus::Recorded
+                : ObserverAuditReconciliationStatus::Deferred;
         });
     }
 
-    public function resolveObserverFailures(int $operationId): bool
+    public function resolveObserverFailures(int $operationId): ObserverAuditReconciliationStatus
     {
         if ($operationId <= 0) {
-            return false;
+            return ObserverAuditReconciliationStatus::Deferred;
         }
 
-        return $this->connection->transactional(function () use ($operationId): bool {
-            if ($this->deliveries->hasDead($operationId) || $this->deliveries->hasUnresolved($operationId)) {
-                return false;
+        return $this->connection->transactional(function () use ($operationId): ObserverAuditReconciliationStatus {
+            if ($this->deliveries->hasUnresolved($operationId)) {
+                return ObserverAuditReconciliationStatus::Deferred;
+            }
+            if ($this->deliveries->hasDead($operationId)) {
+                return ObserverAuditReconciliationStatus::NotApplicable;
             }
 
-            $row = $this->connection->fetchAssociative(
-                'SELECT status, error_message FROM ' . Installer::TABLE_AUDIT_LOG . ' WHERE id = ?',
-                [$operationId],
-            );
-            if ($row === false || (string) $row['status'] !== OperationStatus::CompletedWithObserverError->value) {
-                return false;
+            $row = $this->observerFailureRow($operationId);
+            if ($row === false) {
+                return ObserverAuditReconciliationStatus::NotApplicable;
             }
 
-            $previous = trim((string) ($row['error_message'] ?? ''));
-            $remaining = array_values(array_filter(
-                $previous === '' ? [] : explode('; ', $previous),
-                static fn (string $error): bool => preg_match('/^Durable observer "[^"]+" did not complete\.$/D', $error) !== 1,
-            ));
-            if (count($remaining) === ($previous === '' ? 0 : count(explode('; ', $previous)))) {
-                return false;
+            $operationStatus = OperationStatus::from((string) $row['status']);
+            if (in_array($operationStatus, [OperationStatus::Completed, OperationStatus::Failed, OperationStatus::Skipped], true)) {
+                return ObserverAuditReconciliationStatus::NotApplicable;
+            }
+            if ($operationStatus !== OperationStatus::CompletedWithObserverError) {
+                return ObserverAuditReconciliationStatus::Deferred;
             }
 
-            $error = $remaining === [] ? null : implode('; ', $remaining);
-            $status = $remaining === [] ? OperationStatus::Completed : OperationStatus::CompletedWithObserverError;
+            $encodedFailures = $row['durable_observer_failures'] ?? null;
+            if (!is_string($encodedFailures) || trim($encodedFailures) === '') {
+                return ObserverAuditReconciliationStatus::NotApplicable;
+            }
+            $failures = $this->observerFailures($row);
+            if ($failures['observerIds'] === []) {
+                return ObserverAuditReconciliationStatus::NotApplicable;
+            }
 
-            return $this->connection->executeStatement(
-                'UPDATE ' . Installer::TABLE_AUDIT_LOG . ' SET status = ?, error_message = ?, updated_at = ? WHERE id = ? AND status = ? AND error_message = ? AND NOT EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_DELIVERY . ' WHERE operation_id = ? AND status IN (?, ?, ?, ?, ?))',
+            $error = $failures['baseError'];
+            $status = $error === null ? OperationStatus::Completed : OperationStatus::CompletedWithObserverError;
+            $updated = $this->connection->executeStatement(
+                'UPDATE ' . Installer::TABLE_AUDIT_LOG . ' SET status = ?, error_message = ?, durable_observer_failures = NULL, updated_at = ? WHERE id = ? AND status = ? AND durable_observer_failures = ? AND NOT EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_DELIVERY . ' WHERE operation_id = ? AND status IN (?, ?, ?, ?, ?))',
                 [
                     $status->value,
                     $error,
                     $this->format($this->now()),
                     $operationId,
                     OperationStatus::CompletedWithObserverError->value,
-                    $previous,
+                    $encodedFailures,
                     $operationId,
                     OperationDeliveryStatus::Dead->value,
                     OperationDeliveryStatus::Prepared->value,
@@ -215,8 +266,67 @@ final class OperationJournal implements OperationJournalInterface
                     OperationDeliveryStatus::Processing->value,
                     OperationDeliveryStatus::Retry->value,
                 ],
-            ) === 1;
+            );
+
+            return $updated === 1
+                ? ObserverAuditReconciliationStatus::Recorded
+                : ObserverAuditReconciliationStatus::Deferred;
         });
+    }
+
+    /** @return array<string, mixed>|false */
+    private function observerFailureRow(int $operationId): array|false
+    {
+        $query = $this->connection->createQueryBuilder()
+            ->select('status', 'error_message', 'durable_observer_failures')
+            ->from(Installer::TABLE_AUDIT_LOG)
+            ->where('id = :id')
+            ->setParameter('id', $operationId);
+        if (!$this->connection->getDatabasePlatform() instanceof SQLitePlatform) {
+            $query->forUpdate();
+        }
+
+        return $query->executeQuery()->fetchAssociative();
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{baseError: ?string, observerIds: list<string>}
+     */
+    private function observerFailures(array $row): array
+    {
+        $encoded = $row['durable_observer_failures'] ?? null;
+        if (!is_string($encoded) || trim($encoded) === '') {
+            $error = $row['error_message'] ?? null;
+
+            return [
+                'baseError' => is_string($error) && trim($error) !== '' ? $error : null,
+                'observerIds' => [],
+            ];
+        }
+
+        $decoded = $this->decode($encoded);
+        $baseError = $decoded['baseError'] ?? null;
+        $observerIds = $decoded['observerIds'] ?? [];
+        if (($baseError !== null && !is_string($baseError)) || !is_array($observerIds)) {
+            throw new \UnexpectedValueException('Durable observer failure state is invalid.');
+        }
+
+        return [
+            'baseError' => $baseError,
+            'observerIds' => array_values(array_filter($observerIds, 'is_string')),
+        ];
+    }
+
+    /** @param array{baseError: ?string, observerIds: list<string>} $failures */
+    private function observerFailureMessage(array $failures): string
+    {
+        $messages = $failures['baseError'] === null ? [] : [$failures['baseError']];
+        foreach ($failures['observerIds'] as $observerId) {
+            $messages[] = sprintf('Durable observer "%s" did not complete.', $observerId);
+        }
+
+        return implode('; ', $messages);
     }
 
     /** @return array<string, mixed> */

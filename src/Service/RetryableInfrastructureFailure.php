@@ -12,7 +12,7 @@ use Symfony\Component\Lock\Exception\LockAcquiringException;
 use Symfony\Component\Lock\Exception\LockExpiredException;
 use Symfony\Component\Lock\Exception\LockStorageException;
 
-final class RetryableInfrastructureFailure
+class RetryableInfrastructureFailure
 {
     public static function matches(\Throwable $throwable): bool
     {

@@ -13,7 +13,7 @@ use Oronts\AssetPilotBundle\Model\DeadOperationDelivery;
 use Oronts\AssetPilotBundle\Model\ReviewedDeliveryRetry;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 
-final readonly class OperationDeliveryRetryCoordinator implements OperationDeliveryRetryCoordinatorInterface
+readonly class OperationDeliveryRetryCoordinator implements OperationDeliveryRetryCoordinatorInterface
 {
     /** @param array<string, mixed> $planConfiguration */
     public function __construct(

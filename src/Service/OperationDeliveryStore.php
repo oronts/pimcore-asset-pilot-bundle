@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Enum\OperationDeliveryStatus;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\DeadOperationDelivery;
 use Oronts\AssetPilotBundle\Model\DeliveryEnvelope;
+use Oronts\AssetPilotBundle\Model\OperationDeliveryAudit;
 use Oronts\AssetPilotBundle\Model\OperationHandle;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Support\BulkIds;
@@ -27,11 +28,11 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
         $ids = [];
         $keys = [];
         foreach ($deliveries as $delivery) {
-            if (isset($keys[$delivery->deliveryKey])) {
+            if (isset($keys[$delivery->observerId][$delivery->deliveryKey])) {
                 throw new \InvalidArgumentException(sprintf('Duplicate prepared delivery key "%s".', $delivery->deliveryKey));
             }
-            $keys[$delivery->deliveryKey] = true;
-            $ids[] = $this->deliveryId($operation->operationId, $delivery->deliveryKey);
+            $keys[$delivery->observerId][$delivery->deliveryKey] = true;
+            $ids[] = $this->deliveryId($operation->operationId, $delivery->observerId, $delivery->deliveryKey);
         }
 
         $now = $this->format($this->now());
@@ -55,6 +56,7 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
                     'created_at' => $now,
                     'updated_at' => $now,
                     'delivered_at' => null,
+                    'audit_reconciled_at' => null,
                 ];
 
                 $existing = $this->connection->fetchAssociative(
@@ -110,10 +112,11 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
         $rows = $this->connection->createQueryBuilder()
             ->select('id')
             ->from(Installer::TABLE_OPERATION_DELIVERY)
-            ->where('((status IN (:pending, :retry) AND available_at <= :now) OR (status = :processing AND locked_until <= :now))')
+            ->where('((status IN (:pending, :retry) AND available_at <= :now) OR (status = :processing AND locked_until <= :now) OR (status IN (:terminal) AND audit_reconciled_at IS NULL AND available_at <= :now))')
             ->setParameter('pending', OperationDeliveryStatus::Pending->value)
             ->setParameter('retry', OperationDeliveryStatus::Retry->value)
             ->setParameter('processing', OperationDeliveryStatus::Processing->value)
+            ->setParameter('terminal', [OperationDeliveryStatus::Dead->value, OperationDeliveryStatus::Delivered->value], \Doctrine\DBAL\ArrayParameterType::STRING)
             ->setParameter('now', $this->format($this->now()))
             ->orderBy('available_at', 'ASC')
             ->addOrderBy('id', 'ASC')
@@ -165,12 +168,78 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
         return $this->envelope($row);
     }
 
+    public function renewLease(DeliveryEnvelope $delivery, int $leaseSeconds): bool
+    {
+        if ($leaseSeconds <= 0) {
+            throw new \InvalidArgumentException('A delivery lease renewal must be positive.');
+        }
+
+        $now = $this->now();
+        $formattedNow = $this->format($now);
+        $parameters = [
+            $this->format($now->modify(sprintf('+%d seconds', $leaseSeconds))),
+            $formattedNow,
+            $delivery->deliveryId,
+            OperationDeliveryStatus::Processing->value,
+            $delivery->claimToken,
+            $formattedNow,
+        ];
+        $updated = $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET locked_until = ?, updated_at = ? WHERE id = ? AND status = ? AND lock_token = ? AND locked_until > ?',
+            $parameters,
+        );
+        if ($updated === 1) {
+            return true;
+        }
+
+        // MariaDB reports zero changed rows when repeated heartbeats land in the same whole second.
+        $ownershipNow = $this->format($this->now());
+        return (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM ' . Installer::TABLE_OPERATION_DELIVERY . ' WHERE id = ? AND status = ? AND lock_token = ? AND locked_until > ?',
+            [$delivery->deliveryId, OperationDeliveryStatus::Processing->value, $delivery->claimToken, $ownershipNow],
+        ) === 1;
+    }
+
+    public function deadLetterExhausted(string $deliveryId, int $maxAttempts, string $error): ?DeadOperationDelivery
+    {
+        if ($deliveryId === '' || $maxAttempts <= 0 || trim($error) === '') {
+            throw new \InvalidArgumentException('An exhausted delivery requires an ID, attempt limit, and error.');
+        }
+
+        $now = $this->format($this->now());
+        $updated = $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, lock_token = NULL, locked_until = NULL, last_error = ?, audit_reconciled_at = NULL, updated_at = ? WHERE id = ? AND attempts >= ? AND ((status IN (?, ?) AND available_at <= ?) OR (status = ? AND locked_until <= ?))',
+            [
+                OperationDeliveryStatus::Dead->value,
+                $error,
+                $now,
+                $deliveryId,
+                $maxAttempts,
+                OperationDeliveryStatus::Pending->value,
+                OperationDeliveryStatus::Retry->value,
+                $now,
+                OperationDeliveryStatus::Processing->value,
+                $now,
+            ],
+        );
+        if ($updated !== 1) {
+            return null;
+        }
+
+        $row = $this->connection->fetchAssociative(
+            'SELECT * FROM ' . Installer::TABLE_OPERATION_DELIVERY . ' WHERE id = ? AND status = ?',
+            [$deliveryId, OperationDeliveryStatus::Dead->value],
+        );
+
+        return $row === false ? null : $this->deadDelivery($row);
+    }
+
     public function markDelivered(DeliveryEnvelope $delivery): bool
     {
         $now = $this->format($this->now());
 
         return $this->connection->executeStatement(
-            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, lock_token = NULL, locked_until = NULL, last_error = NULL, updated_at = ?, delivered_at = ? WHERE id = ? AND status = ? AND lock_token = ?',
+            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, lock_token = NULL, locked_until = NULL, last_error = NULL, audit_reconciled_at = NULL, updated_at = ?, delivered_at = ? WHERE id = ? AND status = ? AND lock_token = ?',
             [OperationDeliveryStatus::Delivered->value, $now, $now, $delivery->deliveryId, OperationDeliveryStatus::Processing->value, $delivery->claimToken],
         ) === 1;
     }
@@ -194,7 +263,7 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
     public function markDead(DeliveryEnvelope $delivery, string $error): bool
     {
         return $this->connection->executeStatement(
-            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, lock_token = NULL, locked_until = NULL, last_error = ?, updated_at = ? WHERE id = ? AND status = ? AND lock_token = ?',
+            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, lock_token = NULL, locked_until = NULL, last_error = ?, audit_reconciled_at = NULL, updated_at = ? WHERE id = ? AND status = ? AND lock_token = ?',
             [
                 OperationDeliveryStatus::Dead->value,
                 $error,
@@ -206,6 +275,54 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
         ) === 1;
     }
 
+    public function awaitingAudit(string $deliveryId): ?OperationDeliveryAudit
+    {
+        if ($deliveryId === '') {
+            throw new \InvalidArgumentException('A delivery audit reconciliation requires an ID.');
+        }
+
+        $row = $this->connection->fetchAssociative(
+            'SELECT * FROM ' . Installer::TABLE_OPERATION_DELIVERY . ' WHERE id = ? AND status IN (?, ?) AND audit_reconciled_at IS NULL',
+            [$deliveryId, OperationDeliveryStatus::Dead->value, OperationDeliveryStatus::Delivered->value],
+        );
+
+        return $row === false ? null : $this->audit($row);
+    }
+
+    public function markAuditReconciled(OperationDeliveryAudit $delivery): bool
+    {
+        $now = $this->format($this->now());
+
+        return $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET audit_reconciled_at = ?, updated_at = ? WHERE id = ? AND status = ? AND audit_reconciled_at IS NULL AND attempts = ? AND updated_at = ?',
+            [
+                $now,
+                $now,
+                $delivery->deliveryId,
+                $delivery->status->value,
+                $delivery->attempts,
+                $delivery->updatedAt,
+            ],
+        ) === 1;
+    }
+
+    public function deferAudit(OperationDeliveryAudit $delivery, \DateTimeImmutable $availableAt): bool
+    {
+        $now = $this->format($this->now());
+
+        return $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET available_at = ?, updated_at = ? WHERE id = ? AND status = ? AND audit_reconciled_at IS NULL AND attempts = ? AND updated_at = ?',
+            [
+                $this->format($availableAt),
+                $now,
+                $delivery->deliveryId,
+                $delivery->status->value,
+                $delivery->attempts,
+                $delivery->updatedAt,
+            ],
+        ) === 1;
+    }
+
     public function dead(int $limit = 100): array
     {
         $this->assertLimit($limit);
@@ -213,7 +330,7 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
         $rows = $this->connection->createQueryBuilder()
             ->select('*')
             ->from(Installer::TABLE_OPERATION_DELIVERY)
-            ->where('status = :status')
+            ->where('status = :status AND audit_reconciled_at IS NOT NULL')
             ->setParameter('status', OperationDeliveryStatus::Dead->value)
             ->orderBy('updated_at', 'ASC')
             ->addOrderBy('id', 'ASC')
@@ -250,6 +367,7 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
                 );
                 if ($row === false
                     || (string) $row['status'] !== OperationDeliveryStatus::Dead->value
+                    || $row['audit_reconciled_at'] === null
                     || !hash_equals($delivery->fingerprint, $this->fingerprint($row))
                 ) {
                     throw new \LogicException(sprintf('Dead delivery "%s" changed after it was reviewed.', $deliveryId));
@@ -260,7 +378,7 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
             $now = $this->format($this->now());
             foreach ($current as $deliveryId => $row) {
                 $updated = $this->connection->executeStatement(
-                    'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, attempts = 0, available_at = ?, lock_token = NULL, locked_until = NULL, last_error = NULL, updated_at = ?, delivered_at = NULL WHERE id = ? AND status = ? AND attempts = ? AND updated_at = ?',
+                    'UPDATE ' . Installer::TABLE_OPERATION_DELIVERY . ' SET status = ?, attempts = 0, available_at = ?, lock_token = NULL, locked_until = NULL, last_error = NULL, audit_reconciled_at = NULL, updated_at = ?, delivered_at = NULL WHERE id = ? AND status = ? AND audit_reconciled_at IS NOT NULL AND attempts = ? AND updated_at = ?',
                     [
                         OperationDeliveryStatus::Pending->value,
                         $now,
@@ -332,6 +450,19 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
     }
 
     /** @param array<string, mixed> $row */
+    private function audit(array $row): OperationDeliveryAudit
+    {
+        return new OperationDeliveryAudit(
+            deliveryId: (string) $row['id'],
+            operationId: (int) $row['operation_id'],
+            observerId: (string) $row['observer_id'],
+            status: OperationDeliveryStatus::from((string) $row['status']),
+            attempts: (int) $row['attempts'],
+            updatedAt: (string) $row['updated_at'],
+        );
+    }
+
+    /** @param array<string, mixed> $row */
     private function deadDelivery(array $row): DeadOperationDelivery
     {
         return new DeadOperationDelivery(
@@ -368,6 +499,7 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
             'created_at',
             'updated_at',
             'delivered_at',
+            'audit_reconciled_at',
         ] as $column) {
             $snapshot[$column] = $row[$column] === null ? null : (string) $row[$column];
         }
@@ -375,9 +507,9 @@ class OperationDeliveryStore implements OperationDeliveryStoreInterface
         return hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
     }
 
-    private function deliveryId(int $operationId, string $deliveryKey): string
+    private function deliveryId(int $operationId, string $observerId, string $deliveryKey): string
     {
-        return hash('sha256', $operationId . "\0" . $deliveryKey);
+        return hash('sha256', $operationId . "\0" . $observerId . "\0" . $deliveryKey);
     }
 
     private function assertLimit(int $limit): void

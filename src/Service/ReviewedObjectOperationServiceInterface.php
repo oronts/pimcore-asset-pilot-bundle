@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
@@ -15,7 +16,7 @@ interface ReviewedObjectOperationServiceInterface
      * @param array<string, mixed> $selector
      */
     public function execute(
-        string $kind,
+        OperationRunKind $kind,
         array $objectIds,
         array $selector,
         TriggerType $triggerType,

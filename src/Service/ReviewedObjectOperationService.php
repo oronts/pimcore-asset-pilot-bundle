@@ -5,37 +5,46 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
-use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ActorContextStore;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 
 class ReviewedObjectOperationService implements ReviewedObjectOperationServiceInterface
 {
+    private readonly SynchronousRunExecutor $syncRunExecutor;
+
     public function __construct(
-        private readonly AssetOrganizer $organizer,
-        private readonly OrganizeDispatcher $dispatcher,
-        private readonly ElementAuthorization $authorization,
+        private readonly AssetOrganizerInterface $organizer,
+        private readonly OrganizeDispatcherInterface $dispatcher,
+        private readonly ElementAuthorizationInterface $authorization,
+        private readonly ActorContextStore $actors,
         private readonly OperationRunStoreInterface $runs,
         private readonly ApplyPlanServiceInterface $applyPlans,
         private readonly OrganizePlanFingerprint $fingerprints,
         private readonly LoggerInterface $logger,
+        private readonly RunItemLease $runItemLease,
         private readonly array $planConfiguration = [],
-    ) {}
+        ?SynchronousRunExecutor $syncRunExecutor = null,
+    ) {
+        $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease);
+    }
 
     public function execute(
-        string $kind,
+        OperationRunKind $kind,
         array $objectIds,
         array $selector,
         TriggerType $triggerType,
@@ -52,6 +61,35 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
         }
 
         $actor ??= $this->authorization->currentActor();
+
+        // AssetOrganizer's per-asset checks read the ambient actor; binding the whole flow keeps them from
+        // falling back to System while the object checks use $actor.
+        return $this->actors->runAs($actor, fn (): ReviewedSelectionResult => $this->executeAs(
+            $kind,
+            $objectIds,
+            $selector,
+            $triggerType,
+            $dryRun,
+            $async,
+            $planToken,
+            $actor,
+        ));
+    }
+
+    /**
+     * @param list<int>    $objectIds
+     * @param array<mixed> $selector
+     */
+    private function executeAs(
+        OperationRunKind $kind,
+        array $objectIds,
+        array $selector,
+        TriggerType $triggerType,
+        bool $dryRun,
+        bool $async,
+        mixed $planToken,
+        ActorContext $actor,
+    ): ReviewedSelectionResult {
         $objectIds = $this->normalizeObjectIds($objectIds);
         if (count($objectIds) > BulkIds::MAX) {
             throw new ReviewedSelectionException(
@@ -80,7 +118,7 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
             'selector' => $selector,
             'trigger' => $triggerType->value,
         ];
-        $plan = new ApplyPlan($kind, $actor, $request, $this->planConfiguration, $preview['targets']);
+        $plan = new ApplyPlan($kind->value, $actor, $request, $this->planConfiguration, $preview['targets']);
 
         if ($dryRun) {
             return new ReviewedSelectionResult(
@@ -266,31 +304,18 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
             );
         }
         try {
-            $report = $this->organizer->organizeBulkDetailed(
-                $objectIds,
-                $triggerType,
-                shouldCancel: fn (): bool => $this->runs->isCancellationRequested($runId),
-                beforeObject: fn (int $objectId): bool => $this->runs->startItem($runId, $this->runItemKey($objectId)),
-                expectedFingerprints: $fingerprints,
-            );
-            foreach ($report->objectResults as $result) {
-                $this->runs->completeItem(
-                    $runId,
-                    $this->runItemKey($result->objectId),
-                    $this->itemStatus($result->status),
-                    ['operationCount' => $result->operationCount],
-                    $result->reason,
-                );
-            }
+            $report = $this->syncRunExecutor->runBulkOrganize($runId, $objectIds, $triggerType, $fingerprints);
             $status = $this->runs->finish($runId);
+        } catch (LostRunItemOwnershipException $e) {
+            throw new ReviewedSelectionException(
+                ReviewedSelectionError::OwnershipLost,
+                'A run item was reclaimed by a concurrent attempt before it could be recorded.',
+                runId: $runId,
+                previous: $e,
+            );
         } catch (\Throwable $e) {
             foreach ($objectIds as $objectId) {
-                $this->runs->completeItem(
-                    $runId,
-                    $this->runItemKey($objectId),
-                    OperationRunItemStatus::Failed,
-                    error: 'Reviewed organization failed.',
-                );
+                $this->runItemLease->complete($runId, $this->runItemKey($objectId), OperationRunItemStatus::Failed, error: 'Reviewed organization failed.');
             }
             $this->runs->fail($runId, 'Reviewed organization failed.');
             $this->logger->error('Asset Pilot: reviewed organization failed', ['run_id' => $runId, 'exception' => $e]);
@@ -331,15 +356,6 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
             'status' => $operation->status->value,
             'targetPath' => $operation->targetPath,
         ];
-    }
-
-    private function itemStatus(BulkObjectStatus $status): OperationRunItemStatus
-    {
-        return match ($status) {
-            BulkObjectStatus::Succeeded => OperationRunItemStatus::Completed,
-            BulkObjectStatus::Skipped => OperationRunItemStatus::Skipped,
-            BulkObjectStatus::Failed => OperationRunItemStatus::Failed,
-        };
     }
 
     private function runItemKey(int $objectId): string

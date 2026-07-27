@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 
-final class OperationRunActor
+class OperationRunActor
 {
     /** @param array<string, mixed> $run */
     public static function fromRun(array $run): ActorContext

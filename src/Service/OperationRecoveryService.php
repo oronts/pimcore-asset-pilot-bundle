@@ -6,10 +6,11 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Enum\OperationKind;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
+use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\OperationHandle;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Model\OperationRecoveryResult;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -19,7 +20,7 @@ class OperationRecoveryService
     public function __construct(
         private readonly OperationJournalInterface $journal,
         private readonly LoopGuard $loopGuard,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly LoggerInterface $logger,
         private readonly int $recoveryAfterSeconds,
     ) {
@@ -31,41 +32,110 @@ class OperationRecoveryService
     /** @return list<OperationRecoveryResult> */
     public function preview(int $limit = 100): array
     {
-        return $this->reconcile($limit, false);
+        return $this->previewOperations($limit);
     }
 
-    /**
-     * @param list<int>|null $operationIds
-     * @return list<OperationRecoveryResult>
-     */
-    public function recover(int $limit = 100, ?array $operationIds = null): array
+    /** @param array<int, string> $reviewedFingerprints @return list<OperationRecoveryResult> */
+    public function recover(int $limit, array $reviewedFingerprints): array
     {
-        if ($operationIds !== null && (count($operationIds) !== count(array_unique($operationIds)) || array_any($operationIds, static fn (int $id): bool => $id <= 0))) {
-            throw new \InvalidArgumentException('Reviewed recovery operation IDs must be unique and positive.');
-        }
+        $this->assertReviewedFingerprints($reviewedFingerprints);
 
-        return $this->reconcile($limit, true, $operationIds);
+        return $this->recoverReviewed($limit, $reviewedFingerprints);
     }
 
     /** @return list<OperationRecoveryResult> */
-    private function reconcile(int $limit, bool $updateJournal, ?array $operationIds = null): array
+    private function previewOperations(int $limit): array
     {
-        $operations = $this->journal->recoverable($limit, $this->recoveryAfterSeconds);
-        if ($operationIds !== null) {
-            $reviewed = array_fill_keys($operationIds, true);
-            $operations = array_values(array_filter(
-                $operations,
-                static fn (OperationHandle $operation): bool => isset($reviewed[$operation->operationId]),
-            ));
-        }
-
         return array_map(
-            fn (OperationHandle $operation): OperationRecoveryResult => $this->reconcileOperation($operation, $updateJournal),
-            $operations,
+            fn (OperationHandle $operation): OperationRecoveryResult => $this->previewOperation($operation),
+            $this->journal->recoverable($limit, $this->recoveryAfterSeconds),
         );
     }
 
-    private function reconcileOperation(OperationHandle $operation, bool $updateJournal): OperationRecoveryResult
+    /** @param array<int, string> $reviewedFingerprints @return list<OperationRecoveryResult> */
+    private function recoverReviewed(int $limit, array $reviewedFingerprints): array
+    {
+        $operations = $this->reviewedOperations($limit, array_keys($reviewedFingerprints));
+        $assetIds = array_values(array_unique(array_map(
+            static fn (OperationHandle $operation): int => $operation->intent->assetId,
+            $operations,
+        )));
+        sort($assetIds, SORT_NUMERIC);
+
+        $locked = [];
+        try {
+            foreach ($assetIds as $assetId) {
+                if (!$this->loopGuard->acquireAsset($assetId)) {
+                    throw new StaleApplyPlanException('A reviewed recovery asset is busy. Preview recovery again.');
+                }
+                $locked[] = $assetId;
+            }
+
+            $classified = array_map(
+                fn (OperationHandle $operation): OperationRecoveryResult => $this->classifiedResult($operation),
+                $operations,
+            );
+            foreach ($classified as $result) {
+                if (!hash_equals($reviewedFingerprints[$result->operationId], $result->fingerprint)) {
+                    throw new StaleApplyPlanException(sprintf('Operation %d changed after recovery was reviewed.', $result->operationId));
+                }
+            }
+
+            return array_map(
+                fn (OperationHandle $operation, OperationRecoveryResult $result): OperationRecoveryResult => $this->updateJournal(
+                    $operation,
+                    $result->status,
+                    $result->message,
+                ),
+                $operations,
+                $classified,
+            );
+        } finally {
+            foreach (array_reverse($locked) as $assetId) {
+                $this->loopGuard->releaseAsset($assetId);
+            }
+        }
+    }
+
+    /** @param list<int> $operationIds @return list<OperationHandle> */
+    private function reviewedOperations(int $limit, array $operationIds): array
+    {
+        $reviewed = array_fill_keys($operationIds, true);
+        $operations = array_values(array_filter(
+            $this->journal->recoverable($limit, $this->recoveryAfterSeconds),
+            static fn (OperationHandle $operation): bool => isset($reviewed[$operation->operationId]),
+        ));
+        $found = array_map(static fn (OperationHandle $operation): int => $operation->operationId, $operations);
+        sort($found, SORT_NUMERIC);
+        sort($operationIds, SORT_NUMERIC);
+        if ($found !== $operationIds) {
+            throw new StaleApplyPlanException('The reviewed recovery set changed before it could be applied.');
+        }
+
+        return $operations;
+    }
+
+    /** @param array<int, string> $reviewedFingerprints */
+    private function assertReviewedFingerprints(array $reviewedFingerprints): void
+    {
+        if ($reviewedFingerprints === []) {
+            throw new \InvalidArgumentException('Reviewed recovery fingerprints cannot be empty.');
+        }
+        foreach ($reviewedFingerprints as $operationId => $fingerprint) {
+            if (!is_int($operationId) || $operationId <= 0 || preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1) {
+                throw new \InvalidArgumentException('Reviewed recovery fingerprints require positive operation IDs and SHA-256 values.');
+            }
+        }
+    }
+
+    private function classifiedResult(OperationHandle $operation): OperationRecoveryResult
+    {
+        [$status, $message] = $this->classify($operation);
+
+        return $this->result($operation, $status, false, $message);
+    }
+
+    private function previewOperation(OperationHandle $operation): OperationRecoveryResult
     {
         $intent = $operation->intent;
         if (!$this->loopGuard->acquireAsset($intent->assetId)) {
@@ -79,11 +149,8 @@ class OperationRecoveryService
 
         try {
             [$status, $message] = $this->classify($operation);
-            if (!$updateJournal) {
-                return $this->result($operation, $status, false, $message);
-            }
 
-            return $this->updateJournal($operation, $status, $message);
+            return $this->result($operation, $status, false, $message);
         } finally {
             $this->loopGuard->releaseAsset($intent->assetId);
         }

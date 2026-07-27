@@ -11,11 +11,11 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\OperationRunExecution;
 use Oronts\AssetPilotBundle\Security\ActorContextStore;
 
-final class OperationRunExecutor implements OperationRunExecutorInterface
+class OperationRunExecutor implements OperationRunExecutorInterface
 {
     public function __construct(
-        private readonly OrganizeDispatcher $dispatcher,
-        private readonly DuplicateMergeService $duplicateMerges,
+        private readonly OrganizeDispatcherInterface $dispatcher,
+        private readonly DuplicateMergeServiceInterface $duplicateMerges,
         private readonly ActorContextStore $actors,
     ) {}
 

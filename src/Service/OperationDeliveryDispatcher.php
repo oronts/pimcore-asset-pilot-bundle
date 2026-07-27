@@ -7,13 +7,15 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Message\OperationDeliveryMessage;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DeduplicateStamp;
 
-final class OperationDeliveryDispatcher implements OperationDeliveryDispatcherInterface
+class OperationDeliveryDispatcher implements OperationDeliveryDispatcherInterface
 {
     public function __construct(
         private readonly OperationDeliveryStoreInterface $deliveries,
         private readonly MessageBusInterface $messageBus,
         private readonly LoggerInterface $logger,
+        private readonly float $deduplicationTtl = 3600.0,
     ) {}
 
     /** @return array{dispatched: list<string>, failed: list<string>} */
@@ -23,7 +25,9 @@ final class OperationDeliveryDispatcher implements OperationDeliveryDispatcherIn
         $failed = [];
         foreach ($this->deliveries->due($limit) as $deliveryId) {
             try {
-                $this->messageBus->dispatch(new OperationDeliveryMessage($deliveryId));
+                $this->messageBus->dispatch(new OperationDeliveryMessage($deliveryId), [
+                    new DeduplicateStamp('asset-pilot-delivery-' . $deliveryId, $this->deduplicationTtl, true),
+                ]);
                 $dispatched[] = $deliveryId;
             } catch (\Throwable $e) {
                 $failed[] = $deliveryId;

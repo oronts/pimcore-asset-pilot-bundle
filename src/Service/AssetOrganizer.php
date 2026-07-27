@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditWriterInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
@@ -16,6 +16,7 @@ use Oronts\AssetPilotBundle\Event\AssetMoveEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\BulkOrganizeEvent;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
+use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
@@ -27,7 +28,7 @@ use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Model\OperationResult;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleMatch;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Strategy\FirstAssignmentStrategy;
 use Pimcore\Model\Asset;
@@ -36,24 +37,35 @@ use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-class AssetOrganizer
+class AssetOrganizer implements AssetOrganizerInterface
 {
+    protected readonly ReviewedAssetLockCoordinator $reviewedLocks;
+    protected readonly RuleExecutionFingerprint $executionFingerprints;
+
     public function __construct(
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
-        protected readonly MovePlanner $movePlanner,
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly MovePlannerInterface $movePlanner,
+        protected readonly AuditWriterInterface $auditLogger,
         protected readonly OperationJournalInterface $operationJournal,
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly OrganizePlanFingerprint $planFingerprints,
+        protected readonly LoopGuardedAssetSaver $assetSaver,
         protected readonly int $maxObjectReplays = 3,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
+        ?ReviewedAssetLockCoordinator $reviewedLocks = null,
+        ?RuleExecutionFingerprint $executionFingerprints = null,
     ) {
         if ($this->maxObjectReplays < 1) {
             throw new \InvalidArgumentException('The maximum object replay count must be positive.');
         }
+        // Shares this organizer's LoopGuard so a pre-acquired asset lock and executeMove's own
+        // acquireAsset nest reentrantly (same in-process depth counter) instead of self-deadlocking.
+        $this->reviewedLocks = $reviewedLocks ?? new ReviewedAssetLockCoordinator($this->loopGuard);
+        $this->executionFingerprints = $executionFingerprints ?? new RuleExecutionFingerprint();
     }
 
     /** @return OperationResult[] */
@@ -146,42 +158,128 @@ class AssetOrganizer
         $this->loopGuard->markObjectProcessing($objectId);
 
         try {
-            $object = $this->validatedObjectState($object, $triggerType, $ruleName, $expectedFingerprint);
+            if ($expectedFingerprint === null) {
+                return $this->organizeLockedState($object, $triggerType, $ruleName, $heartbeat);
+            }
 
-            return $this->organizeLockedState($object, $triggerType, $ruleName, $heartbeat);
+            return $this->organizeReviewedState($object, $triggerType, $ruleName, $expectedFingerprint, $heartbeat);
         } finally {
             $this->loopGuard->unmarkObjectProcessing($objectId);
             $this->loopGuard->releaseObject($objectId);
         }
     }
 
-    private function validatedObjectState(
+    /**
+     * Reviewed apply. The object fingerprint alone does not close an asset-level race: an asset can be
+     * edited (metadata, property, mimetype, filename) after planning but before its lock, changing the
+     * canonical target while the object looks unchanged. So pin every asset the plan touches in stable id
+     * order under the object lock, then reload and recompute the whole plan under those locks and compare
+     * it against the reviewed fingerprint before mutating. Execution is then bound to the reviewed target
+     * per asset (executeMove tripwire), so a non-deterministic template cannot land a later, unreviewed
+     * path in the window between re-validation and the move. executeMove's own acquireAsset nests
+     * reentrantly on the pre-acquired lock.
+     *
+     * @return list<OperationResult>
+     */
+    protected function organizeReviewedState(
         AbstractObject $object,
         TriggerType $triggerType,
         ?string $ruleName,
-        ?string $expectedFingerprint,
-    ): AbstractObject {
-        if ($expectedFingerprint === null) {
-            return $object;
+        string $expectedFingerprint,
+        ?callable $heartbeat,
+    ): array {
+        $objectId = (int) $object->getId();
+        [, $operations] = $this->revalidatedReviewedPlan($objectId, $triggerType, $ruleName, $expectedFingerprint);
+        $assetIds = $this->distinctPlanAssetIds($operations);
+        if ($assetIds === []) {
+            return [];
         }
 
-        $objectId = (int) $object->getId();
+        return $this->reviewedLocks->run(
+            $assetIds,
+            static fn (int $assetId): \Throwable => new StaleApplyPlanException($objectId),
+            function (array $lockedIds) use ($objectId, $triggerType, $ruleName, $expectedFingerprint, $heartbeat): array {
+                [$object, $operations] = $this->revalidatedReviewedPlan($objectId, $triggerType, $ruleName, $expectedFingerprint);
+
+                return $this->organizeLockedState($object, $triggerType, $ruleName, $heartbeat, $this->reviewedPendingOperations($operations));
+            },
+        );
+    }
+
+    /**
+     * The reviewed pending operation per asset id, from the plan re-validated under the locks. Skipped
+     * operations are excluded so a skip that flips to a move cannot be executed as an unreviewed move. Each
+     * op carries the reviewed target AND the execution fingerprint, so the apply is bound to the full
+     * reviewed rule semantics (strategy/actions/callback/options), not only the destination path.
+     *
+     * @param list<MoveOperation> $operations
+     * @return array<int, MoveOperation>
+     */
+    protected function reviewedPendingOperations(array $operations): array
+    {
+        $pending = [];
+        foreach ($operations as $operation) {
+            if ($operation->status === OperationStatus::Pending) {
+                $pending[$operation->assetId] = $operation;
+            }
+        }
+
+        return $pending;
+    }
+
+    /**
+     * Reload the object, re-authorize it, recompute the canonical plan, and assert it still equals the
+     * reviewed fingerprint. Throws {@see StaleApplyPlanException} (a per-object skip) on any drift.
+     *
+     * @return array{0: AbstractObject, 1: list<MoveOperation>}
+     */
+    protected function revalidatedReviewedPlan(
+        int $objectId,
+        TriggerType $triggerType,
+        ?string $ruleName,
+        string $expectedFingerprint,
+    ): array {
         $object = $this->reloadObject($objectId) ?? throw new StaleApplyPlanException($objectId);
         if (!$this->authorization->isAllowed($object, 'publish')) {
             throw new StaleApplyPlanException($objectId);
         }
 
         $operations = $this->dryRun($object, $triggerType, $ruleName);
-        $fingerprint = $this->planFingerprints->forOperations($object, $operations);
-        if (!hash_equals($expectedFingerprint, $fingerprint)) {
+        if (!hash_equals($expectedFingerprint, $this->planFingerprints->forOperations($object, $operations))) {
             throw new StaleApplyPlanException($objectId);
         }
 
-        return $object;
+        return [$object, $operations];
     }
 
-    /** @return list<OperationResult> */
-    private function organizeLockedState(AbstractObject $object, TriggerType $triggerType, ?string $ruleName, ?callable $heartbeat): array
+    /**
+     * @param list<MoveOperation> $operations
+     * @return list<int> distinct asset ids the plan touches, sorted for a stable lock-acquisition order
+     */
+    protected function distinctPlanAssetIds(array $operations): array
+    {
+        $ids = [];
+        foreach ($operations as $operation) {
+            $ids[$operation->assetId] = true;
+        }
+        $ids = array_map('intval', array_keys($ids));
+        sort($ids, SORT_NUMERIC);
+
+        return $ids;
+    }
+
+    /**
+     * @param array<int, MoveOperation>|null $reviewedOperations when set (reviewed apply), the reviewed
+     *                                                            pending operation keyed by asset id. Only
+     *                                                            these assets run; each executes only if the
+     *                                                            live rule's execution fingerprint still
+     *                                                            matches the reviewed one (semantic gate,
+     *                                                            before planning) and its live target still
+     *                                                            equals the reviewed one (executeMove tripwire).
+     *
+     * @return list<OperationResult>
+     */
+    protected function organizeLockedState(AbstractObject $object, TriggerType $triggerType, ?string $ruleName, ?callable $heartbeat, ?array $reviewedOperations = null): array
     {
         $objectId = (int) $object->getId();
         $fieldInfos = $this->fieldExtractor->extract($object);
@@ -196,16 +294,61 @@ class AssetOrganizer
             if ($heartbeat !== null) {
                 $heartbeat();
             }
-            $this->loopGuard->refreshObject($objectId);
             $asset = $candidate['asset'];
+            $assetId = (int) $asset->getId();
+            if ($reviewedOperations !== null && !array_key_exists($assetId, $reviewedOperations)) {
+                // A reviewed apply executes exactly the reviewed pending moves; never an asset that was a
+                // skip or appeared/changed after re-validation.
+                continue;
+            }
+            $this->loopGuard->refreshObject($objectId);
+            if ($reviewedOperations !== null) {
+                $this->reviewedLocks->refresh(array_map('intval', array_keys($reviewedOperations)));
+            }
             $match = $candidate['match'];
+            $reviewedOperation = $reviewedOperations[$assetId] ?? null;
+            if ($reviewedOperation !== null
+                && !$this->matchesReviewedExecution($reviewedOperation, $match->rule)) {
+                // Live rule diverged from the reviewed one; skip before planning so no unreviewed side effect runs.
+                $results[] = $this->skipReviewedDivergence($asset, $object, $match->rule, $triggerType, $reviewedOperation->targetPath);
+
+                continue;
+            }
             $plan = $this->movePlanner->plan($asset, $object, $match->rule, $match->resolvedPath, $triggerType, dryRun: false);
-            $results[] = $this->executeMove($asset, $plan, $object, $match->rule, $triggerType);
+            $results[] = $this->executeMove($asset, $plan, $object, $match->rule, $triggerType, $reviewedOperation?->targetPath);
         }
 
         $this->logOrganizeResult($object, $results);
 
         return $results;
+    }
+
+    /**
+     * Whether the live rule's execution fingerprint still equals the one reviewed for this asset. A
+     * reviewed operation with no recorded fingerprint fails closed (it predates the binding, so its
+     * semantics cannot be proven).
+     */
+    protected function matchesReviewedExecution(MoveOperation $reviewedOperation, Rule $liveRule): bool
+    {
+        return $reviewedOperation->executionFingerprint !== null
+            && hash_equals($reviewedOperation->executionFingerprint, $this->executionFingerprints->forRule($liveRule));
+    }
+
+    private function skipReviewedDivergence(Asset $asset, AbstractObject $object, Rule $rule, TriggerType $triggerType, string $reviewedTarget): OperationResult
+    {
+        $startTime = hrtime(true);
+        $planned = $this->operation(
+            (int) $asset->getId(),
+            $asset->getRealFullPath(),
+            $reviewedTarget,
+            (int) $object->getId(),
+            $this->resolveObjectClass($object),
+            $rule,
+            $triggerType,
+            OperationStatus::Pending,
+        );
+
+        return $this->skipMove($planned, $startTime, 'Asset operation changed after review');
     }
 
     /** @param list<OperationResult> $results */
@@ -316,7 +459,7 @@ class AssetOrganizer
      *
      * @return list<array{asset: Asset, match: RuleMatch, field: string, locale: ?string}>
      */
-    private function bestMatches(AbstractObject $object, iterable $fieldInfos, ?string $ruleName): array
+    protected function bestMatches(AbstractObject $object, iterable $fieldInfos, ?string $ruleName): array
     {
         $best = [];
 
@@ -477,8 +620,12 @@ class AssetOrganizer
                 ]);
                 $objectResults[] = new BulkObjectResult($objectId, BulkObjectStatus::Failed, 'Unexpected error while organizing this object.');
             } finally {
-                if ($afterObject !== null && count($objectResults) > $resultOffset) {
-                    $afterObject($objectResults[array_key_last($objectResults)]);
+                // A false return means the token-fenced completion was reclaimed; abort so the run is never
+                // finished on stale ownership. afterObject only runs after a result is appended (retryable
+                // failures re-throw first), so no pending exception is suppressed by throwing here.
+                if ($afterObject !== null && count($objectResults) > $resultOffset
+                    && $afterObject($objectResults[array_key_last($objectResults)]) === false) {
+                    throw new LostRunItemOwnershipException(sprintf('Run item for object %d was reclaimed by another attempt.', $objectId));
                 }
                 if ($progressCallback !== null) {
                     $progressCallback($index + 1, $total, $objectId);
@@ -533,6 +680,7 @@ class AssetOrganizer
         AbstractObject $object,
         Rule $rule,
         TriggerType $triggerType,
+        ?string $reviewedTarget = null,
     ): OperationResult {
         $startTime = hrtime(true);
         $assetId = (int) $asset->getId();
@@ -557,6 +705,13 @@ class AssetOrganizer
             ]);
 
             return $this->skipMove($planned, $startTime, (string) $plan->skipReason);
+        }
+
+        if ($reviewedTarget !== null && $plan->targetPath !== $reviewedTarget) {
+            // The live target diverged from the reviewed one (e.g. a non-deterministic {{ date }} template
+            // crossed a bucket between re-validation and execution). Skip fail-closed rather than move to a
+            // path that was never reviewed, keeping the signed-plan guarantee.
+            return $this->skipMove($planned, $startTime, 'Asset target changed after review');
         }
 
         if (!$this->loopGuard->acquireAsset($assetId)) {
@@ -607,6 +762,12 @@ class AssetOrganizer
     {
         if ($asset->getRealFullPath() !== $planned->sourcePath) {
             return 'Asset changed after planning';
+        }
+        // Re-check protection on the live asset under the asset lock: a user may have locked it
+        // between planning (MovePlanner) and here, and the object-level reviewed fingerprint does
+        // not close this asset-level race.
+        if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+            return 'Asset is protected from automated changes';
         }
         if (!$this->authorization->isAllowed($asset, 'publish')) {
             return 'Not permitted to move this asset';
@@ -661,22 +822,20 @@ class AssetOrganizer
 
     private function saveMove(Asset $asset, MovePlan $plan, Rule $rule): void
     {
-        $assetId = (int) $asset->getId();
-        $asset->setParent($this->createFolderIfNeeded((string) $plan->folderPath));
-        $asset->setFilename((string) $plan->targetFilename);
-        if ($rule->strategy === MoveStrategy::FirstAssignment) {
-            $asset->setProperty(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY, PropertyType::Bool->value, true);
-        }
-
-        $this->loopGuard->markAssetProcessing($assetId);
-        try {
-            $this->loopGuard->refreshAsset($assetId);
-            $this->loopGuard->refreshTarget($plan->targetPath);
-            $asset->save(['versionNote' => 'Asset Pilot: organized by rule "' . $rule->name . '" -> ' . $plan->targetPath]);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
-        }
+        $this->assetSaver->save(
+            $asset,
+            function (Asset $mutable) use ($plan, $rule): void {
+                $mutable->setParent($this->createFolderIfNeeded((string) $plan->folderPath));
+                $mutable->setFilename((string) $plan->targetFilename);
+                if ($rule->strategy === MoveStrategy::FirstAssignment) {
+                    $mutable->setProperty(FirstAssignmentStrategy::ASSIGNMENT_PROPERTY, PropertyType::Bool->value, true);
+                }
+            },
+            ['versionNote' => 'Asset Pilot: organized by rule "' . $rule->name . '" -> ' . $plan->targetPath],
+            function () use ($plan): void {
+                $this->loopGuard->refreshTarget($plan->targetPath);
+            },
+        );
     }
 
     private function completeMove(
@@ -935,6 +1094,7 @@ class AssetOrganizer
             errorMessage: $errorMessage,
             durationMs: $durationMs,
             userId: $this->authorization->currentActor()->userId,
+            executionFingerprint: $this->executionFingerprints->forRule($rule),
         );
     }
 

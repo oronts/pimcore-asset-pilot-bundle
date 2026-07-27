@@ -7,27 +7,20 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
-use Psr\Cache\CacheItemPoolInterface;
-use Symfony\Component\Lock\LockFactory;
 
-final class ApplyPlanService implements ApplyPlanServiceInterface
+class ApplyPlanService implements ApplyPlanServiceInterface
 {
     private const string VERSION = 'v1';
-    private const string CLAIM_KEY_PREFIX = 'asset_pilot.apply_plan.claim.';
-    private const string CLAIM_LOCK_PREFIX = 'asset_pilot_apply_plan_claim_';
 
     private readonly string $secret;
     private readonly int $ttlSeconds;
-    private readonly float $claimLockTtl;
     private readonly ?\Closure $clock;
 
     public function __construct(
         #[\SensitiveParameter]
         string $secret,
-        private readonly CacheItemPoolInterface $cache,
-        private readonly LockFactory $lockFactory,
+        private readonly ApplyPlanClaimStoreInterface $claims,
         int $ttlSeconds = 300,
-        float $claimLockTtl = 10.0,
         ?\Closure $clock = null,
     ) {
         if ($secret === '') {
@@ -36,13 +29,8 @@ final class ApplyPlanService implements ApplyPlanServiceInterface
         if ($ttlSeconds <= 0) {
             throw new \InvalidArgumentException('The apply plan token lifetime must be positive.');
         }
-        if ($claimLockTtl <= 0) {
-            throw new \InvalidArgumentException('The apply plan claim lock lifetime must be positive.');
-        }
-
         $this->secret = $secret;
         $this->ttlSeconds = $ttlSeconds;
-        $this->claimLockTtl = $claimLockTtl;
         $this->clock = $clock;
     }
 
@@ -73,37 +61,16 @@ final class ApplyPlanService implements ApplyPlanServiceInterface
         }
 
         $claimId = hash('sha256', $token);
-        $lock = $this->lockFactory->createLock(
-            self::CLAIM_LOCK_PREFIX . $claimId,
-            $this->claimLockTtl,
-        );
-        if (!$lock->acquire()) {
-            return ApplyPlanStatus::AlreadyClaimed;
+        $claimedAt = $this->now();
+        if ($inspection['expiresAt'] <= $claimedAt) {
+            return ApplyPlanStatus::Stale;
         }
 
-        try {
-            $cacheItem = $this->cache->getItem(self::CLAIM_KEY_PREFIX . $claimId);
-            if ($cacheItem->isHit()) {
-                return ApplyPlanStatus::AlreadyClaimed;
-            }
-
-            $remainingLifetime = $inspection['expiresAt'] - $this->now();
-            if ($remainingLifetime <= 0) {
-                return ApplyPlanStatus::Stale;
-            }
-
-            $cacheItem->set(true)->expiresAfter($remainingLifetime);
-            if (!$this->cache->save($cacheItem)) {
-                throw new \RuntimeException('Unable to persist the apply plan claim.');
-            }
-
-            return ApplyPlanStatus::Claimed;
-        } finally {
-            try {
-                $lock->release();
-            } catch (\Throwable) {
-            }
-        }
+        return $this->claims->claim(
+            $claimId,
+            $this->timestamp($claimedAt),
+            $this->timestamp($inspection['expiresAt']),
+        ) ? ApplyPlanStatus::Claimed : ApplyPlanStatus::AlreadyClaimed;
     }
 
     /** @return array{status: ApplyPlanStatus, expiresAt: int} */
@@ -239,5 +206,10 @@ final class ApplyPlanService implements ApplyPlanServiceInterface
     private function now(): int
     {
         return $this->clock === null ? time() : ($this->clock)();
+    }
+
+    private function timestamp(int $value): \DateTimeImmutable
+    {
+        return (new \DateTimeImmutable('@' . $value))->setTimezone(new \DateTimeZone('UTC'));
     }
 }

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Enum\OperationKind;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\RevertFailure;
@@ -16,21 +16,23 @@ use Oronts\AssetPilotBundle\Exception\RevertException;
 use Oronts\AssetPilotBundle\Model\OperationHandle;
 use Oronts\AssetPilotBundle\Model\OperationIntent;
 use Oronts\AssetPilotBundle\Model\RevertResult;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-class OperationReverter
+class OperationReverter implements OperationReverterInterface
 {
     public function __construct(
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly AuditQueryInterface $auditLogger,
         protected readonly OperationJournalInterface $operationJournal,
         protected readonly LoopGuard $loopGuard,
         protected readonly EventDispatcherInterface $eventDispatcher,
         protected readonly LoggerInterface $logger,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly LoopGuardedAssetSaver $assetSaver,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
@@ -73,25 +75,29 @@ class OperationReverter
             throw RevertException::of(RevertFailure::AssetNotFound, 'Asset not found');
         }
 
-        $targetPath = (string) ($entry['asset_path_to'] ?? '');
-        $sourcePath = (string) ($entry['asset_path_from'] ?? '');
-        $this->assertRevertAllowed($asset, $targetPath);
-        if (!$this->loopGuard->acquireTarget($sourcePath)) {
+        $currentPath = (string) ($entry['asset_path_to'] ?? '');
+        $originalPath = (string) ($entry['asset_path_from'] ?? '');
+        $this->assertRevertAllowed($asset, $currentPath);
+        if (!$this->loopGuard->acquireTarget($originalPath)) {
             throw RevertException::of(RevertFailure::PathConflict, 'The original path is being allocated by another job');
         }
 
         try {
-            $this->assertSourceAvailable($assetId, $sourcePath);
-            $this->assertTargetFolderAllowed(\dirname($sourcePath));
+            $this->assertOriginalPathAvailable($assetId, $originalPath);
+            $this->assertOriginalFolderAllowed(\dirname($originalPath));
 
-            return $this->executeRevert($entry, $auditId, $asset, $assetId, $targetPath, $sourcePath);
+            return $this->executeRevert($entry, $auditId, $asset, $assetId, $currentPath, $originalPath);
         } finally {
-            $this->loopGuard->releaseTarget($sourcePath);
+            $this->loopGuard->releaseTarget($originalPath);
         }
     }
 
     private function assertRevertAllowed(Asset $asset, string $expectedPath): void
     {
+        if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+            throw RevertException::of(RevertFailure::AssetLocked, 'Asset is protected from automated changes');
+        }
+
         if (!$this->authorization->isAllowed($asset, 'publish')) {
             throw RevertException::of(RevertFailure::PermissionDenied, 'You are not permitted to revert this asset');
         }
@@ -105,43 +111,43 @@ class OperationReverter
         }
     }
 
-    private function assertSourceAvailable(int $assetId, string $sourcePath): void
+    private function assertOriginalPathAvailable(int $assetId, string $originalPath): void
     {
-        $occupant = $this->assetAtPath($sourcePath);
+        $occupant = $this->assetAtPath($originalPath);
         if ($occupant !== null && (int) $occupant->getId() !== $assetId) {
             throw RevertException::of(RevertFailure::PathConflict, 'The original asset path is occupied');
         }
     }
 
-    private function assertTargetFolderAllowed(string $sourceDir): void
+    private function assertOriginalFolderAllowed(string $originalDirectory): void
     {
-        $targetParent = $this->nearestExistingFolder($sourceDir);
-        if ($targetParent !== null && !$this->authorization->isAllowed($targetParent, 'create')) {
+        $originalParent = $this->nearestExistingFolder($originalDirectory);
+        if ($originalParent !== null && !$this->authorization->isAllowed($originalParent, 'create')) {
             throw RevertException::of(RevertFailure::PermissionDenied, 'You are not permitted to restore this asset to its original folder');
         }
     }
 
     /** @param array<string, mixed> $entry */
-    private function executeRevert(array $entry, int $auditId, Asset $asset, int $assetId, string $targetPath, string $sourcePath): RevertResult
+    private function executeRevert(array $entry, int $auditId, Asset $asset, int $assetId, string $currentPath, string $originalPath): RevertResult
     {
         $operation = $this->operationJournal->begin($this->intent(
             $entry,
             $auditId,
             $assetId,
-            $targetPath,
-            $sourcePath,
+            $currentPath,
+            $originalPath,
         ));
 
         try {
-            $asset->setParent($this->createFolder(\dirname($sourcePath)));
-            $asset->setFilename(basename($sourcePath));
-            $this->loopGuard->refreshTarget($sourcePath);
+            $asset->setParent($this->createFolder(\dirname($originalPath)));
+            $asset->setFilename(basename($originalPath));
+            $this->loopGuard->refreshTarget($originalPath);
             $this->saveReverted($asset, $assetId);
         } catch (\Throwable $e) {
-            return $this->finalizeRevert($operation, $auditId, $assetId, $targetPath, $sourcePath, $e);
+            return $this->finalizeRevert($operation, $auditId, $assetId, $currentPath, $originalPath, $e);
         }
 
-        return $this->finalizeRevert($operation, $auditId, $assetId, $targetPath, $sourcePath);
+        return $this->finalizeRevert($operation, $auditId, $assetId, $currentPath, $originalPath);
     }
 
     /** @param array<string, mixed> $entry */
@@ -149,14 +155,14 @@ class OperationReverter
         array $entry,
         int $parentAuditId,
         int $assetId,
-        string $sourcePath,
-        string $targetPath,
+        string $currentPath,
+        string $originalPath,
     ): OperationIntent {
         return new OperationIntent(
             OperationKind::Revert,
             $assetId,
-            $sourcePath,
-            $targetPath,
+            $currentPath,
+            $originalPath,
             (int) ($entry['object_id'] ?? 0),
             (string) ($entry['object_class'] ?? ''),
             'revert:' . ($entry['rule_name'] ?? ''),
@@ -171,11 +177,11 @@ class OperationReverter
         OperationHandle $operation,
         int $parentAuditId,
         int $assetId,
-        string $sourcePath,
-        string $targetPath,
+        string $currentPath,
+        string $originalPath,
         ?\Throwable $cause = null,
     ): RevertResult {
-        $status = $this->classifyPersistedRevert($assetId, $sourcePath, $targetPath);
+        $status = $this->classifyPersistedRevert($assetId, $currentPath, $originalPath);
         if ($status === OperationStatus::RecoveryRequired) {
             $this->throwRecoveryRequired($operation, $assetId, $cause);
         }
@@ -183,7 +189,7 @@ class OperationReverter
             $this->throwRevertFailed($operation, $parentAuditId, $assetId, $cause);
         }
 
-        return $this->completeRevert($operation, $parentAuditId, $assetId, $sourcePath, $targetPath);
+        return $this->completeRevert($operation, $parentAuditId, $assetId, $currentPath, $originalPath);
     }
 
     private function throwRecoveryRequired(OperationHandle $operation, int $assetId, ?\Throwable $cause): never
@@ -214,11 +220,11 @@ class OperationReverter
         throw RevertException::of(RevertFailure::ExecutionFailed, 'Failed to revert the operation.', [], $cause);
     }
 
-    private function completeRevert(OperationHandle $operation, int $parentAuditId, int $assetId, string $sourcePath, string $targetPath): RevertResult
+    private function completeRevert(OperationHandle $operation, int $parentAuditId, int $assetId, string $currentPath, string $originalPath): RevertResult
     {
         $observerErrors = NonFatalEventDispatcher::dispatch(
             $this->eventDispatcher,
-            new AssetMutationEvent([$assetId], 'revert', ['from' => $sourcePath, 'to' => $targetPath]),
+            new AssetMutationEvent([$assetId], 'revert', ['from' => $currentPath, 'to' => $originalPath]),
             AssetPilotEvents::REVERTED,
             $this->logger,
             ['audit_id' => $parentAuditId, 'asset_id' => $assetId],
@@ -248,18 +254,18 @@ class OperationReverter
         $this->logger->info('Asset Pilot: reverted audit entry {id}, asset {assetId} moved back to {path}', [
             'id' => $parentAuditId,
             'assetId' => $assetId,
-            'path' => $targetPath,
+            'path' => $originalPath,
         ]);
 
         return new RevertResult(
             $assetId,
-            $sourcePath,
-            $targetPath,
+            $currentPath,
+            $originalPath,
             $observerErrors === [] ? null : 'The asset was reverted, but an observer did not complete.',
         );
     }
 
-    protected function classifyPersistedRevert(int $assetId, string $sourcePath, string $targetPath): OperationStatus
+    protected function classifyPersistedRevert(int $assetId, string $currentPath, string $originalPath): OperationStatus
     {
         try {
             $asset = $this->loadAsset($assetId);
@@ -267,10 +273,10 @@ class OperationReverter
                 return OperationStatus::RecoveryRequired;
             }
             $path = $asset->getRealFullPath();
-            if ($path === $targetPath) {
+            if ($path === $originalPath) {
                 return OperationStatus::Completed;
             }
-            if ($path === $sourcePath) {
+            if ($path === $currentPath) {
                 return OperationStatus::Failed;
             }
         } catch (\Throwable $e) {
@@ -306,13 +312,7 @@ class OperationReverter
     // The post-update listener must see either the processing or recently-moved guard.
     protected function saveReverted(Asset $asset, int $assetId): void
     {
-        $this->loopGuard->markAssetProcessing($assetId);
-        try {
-            $this->loopGuard->refreshAsset($assetId);
-            $asset->save(['versionNote' => 'Asset Pilot: reverted a previous move']);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
-        }
+        unset($assetId);
+        $this->assetSaver->save($asset, saveParameters: ['versionNote' => 'Asset Pilot: reverted a previous move']);
     }
 }

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 
-class FailureReplayService
+class FailureReplayService implements FailureReplayServiceInterface
 {
     public function __construct(
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly AuditQueryInterface $auditLogger,
         protected readonly int $defaultLimit = 100,
     ) {}
 

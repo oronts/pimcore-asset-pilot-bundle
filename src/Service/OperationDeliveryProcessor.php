@@ -4,22 +4,24 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Enum\ObserverAuditReconciliationStatus;
 use Oronts\AssetPilotBundle\Enum\OperationDeliveryStatus;
 use Oronts\AssetPilotBundle\Model\DeliveryEnvelope;
+use Oronts\AssetPilotBundle\Model\OperationDeliveryAudit;
 use Oronts\AssetPilotBundle\Observer\DurableOperationObserverInterface;
 use Oronts\AssetPilotBundle\Observer\OperationObserverRegistry;
 use Oronts\AssetPilotBundle\Security\ActorContextStore;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 
-class OperationDeliveryProcessor
+class OperationDeliveryProcessor implements OperationDeliveryProcessorInterface
 {
     public function __construct(
         private readonly OperationDeliveryStoreInterface $deliveries,
         private readonly OperationObserverRegistry $observers,
         private readonly ActorContextStore $actors,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly LoopGuard $loopGuard,
         private readonly OperationJournalInterface $journal,
         private readonly LoggerInterface $logger,
@@ -35,10 +37,36 @@ class OperationDeliveryProcessor
 
     public function process(string $deliveryId): ?OperationDeliveryStatus
     {
+        $audit = $this->deliveries->awaitingAudit($deliveryId);
+        if ($audit !== null) {
+            return $this->reconcileAuditSafely($audit);
+        }
+
+        $exhausted = $this->deliveries->deadLetterExhausted(
+            $deliveryId,
+            $this->maxAttempts,
+            'The durable delivery lease expired after the maximum number of attempts.',
+        );
+        if ($exhausted !== null) {
+            $this->logger->error('Asset Pilot: durable delivery {delivery} exhausted after an abandoned lease.', [
+                'delivery' => $exhausted->deliveryId,
+                'observer' => $exhausted->observerId,
+                'operation' => $exhausted->operationId,
+                'attempts' => $exhausted->attempts,
+            ]);
+            $audit = $this->deliveries->awaitingAudit($deliveryId);
+
+            return $audit === null ? OperationDeliveryStatus::Dead : $this->reconcileAuditSafely($audit);
+        }
+
         $delivery = $this->deliveries->claim($deliveryId, bin2hex(random_bytes(16)), $this->leaseSeconds);
         if ($delivery === null) {
             return null;
         }
+
+        $delivery = $delivery->withLeaseHeartbeat(
+            fn (): bool => $this->deliveries->renewLease($delivery, $this->leaseSeconds),
+        );
 
         $observer = $this->observers->get($delivery->observerId);
         if ($observer === null) {
@@ -51,7 +79,9 @@ class OperationDeliveryProcessor
         }
 
         try {
+            $delivery->heartbeat();
             $this->deliver($delivery, $observer);
+            $delivery->heartbeat();
 
             return $this->completeDelivery($delivery);
         } catch (\Throwable $e) {
@@ -115,9 +145,18 @@ class OperationDeliveryProcessor
         }
 
         $this->loopGuard->markAssetProcessing($assetId);
-        try {
+        // While this delivery holds the asset lock, one heartbeat must renew the delivery lease AND the asset
+        // lock together and fail closed if either is lost: otherwise an observer that heartbeats per the docs
+        // keeps a live delivery lease while its asset lock silently expires and a concurrent mutation acquires
+        // the asset. refreshAsset throws on a lost lock; renewLease===false throws via heartbeat().
+        $fenced = $delivery->withLeaseHeartbeat(function () use ($delivery, $assetId): bool {
             $this->loopGuard->refreshAsset($assetId);
-            $observer->deliver($delivery);
+
+            return $this->deliveries->renewLease($delivery, $this->leaseSeconds);
+        });
+        try {
+            $fenced->heartbeat();
+            $observer->deliver($fenced);
         } finally {
             $this->loopGuard->unmarkAssetProcessing($assetId);
             $this->loopGuard->releaseAsset($assetId);
@@ -152,17 +191,12 @@ class OperationDeliveryProcessor
             return OperationDeliveryStatus::Processing;
         }
 
-        try {
-            $this->journal->resolveObserverFailures($delivery->operationId);
-        } catch (\Throwable $e) {
-            $this->logger->error('Asset Pilot: operation {operation} observer status could not be reconciled after delivery {delivery}.', [
-                'operation' => $delivery->operationId,
-                'delivery' => $delivery->deliveryId,
-                'exception' => $e,
-            ]);
+        $audit = $this->deliveries->awaitingAudit($delivery->deliveryId);
+        if ($audit === null) {
+            return OperationDeliveryStatus::Delivered;
         }
 
-        return OperationDeliveryStatus::Delivered;
+        return $this->reconcileAuditSafely($audit);
     }
 
     private function retryDelay(int $attempt): int
@@ -181,11 +215,68 @@ class OperationDeliveryProcessor
             return OperationDeliveryStatus::Processing;
         }
 
-        $this->journal->recordObserverFailure(
-            $delivery->operationId,
-            sprintf('Durable observer "%s" did not complete.', $delivery->observerId),
-        );
+        $audit = $this->deliveries->awaitingAudit($delivery->deliveryId);
 
-        return OperationDeliveryStatus::Dead;
+        return $audit === null ? OperationDeliveryStatus::Dead : $this->reconcileAuditSafely($audit);
+    }
+
+    private function deferAudit(OperationDeliveryAudit $delivery): void
+    {
+        if (!$this->deliveries->deferAudit(
+            $delivery,
+            $this->now()->modify(sprintf('+%d seconds', $this->baseRetrySeconds)),
+        ) && $this->deliveries->awaitingAudit($delivery->deliveryId) !== null) {
+            $this->logger->warning('Asset Pilot: durable delivery {delivery} audit retry could not be deferred.', [
+                'delivery' => $delivery->deliveryId,
+                'operation' => $delivery->operationId,
+            ]);
+        }
+    }
+
+    private function reconcileAuditSafely(OperationDeliveryAudit $delivery): OperationDeliveryStatus
+    {
+        try {
+            return $this->reconcileAudit($delivery);
+        } catch (\Throwable $e) {
+            $this->deferAudit($delivery);
+            $this->logger->error('Asset Pilot: operation {operation} observer status could not be reconciled after delivery {delivery}.', [
+                'operation' => $delivery->operationId,
+                'delivery' => $delivery->deliveryId,
+                'status' => $delivery->status->value,
+                'exception' => $e,
+            ]);
+
+            return $delivery->status;
+        }
+    }
+
+    private function reconcileAudit(OperationDeliveryAudit $delivery): OperationDeliveryStatus
+    {
+        $status = match ($delivery->status) {
+            OperationDeliveryStatus::Dead => $this->journal->recordObserverFailure($delivery->operationId, $delivery->observerId),
+            OperationDeliveryStatus::Delivered => $this->journal->resolveObserverFailures($delivery->operationId),
+            default => throw new \LogicException('Only terminal deliveries can reconcile their audit state.'),
+        };
+        if ($status === ObserverAuditReconciliationStatus::Deferred) {
+            $this->deferAudit($delivery);
+            $this->logger->warning('Asset Pilot: durable delivery {delivery} is waiting for audit reconciliation.', [
+                'delivery' => $delivery->deliveryId,
+                'operation' => $delivery->operationId,
+                'observer' => $delivery->observerId,
+            ]);
+
+            return $delivery->status;
+        }
+
+        if (!$this->deliveries->markAuditReconciled($delivery)
+            && $this->deliveries->awaitingAudit($delivery->deliveryId) !== null
+        ) {
+            $this->logger->warning('Asset Pilot: durable delivery {delivery} audit marker changed during reconciliation.', [
+                'delivery' => $delivery->deliveryId,
+                'operation' => $delivery->operationId,
+            ]);
+        }
+
+        return $delivery->status;
     }
 }

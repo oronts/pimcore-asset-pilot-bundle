@@ -4,18 +4,18 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 
 /**
  * Resolves the exact owner-object selection for assets in a folder or an explicit asset set.
  */
-class AssetReorganizer
+class AssetReorganizer implements AssetReorganizerInterface
 {
     public function __construct(
-        protected readonly AssetDependencyResolver $dependencyResolver,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly AssetDependencyResolverInterface $dependencyResolver,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly int $defaultLimit = 100,
     ) {}
 

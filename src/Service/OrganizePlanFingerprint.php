@@ -8,23 +8,12 @@ use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 
-final class OrganizePlanFingerprint
+class OrganizePlanFingerprint
 {
     /** @param list<MoveOperation> $operations */
     public function forOperations(AbstractObject $object, array $operations): string
     {
-        $operationSnapshots = array_map(static fn (MoveOperation $operation): array => [
-            'assetId' => $operation->assetId,
-            'error' => $operation->errorMessage,
-            'objectClass' => $operation->objectClass,
-            'objectId' => $operation->objectId,
-            'rule' => $operation->ruleName,
-            'source' => $operation->sourcePath,
-            'status' => $operation->status->value,
-            'target' => $operation->targetPath,
-            'trigger' => $operation->triggerType->value,
-        ], $operations);
-        usort($operationSnapshots, fn (array $left, array $right): int => $this->encode($left) <=> $this->encode($right));
+        $operationSnapshots = MoveOperationSnapshot::list($operations);
 
         return hash('sha256', $this->encode([
             'object' => [

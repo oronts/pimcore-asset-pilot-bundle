@@ -10,7 +10,7 @@ use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Installer;
 
-final class OperationRunRetention implements OperationRunRetentionInterface
+class OperationRunRetention implements OperationRunRetentionInterface
 {
     private readonly ?\Closure $clock;
 
@@ -94,6 +94,6 @@ final class OperationRunRetention implements OperationRunRetentionInterface
 
     private function now(): \DateTimeImmutable
     {
-        return $this->clock === null ? new \DateTimeImmutable() : ($this->clock)();
+        return $this->clock === null ? new \DateTimeImmutable('now', new \DateTimeZone('UTC')) : ($this->clock)();
     }
 }
