@@ -411,16 +411,21 @@ class AssetZipService implements AssetZipServiceInterface
             return $entry;
         }
 
-        $n = ++$used[$entry];
         $dir = \dirname($entry);
         $dir = $dir === '.' ? '' : $dir . '/';
         $base = basename($entry);
         $ext = pathinfo($base, PATHINFO_EXTENSION);
-        if ($ext === '') {
-            return $dir . $base . '-' . $n;
-        }
+        $stem = $ext === '' ? $base : substr($base, 0, -(strlen($ext) + 1));
+        $suffix = $ext === '' ? '' : '.' . $ext;
 
-        return $dir . substr($base, 0, -(strlen($ext) + 1)) . '-' . $n . '.' . $ext;
+        // Register the generated name too, and skip a suffix that some other asset already owns, so two entries
+        // can never resolve to the same archive path (ZipArchive::addFile would otherwise overwrite one).
+        do {
+            $candidate = $dir . $stem . '-' . (++$used[$entry]) . $suffix;
+        } while (isset($used[$candidate]));
+        $used[$candidate] = 1;
+
+        return $candidate;
     }
 
     protected function loadAsset(int $id): ?Asset

@@ -101,6 +101,21 @@ class StorageTrendServiceTest extends TestCase
     }
 
     #[Test]
+    public function overallTrendReturnsOnePointPerRunNotOnePerSnapshotType(): void
+    {
+        $connection = $this->connection();
+        $run = $this->insertRun($connection, '2026-06-20 00:00:00', 100, 5000);
+        foreach (['image', 'video', 'document'] as $type) {
+            $connection->insert('asset_pilot_storage_snapshot', ['run_id' => $run, 'captured_at' => '2026-06-20 00:00:00', 'type' => $type, 'unused_count' => 10, 'unused_size' => 500]);
+        }
+        $service = $this->service($connection, []);
+
+        self::assertSame([
+            ['capturedAt' => '2026-06-20 00:00:00', 'count' => 100, 'size' => 5000, 'unknownSizeCount' => 0],
+        ], $service->trend());
+    }
+
+    #[Test]
     public function failedCaptureLeavesAFailedRunAndNoCompletedSnapshot(): void
     {
         $connection = $this->connection();

@@ -60,6 +60,22 @@ class AssetZipServiceTest extends TestCase
     }
 
     #[Test]
+    public function uniqueNameNeverEmitsADuplicateWhenAGeneratedNameLaterCollides(): void
+    {
+        $service = $this->serviceWith([]);
+        $used = [];
+        $a = $service->unique('a.jpg', $used);
+        $b = $service->unique('a.jpg', $used);
+        $c = $service->unique('a-2.jpg', $used);
+        $d = $service->unique('a.jpg', $used);
+
+        self::assertSame('a.jpg', $a);
+        self::assertSame('a-2.jpg', $b);
+        self::assertNotSame($b, $c);
+        self::assertCount(4, array_unique([$a, $b, $c, $d]), 'Every emitted archive entry name must be unique.');
+    }
+
+    #[Test]
     public function rejectsDuplicateStrategyNames(): void
     {
         $strategy = static function (): ZipEntryStrategyInterface {

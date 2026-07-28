@@ -53,6 +53,35 @@ class PathTemplateExtensionTest extends TestCase
         self::assertSame('', $this->render("{{ prop(o, 'deleteEverything') }}", ['o' => $obj]));
     }
 
+    #[Test]
+    public function pluckAndFirstOfInvokeReadAccessorsOnly(): void
+    {
+        $flag = new \ArrayObject(['mutated' => false]);
+        $item = new class ($flag) {
+            public function __construct(private readonly \ArrayObject $flag) {}
+
+            public function getCode(): string
+            {
+                return 'C1';
+            }
+
+            public function drop(): string
+            {
+                $this->flag['mutated'] = true;
+
+                return 'boom';
+            }
+        };
+        $items = [$item];
+
+        self::assertSame('C1', $this->render("{{ items|first_of('code') }}", ['items' => $items]));
+        self::assertSame('C1', $this->render("{{ items|pluck('code')|first }}", ['items' => $items]));
+
+        self::assertSame('unknown', $this->render("{{ items|first_of('drop') }}", ['items' => $items]));
+        self::assertSame('x', $this->render("{{ items|pluck('drop')|first|default('x') }}", ['items' => $items]));
+        self::assertFalse($flag['mutated'], 'A path-template filter must never invoke a non-accessor (mutating) method.');
+    }
+
     /**
      * @param array<string, mixed> $context
      */

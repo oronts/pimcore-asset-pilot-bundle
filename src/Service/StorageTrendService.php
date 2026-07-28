@@ -167,7 +167,6 @@ class StorageTrendService implements StorageTrendServiceInterface
     {
         $qb = $this->connection->createQueryBuilder()
             ->from(Installer::TABLE_STORAGE_RUN, 'r')
-            ->leftJoin('r', Installer::TABLE_STORAGE_SNAPSHOT, 's', 's.run_id = r.id' . ($type !== null && $type !== '' ? ' AND s.type = :type' : ''))
             ->where('r.status = :status')
             ->setParameter('status', self::STATUS_COMPLETED)
             ->orderBy('r.completed_at', 'DESC')
@@ -175,9 +174,12 @@ class StorageTrendService implements StorageTrendServiceInterface
             ->setMaxResults($limit);
 
         if ($type !== null && $type !== '') {
-            $qb->select('r.completed_at AS captured_at', 'COALESCE(s.unused_count, 0) AS unused_count', 'COALESCE(s.unused_size, 0) AS unused_size', 'COALESCE(s.unknown_size_count, 0) AS unknown_size_count')
+            // One snapshot row per (run, type) via the UNIQUE(run_id, type) key, so this join never fans out.
+            $qb->leftJoin('r', Installer::TABLE_STORAGE_SNAPSHOT, 's', 's.run_id = r.id AND s.type = :type')
+                ->select('r.completed_at AS captured_at', 'COALESCE(s.unused_count, 0) AS unused_count', 'COALESCE(s.unused_size, 0) AS unused_size', 'COALESCE(s.unknown_size_count, 0) AS unknown_size_count')
                 ->setParameter('type', $type);
         } else {
+            // The overall trend reads the run totals directly: joining snapshots would fan out one point per type.
             $qb->select('r.completed_at AS captured_at', 'r.total_count AS unused_count', 'r.total_size AS unused_size', 'r.unknown_size_count');
         }
 

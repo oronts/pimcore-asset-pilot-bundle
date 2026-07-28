@@ -42,7 +42,7 @@ class PathTemplateExtension extends AbstractExtension
                         $getter = 'get' . ucfirst($property);
                         if (method_exists($item, $getter)) {
                             $val = $item->$getter();
-                        } elseif (method_exists($item, $property)) {
+                        } elseif (preg_match('/^(get|is|has)[A-Z0-9]/', $property) && method_exists($item, $property)) {
                             $val = $item->$property();
                         } elseif (property_exists($item, $property)) {
                             $val = $item->$property;
@@ -77,7 +77,7 @@ class PathTemplateExtension extends AbstractExtension
                                 return (string) $val;
                             }
                         }
-                        if (method_exists($item, $property)) {
+                        if (preg_match('/^(get|is|has)[A-Z0-9]/', $property) && method_exists($item, $property)) {
                             $val = $item->$property();
                             if ($val !== null && $val !== '') {
                                 return (string) $val;
