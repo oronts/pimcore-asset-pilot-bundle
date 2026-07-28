@@ -142,6 +142,49 @@ final class SynchronousRunExecutorTest extends TestCase
     }
 
     #[Test]
+    public function executeSingleReportsLeaseLostWhenTheSuccessfulCompletionThrows(): void
+    {
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeWithHeartbeat')->willReturn([]);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::never())->method('fail');
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $completeCalls = 0;
+        $lease->method('complete')->willReturnCallback(function () use (&$completeCalls): bool {
+            ++$completeCalls;
+            if ($completeCalls === 1) {
+                throw new \RuntimeException('db error recording a successful completion');
+            }
+
+            return true;
+        });
+        $lease->expects(self::once())->method('release');
+
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+
+        self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
+        self::assertSame(1, $completeCalls, 'A successful item must not be re-completed as failed.');
+    }
+
+    #[Test]
+    public function executeSingleReportsLeaseLostWhenTheStalePlanCompletionThrows(): void
+    {
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeWithHeartbeat')->willThrowException(new StaleApplyPlanException('stale'));
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::never())->method('fail');
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->expects(self::once())->method('complete')->willThrowException(new \RuntimeException('db error recording the skip'));
+        $lease->expects(self::once())->method('release');
+
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+
+        self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
+    }
+
+    #[Test]
     public function executeBulkCompletesWithTheReport(): void
     {
         $report = $this->createMock(BulkOrganizeReport::class);

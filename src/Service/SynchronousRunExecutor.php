@@ -45,7 +45,15 @@ final class SynchronousRunExecutor
                 fn () => $this->runItemLease->pulse($runId, $itemKey),
                 expectedFingerprint: $expectedFingerprint,
             );
-            if (!$this->runItemLease->complete($runId, $itemKey, $this->operationItemStatus($results), ['operationCount' => count($results)])) {
+            try {
+                $completed = $this->runItemLease->complete($runId, $itemKey, $this->operationItemStatus($results), ['operationCount' => count($results)]);
+            } catch (\Throwable) {
+                // The mutation succeeded but recording its completion is indeterminate (e.g. a DB failure after
+                // the item update). Report lease loss so the API returns 409 and the reconciler decides durable
+                // truth from the journal; never re-complete a succeeded item as failed or fail the run.
+                return SingleRunOutcome::leaseLost();
+            }
+            if (!$completed) {
                 return SingleRunOutcome::leaseLost();
             }
             $itemCompleted = true;
@@ -55,7 +63,12 @@ final class SynchronousRunExecutor
 
             return SingleRunOutcome::completed($results);
         } catch (StaleApplyPlanException) {
-            if (!$this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Skipped, error: 'Object changed after preview; the immutable plan was not applied.')) {
+            try {
+                $completed = $this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Skipped, error: 'Object changed after preview; the immutable plan was not applied.');
+            } catch (\Throwable) {
+                return SingleRunOutcome::leaseLost();
+            }
+            if (!$completed) {
                 return SingleRunOutcome::leaseLost();
             }
             $itemCompleted = true;
