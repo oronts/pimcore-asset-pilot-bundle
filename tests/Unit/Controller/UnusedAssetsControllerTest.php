@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\StorageTrendService;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
@@ -136,7 +137,7 @@ final class UnusedAssetsControllerTest extends TestCase
         $fingerprints->expects(self::exactly(2))->method('reset');
         $fingerprints->method('planConfig')->willReturn([
             'version' => 1,
-            'lockProperty' => 'asset_pilot_locked',
+            'lockProperty' => AssetProtection::DEFAULT_LOCK_PROPERTY,
             'contentVerification' => true,
         ]);
         $fingerprints->expects(self::exactly(2))->method('targets')->willReturnOnConsecutiveCalls(
@@ -268,7 +269,7 @@ final class UnusedAssetsControllerTest extends TestCase
     private function fingerprints(array $targets): AssetMutationFingerprintService
     {
         $fingerprints = $this->createMock(AssetMutationFingerprintService::class);
-        $fingerprints->method('planConfig')->willReturn(['version' => 1, 'lockProperty' => 'asset_pilot_locked', 'contentVerification' => true]);
+        $fingerprints->method('planConfig')->willReturn(['version' => 1, 'lockProperty' => AssetProtection::DEFAULT_LOCK_PROPERTY, 'contentVerification' => true]);
         $fingerprints->method('targets')->willReturn($targets);
 
         return $fingerprints;

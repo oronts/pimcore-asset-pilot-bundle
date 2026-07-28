@@ -46,7 +46,8 @@ class MergeDuplicatesCommandTest extends TestCase
         $merge = $this->createMock(DuplicateMergeService::class);
         $merge->method('availableStrategies')->willReturn(['quarantine', 'delete', 'isolate']);
         $merge->method('defaultStrategyName')->willReturn('quarantine');
-        $merge->method('planTargets')->willReturnCallback(static function (DuplicateGroup $group): array {
+        $merge->method('planTargets')->willReturnCallback(static function (DuplicateGroup $group, int $canonicalId): array {
+            self::assertContains($canonicalId, $group->assetIds);
             $assetIds = $group->assetIds;
             sort($assetIds, SORT_NUMERIC);
 
@@ -72,8 +73,8 @@ class MergeDuplicatesCommandTest extends TestCase
     public function previewsByDefaultWithoutMerging(): void
     {
         $merge = $this->mergeService();
-        $merge->expects(self::once())->method('merge')
-            ->with(self::isInstanceOf(DuplicateGroup::class), 3, 'quarantine', true, null)
+        $merge->expects(self::once())->method('preview')
+            ->with(self::isInstanceOf(DuplicateGroup::class), 3, 'quarantine')
             ->willReturn(new MergeOutcome('abc', 3, [new CopyDisposition(9, DispositionOutcome::Skipped, 'dry run: would repoint and dispose')]));
 
         $tester = $this->tester($this->detectionReturning(new DuplicateGroup('abc', 100, 2, [3, 9])), $merge);
@@ -88,10 +89,10 @@ class MergeDuplicatesCommandTest extends TestCase
     {
         $merge = $this->mergeService();
         $merge->expects(self::once())->method('merge')
-            ->with(self::isInstanceOf(DuplicateGroup::class), 9, 'delete', false, [
+            ->with(self::isInstanceOf(DuplicateGroup::class), [
                 'asset:3' => 'fingerprint-3',
                 'asset:9' => 'fingerprint-9',
-            ])
+            ], 9, 'delete')
             ->willReturn(new MergeOutcome('abc', 9, [new CopyDisposition(3, DispositionOutcome::Deleted)]));
 
         $tester = $this->tester($this->detectionReturning(new DuplicateGroup('abc', 100, 2, [3, 9])), $merge);
@@ -110,7 +111,7 @@ class MergeDuplicatesCommandTest extends TestCase
     public function previewIssuesAnExactSortedSystemPlan(): void
     {
         $merge = $this->mergeService();
-        $merge->method('merge')->willReturn(new MergeOutcome('abc', 3, []));
+        $merge->method('preview')->willReturn(new MergeOutcome('abc', 3, []));
         $plans = $this->createMock(ApplyPlanServiceInterface::class);
         $plans->expects(self::once())->method('issue')->with(self::callback(static function (ApplyPlan $plan): bool {
             self::assertSame('duplicate-merge-cli', $plan->kind);
@@ -249,10 +250,10 @@ class MergeDuplicatesCommandTest extends TestCase
     {
         $merge = $this->mergeService();
         $merge->expects(self::once())->method('merge')
-            ->with(self::isInstanceOf(DuplicateGroup::class), 3, 'quarantine', false, [
+            ->with(self::isInstanceOf(DuplicateGroup::class), [
                 'asset:3' => 'fingerprint-3',
                 'asset:9' => 'fingerprint-9',
-            ])
+            ], 3, 'quarantine')
             ->willReturn(new MergeOutcome('abc', 3, [new CopyDisposition(9, DispositionOutcome::LeftError, 'copy could not be deleted')]));
 
         $tester = $this->tester($this->detectionReturning(new DuplicateGroup('abc', 100, 2, [3, 9])), $merge);

@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Message\DependencyProjectionRefreshMessage;
 use Oronts\AssetPilotBundle\MessageHandler\DependencyProjectionRefreshHandler;
 use Oronts\AssetPilotBundle\Model\DependencySourceToken;
 use Oronts\AssetPilotBundle\Service\AssetDependencyTargetExtractor;
+use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\DbalDependencyProjection;
 use Oronts\AssetPilotBundle\Service\DbalDependencyProjectionFreshness;
 use Oronts\AssetPilotBundle\Service\DependencyProjectionInterface;
@@ -21,6 +22,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\Element\AbstractElement;
+use Psr\Log\NullLogger;
 
 #[CoversClass(DependencyProjectionRefreshHandler::class)]
 class DependencyProjectionRefreshHandlerTest extends TestCase
@@ -133,6 +135,92 @@ class DependencyProjectionRefreshHandlerTest extends TestCase
         });
     }
 
+    #[Test]
+    public function refusesToMarkCleanUntilTheSourceReachesTheExpectedCommittedRevision(): void
+    {
+        $source = $this->createMock(AbstractObject::class);
+        $source->method('getId')->willReturn(7);
+        $source->method('getModificationDate')->willReturn(100);
+        $token = new DependencySourceToken('object:7', 3);
+        $projection = $this->createMock(DependencyProjectionInterface::class);
+        $projection->expects(self::once())->method('markDirty')->with('object', 7)->willReturn($token);
+        $projection->expects(self::never())->method('refresh');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/ahead of the committed source revision/');
+
+        ($this->handler($projection, $source))(new DependencyProjectionRefreshMessage('object', 7, 200));
+    }
+
+    #[Test]
+    public function marksCleanOnceTheSourceReachesTheExpectedCommittedRevision(): void
+    {
+        $source = $this->createMock(AbstractObject::class);
+        $source->method('getId')->willReturn(7);
+        $source->method('getModificationDate')->willReturn(200);
+        $token = new DependencySourceToken('object:7', 3);
+        $projection = $this->createMock(DependencyProjectionInterface::class);
+        $projection->method('markDirty')->willReturn($token);
+        $projection->expects(self::once())->method('refresh')->with($source, $token)->willReturn(true);
+
+        ($this->handler($projection, $source))(new DependencyProjectionRefreshMessage('object', 7, 200));
+    }
+
+    #[Test]
+    public function retriesInsteadOfRemovingWhenAnExpectedSourceIsNotYetVisible(): void
+    {
+        $projection = $this->createMock(DependencyProjectionInterface::class);
+        $projection->method('markDirty')->willReturn(new DependencySourceToken('object:7', 3));
+        $projection->expects(self::never())->method('remove');
+        $projection->expects(self::never())->method('refresh');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/cannot see the expected committed source/');
+
+        ($this->handler($projection, null))(new DependencyProjectionRefreshMessage('object', 7, 200));
+    }
+
+    #[Test]
+    public function marksCleanWhenTheVisibleContentMatchesTheCommittedFingerprint(): void
+    {
+        $source = $this->source(7, [51], 200);
+        $fingerprint = (new AssetDependencyTargetExtractor(new AssetFieldExtractor(new NullLogger())))->fingerprint($source);
+        $token = new DependencySourceToken('object:7', 3);
+        $projection = $this->createMock(DependencyProjectionInterface::class);
+        $projection->method('markDirty')->willReturn($token);
+        $projection->expects(self::once())->method('refresh')->with($source, $token)->willReturn(true);
+
+        ($this->handler($projection, $source))(new DependencyProjectionRefreshMessage('object', 7, 200, $fingerprint));
+    }
+
+    #[Test]
+    public function retriesWhenTheVisibleContentIsPreCommitAtTheSameSecond(): void
+    {
+        $committedFingerprint = (new AssetDependencyTargetExtractor(new AssetFieldExtractor(new NullLogger())))->fingerprint($this->source(7, [91], 200));
+        $visibleOldSource = $this->source(7, [51], 200);
+        $projection = $this->createMock(DependencyProjectionInterface::class);
+        $projection->method('markDirty')->willReturn(new DependencySourceToken('object:7', 3));
+        $projection->expects(self::never())->method('refresh');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/pre-commit content/');
+
+        ($this->handler($projection, $visibleOldSource))(new DependencyProjectionRefreshMessage('object', 7, 200, $committedFingerprint));
+    }
+
+    #[Test]
+    public function discardsWhenTheSourceAdvancedPastTheExpectedRevision(): void
+    {
+        $committedFingerprint = (new AssetDependencyTargetExtractor(new AssetFieldExtractor(new NullLogger())))->fingerprint($this->source(7, [91], 200));
+        $advancedSource = $this->source(7, [51], 205);
+        $projection = $this->createMock(DependencyProjectionInterface::class);
+        $projection->method('markDirty')->willReturn(new DependencySourceToken('object:7', 3));
+        $projection->expects(self::never())->method('refresh');
+        $projection->expects(self::never())->method('remove');
+
+        ($this->handler($projection, $advancedSource))(new DependencyProjectionRefreshMessage('object', 7, 200, $committedFingerprint));
+    }
+
     private function handler(DependencyProjectionInterface $projection, AbstractElement|\Closure|null $source): DependencyProjectionRefreshHandler
     {
         return new class ($projection, $source) extends DependencyProjectionRefreshHandler {
@@ -140,7 +228,7 @@ class DependencyProjectionRefreshHandlerTest extends TestCase
                 DependencyProjectionInterface $projection,
                 private readonly AbstractElement|\Closure|null $source,
             ) {
-                parent::__construct($projection);
+                parent::__construct($projection, new AssetDependencyTargetExtractor(new AssetFieldExtractor(new NullLogger())));
             }
 
             protected function loadSource(string $sourceType, int $sourceId): ?AbstractElement
@@ -160,8 +248,8 @@ class DependencyProjectionRefreshHandlerTest extends TestCase
             $secondConnection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => $path]);
             $test(
                 $firstConnection,
-                new DbalDependencyProjection($firstConnection, new DbalDependencyProjectionFreshness($firstConnection), new AssetDependencyTargetExtractor()),
-                new DbalDependencyProjection($secondConnection, new DbalDependencyProjectionFreshness($secondConnection), new AssetDependencyTargetExtractor()),
+                new DbalDependencyProjection($firstConnection, new DbalDependencyProjectionFreshness($firstConnection), new AssetDependencyTargetExtractor(new AssetFieldExtractor(new NullLogger()))),
+                new DbalDependencyProjection($secondConnection, new DbalDependencyProjectionFreshness($secondConnection), new AssetDependencyTargetExtractor(new AssetFieldExtractor(new NullLogger()))),
             );
         } finally {
             if (is_file($path)) {
@@ -183,11 +271,11 @@ class DependencyProjectionRefreshHandlerTest extends TestCase
     }
 
     /** @param list<int> $targetIds */
-    private function source(int $id, array $targetIds): AbstractObject
+    private function source(int $id, array $targetIds, int $modificationDate = 123): AbstractObject
     {
         $source = $this->createMock(AbstractObject::class);
         $source->method('getId')->willReturn($id);
-        $source->method('getModificationDate')->willReturn(123);
+        $source->method('getModificationDate')->willReturn($modificationDate);
         $source->method('resolveDependencies')->willReturn(array_map(
             static fn (int $targetId): array => ['id' => $targetId, 'type' => 'asset'],
             $targetIds,

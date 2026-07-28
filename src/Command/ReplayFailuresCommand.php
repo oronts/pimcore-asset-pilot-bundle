@@ -7,11 +7,13 @@ namespace Oronts\AssetPilotBundle\Command;
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
-use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\FailureReplayServiceInterface;
+use Oronts\AssetPilotBundle\Service\Query\UtcSinceCutoff;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -29,7 +31,7 @@ class ReplayFailuresCommand extends Command
     use ValidatesCliBulkIds;
 
     public function __construct(
-        private readonly FailureReplayService $replay,
+        private readonly FailureReplayServiceInterface $replay,
         private readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
         private readonly ReviewedSelectionConsolePresenter $presenter,
     ) {
@@ -112,13 +114,13 @@ class ReplayFailuresCommand extends Command
 
         $since = $input->getOption('since');
         if ($since !== null) {
-            $timestamp = strtotime((string) $since);
-            if ($timestamp === false) {
+            try {
+                $since = UtcSinceCutoff::parse((string) $since);
+            } catch (\Exception) {
                 $io->error(sprintf('Could not parse --since value "%s".', $since));
 
                 return false;
             }
-            $since = date('Y-m-d H:i:s', $timestamp);
         }
 
         return array_filter([
@@ -144,7 +146,7 @@ class ReplayFailuresCommand extends Command
     ): ReviewedSelectionResult|int {
         try {
             return $this->reviewedOperations->execute(
-                'replay',
+                OperationRunKind::Replay,
                 $objectIds,
                 ['filters' => $filters, 'limit' => $limit],
                 TriggerType::Manual,

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
@@ -13,13 +13,14 @@ use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\DriftItem;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleOverlap;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
-use Oronts\AssetPilotBundle\Service\LocationDriftService;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
+use Oronts\AssetPilotBundle\Service\LocationDriftServiceInterface;
+use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
-use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
-use Oronts\AssetPilotBundle\Service\RulePortability;
-use Oronts\AssetPilotBundle\Service\RulePreviewPlanService;
+use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzerInterface;
+use Oronts\AssetPilotBundle\Service\RulePortabilityInterface;
+use Oronts\AssetPilotBundle\Service\RulePreviewPlanServiceInterface;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -33,13 +34,14 @@ class RulesController
 
     public function __construct(
         protected readonly RuleEngineInterface $ruleEngine,
-        protected readonly AssetOrganizer $assetOrganizer,
-        protected readonly AuditLoggerInterface $auditLogger,
-        protected readonly RulePortability $portability,
-        protected readonly RuleOverlapAnalyzer $overlapAnalyzer,
-        protected readonly LocationDriftService $driftService,
-        protected readonly RulePreviewPlanService $previewPlans,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly AssetOrganizerInterface $assetOrganizer,
+        protected readonly AuditQueryInterface $auditLogger,
+        protected readonly RulePortabilityInterface $portability,
+        protected readonly RuleOverlapAnalyzerInterface $overlapAnalyzer,
+        protected readonly LocationDriftServiceInterface $driftService,
+        protected readonly RulePreviewPlanServiceInterface $previewPlans,
+        private readonly OrganizePlanFingerprint $organizeFingerprints,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -328,6 +330,7 @@ class RulesController
 
         $actor = $this->authorization->currentActor();
         $currentOperations = $this->assetOrganizer->dryRun($object, TriggerType::Api, $name);
+        $reviewedFingerprint = $this->organizeFingerprints->forOperations($object, $currentOperations);
         $planStatus = $this->previewPlans->claim($planToken, $rule, $object, $actor, $currentOperations);
         if ($planStatus === RulePreviewPlanStatus::Malformed) {
             return new JsonResponse(
@@ -342,7 +345,12 @@ class RulesController
             );
         }
 
-        $results = $this->assetOrganizer->organize($object, TriggerType::Api, $name);
+        $results = $this->assetOrganizer->organize(
+            $object,
+            TriggerType::Api,
+            $name,
+            $reviewedFingerprint,
+        );
 
         return new JsonResponse([
             'rule' => $name,

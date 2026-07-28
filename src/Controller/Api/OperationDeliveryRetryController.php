@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use DateTimeImmutable;
-use DateTimeZone;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesReviewedPlanRequest;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\DeliveryRetryPlanException;
 use Oronts\AssetPilotBundle\Model\DeadOperationDelivery;
 use Oronts\AssetPilotBundle\Model\ReviewedDeliveryRetry;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\OperationDeliveryRetryCoordinatorInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,8 +25,9 @@ final class OperationDeliveryRetryController
 
     public function __construct(
         private readonly OperationDeliveryRetryCoordinatorInterface $retries,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly LoggerInterface $logger,
+        private readonly ApiDateFormatterInterface $dates,
     ) {}
 
     #[Route('/operations/deliveries/retry', name: 'oronts_asset_pilot_operation_delivery_retry', methods: ['POST'])]
@@ -67,7 +67,7 @@ final class OperationDeliveryRetryController
             'applied' => $review->applied,
             'planToken' => $review->planToken,
             'count' => count($review->deliveries),
-            'deliveries' => array_map(static fn (DeadOperationDelivery $delivery): array => [
+            'deliveries' => array_map(fn (DeadOperationDelivery $delivery): array => [
                 'deliveryId' => $delivery->deliveryId,
                 'operationId' => $delivery->operationId,
                 'deliveryKey' => $delivery->deliveryKey,
@@ -75,7 +75,7 @@ final class OperationDeliveryRetryController
                 'outcome' => $delivery->outcome->value,
                 'attempts' => $delivery->attempts,
                 'lastError' => $delivery->lastError,
-                'updatedAt' => (new DateTimeImmutable($delivery->updatedAt, new DateTimeZone('UTC')))->format(DATE_ATOM),
+                'updatedAt' => $this->dates->fromDatabase($delivery->updatedAt),
                 'fingerprint' => $delivery->fingerprint,
             ], $review->deliveries),
         ];

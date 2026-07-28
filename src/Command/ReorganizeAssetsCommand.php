@@ -7,11 +7,12 @@ namespace Oronts\AssetPilotBundle\Command;
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
-use Oronts\AssetPilotBundle\Service\AssetReorganizer;
+use Oronts\AssetPilotBundle\Service\AssetReorganizerInterface;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -29,7 +30,7 @@ class ReorganizeAssetsCommand extends Command
     use ValidatesCliBulkIds;
 
     public function __construct(
-        private readonly AssetReorganizer $reorganizer,
+        private readonly AssetReorganizerInterface $reorganizer,
         private readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
         private readonly ReviewedSelectionConsolePresenter $presenter,
     ) {
@@ -158,7 +159,7 @@ class ReorganizeAssetsCommand extends Command
     ): ReviewedSelectionResult|int {
         try {
             return $this->reviewedOperations->execute(
-                'reorganize',
+                OperationRunKind::Reorganize,
                 $selection['assets']['objectIds'],
                 $selection['selector'],
                 TriggerType::Manual,

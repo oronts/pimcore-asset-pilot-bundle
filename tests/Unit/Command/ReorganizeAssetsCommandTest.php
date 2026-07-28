@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Command;
 use Oronts\AssetPilotBundle\Command\ReorganizeAssetsCommand;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Enum\ActorType;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
@@ -36,7 +37,7 @@ final class ReorganizeAssetsCommandTest extends TestCase
         ]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [11],
             ['folder' => '/Staging', 'limit' => 100, 'mode' => 'folder'],
             TriggerType::Manual,
@@ -91,7 +92,7 @@ final class ReorganizeAssetsCommandTest extends TestCase
         ]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'reorganize',
+            OperationRunKind::Reorganize,
             [10, 12],
             ['assetIds' => [5, 6], 'mode' => 'asset_ids'],
             TriggerType::Manual,

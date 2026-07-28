@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\EventListener;
 
-use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Message\DependencyProjectionRefreshMessage;
 use Oronts\AssetPilotBundle\Model\DependencySourceToken;
 use Oronts\AssetPilotBundle\Service\AssetDeletionFenceInterface;
-use Oronts\AssetPilotBundle\Service\AssetDependencyTargetExtractor;
+use Oronts\AssetPilotBundle\Service\AssetDependencyTargetExtractorInterface;
 use Oronts\AssetPilotBundle\Service\DependencyProjectionInterface;
+use Oronts\AssetPilotBundle\Service\ProjectionMarkerConnectionInterface;
 use Pimcore\Event\AssetEvents;
 use Pimcore\Event\DataObjectEvents;
 use Pimcore\Event\DocumentEvents;
@@ -23,7 +23,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
-class DependencyProjectionListener implements EventSubscriberInterface
+final class DependencyProjectionListener implements EventSubscriberInterface
 {
     /** @var array<int, list<DependencySourceToken>> */
     private array $tokens = [];
@@ -32,9 +32,9 @@ class DependencyProjectionListener implements EventSubscriberInterface
         private readonly DependencyProjectionInterface $projection,
         private readonly MessageBusInterface $bus,
         private readonly LoggerInterface $logger,
-        private readonly AssetDependencyTargetExtractor $targetExtractor,
+        private readonly AssetDependencyTargetExtractorInterface $targetExtractor,
         private readonly AssetDeletionFenceInterface $fence,
-        private readonly Connection $connection,
+        private readonly ProjectionMarkerConnectionInterface $marker,
     ) {}
 
     public static function getSubscribedEvents(): array
@@ -78,30 +78,29 @@ class DependencyProjectionListener implements EventSubscriberInterface
 
         $element = $event->getElement();
         $sourceType = ElementService::getElementType($element);
-        $targetIds = $this->targetExtractor->extract($element);
-
-        // The dirty marker below must commit before the fence check so a concurrent deleter's snapshot
-        // sees this writer; a marker hidden in an ambient/non-autocommit transaction cannot, so reject that.
-        if ($targetIds !== []) {
-            $this->assertWritableContext();
-        }
+        $extraction = $this->targetExtractor->extract($element);
 
         $token = (int) $element->getId() > 0
             ? $this->projection->markDirty($sourceType, (int) $element->getId())
             : $this->projection->markPending($sourceType);
         $this->tokens[spl_object_id($element)][] = $token;
 
-        if ($targetIds !== []) {
-            $this->fence->assertWritableTargets($targetIds);
+        // The dirty marker is published (and committed, via the projection's marker connection even inside a
+        // consumer transaction) before the fence check, so a concurrent deleter's snapshot cannot miss it.
+        if ($extraction->targetIds !== []) {
+            $this->fence->assertWritableTargets($extraction->targetIds);
         }
-    }
 
-    protected function assertWritableContext(): void
-    {
-        if ($this->connection->isTransactionActive() || !$this->connection->isAutoCommit()) {
-            throw new ValidationException(
-                'Cannot save an asset-referencing element inside an ambient database transaction.',
-            );
+        // Fail closed on an incomplete extraction: we cannot enumerate every referenced asset, so we cannot
+        // prove this save joins the active deletion fence of an asset it references. Rejecting the save is the
+        // only way to keep the writer/deleter handshake sound; the known targets above are still checked first.
+        if (!$extraction->complete) {
+            $this->logger->warning('DependencyProjectionListener: blocking save of {type} {id}; dependency extraction was incomplete (an asset reference could not be fully resolved).', [
+                'type' => $sourceType,
+                'id' => $element->getId(),
+            ]);
+
+            throw new ValidationException('Asset Pilot could not fully resolve the asset references on this element (a classification-store value could not be read). The save is blocked to avoid referencing an asset that may be mid-deletion. Fix the unreadable field and retry.');
         }
     }
 
@@ -115,10 +114,27 @@ class DependencyProjectionListener implements EventSubscriberInterface
         $sourceType = ElementService::getElementType($element);
         $sourceId = (int) $element->getId();
         $token = $this->popToken($element) ?? $this->projection->markDirty($sourceType, $sourceId);
+        $expectedRevision = (int) $element->getModificationDate();
+        $expectedFingerprint = $this->targetExtractor->fingerprint($element);
+
+        if ($this->marker->publicationIsDeferred()) {
+            try {
+                $this->projection->retainDirtyForCommit($sourceType, $sourceId, $token);
+            } catch (\Throwable $e) {
+                $this->logger->error('Asset Pilot: dependency projection deferral failed after an element save.', [
+                    'source_type' => $sourceType,
+                    'source_id' => $sourceId,
+                    'exception' => $e,
+                ]);
+            }
+            $this->dispatchRefresh($sourceType, $sourceId, $expectedRevision, $expectedFingerprint);
+
+            return;
+        }
 
         try {
             if (!$this->projection->refresh($element, $token)) {
-                $this->dispatchRefresh($sourceType, $sourceId);
+                $this->dispatchRefresh($sourceType, $sourceId, $expectedRevision, $expectedFingerprint);
             }
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: dependency projection refresh failed after an element save.', [
@@ -126,7 +142,7 @@ class DependencyProjectionListener implements EventSubscriberInterface
                 'source_id' => $sourceId,
                 'exception' => $e,
             ]);
-            $this->dispatchRefresh($sourceType, $sourceId);
+            $this->dispatchRefresh($sourceType, $sourceId, $expectedRevision, $expectedFingerprint);
         }
     }
 
@@ -190,10 +206,10 @@ class DependencyProjectionListener implements EventSubscriberInterface
         return $token instanceof DependencySourceToken ? $token : null;
     }
 
-    private function dispatchRefresh(string $sourceType, int $sourceId): void
+    private function dispatchRefresh(string $sourceType, int $sourceId, ?int $expectedRevision = null, ?string $expectedFingerprint = null): void
     {
         try {
-            $this->bus->dispatch(new DependencyProjectionRefreshMessage($sourceType, $sourceId));
+            $this->bus->dispatch(new DependencyProjectionRefreshMessage($sourceType, $sourceId, $expectedRevision, $expectedFingerprint));
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: dependency projection retry could not be dispatched.', [
                 'source_type' => $sourceType,

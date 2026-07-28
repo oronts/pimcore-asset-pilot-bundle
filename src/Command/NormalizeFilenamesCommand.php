@@ -9,9 +9,9 @@ use Oronts\AssetPilotBundle\Command\Support\UsesReviewedApplyPlan;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
-use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\NormalizeFilenamesService;
+use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
+use Oronts\AssetPilotBundle\Service\NormalizeFilenamesServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -29,8 +29,9 @@ class NormalizeFilenamesCommand extends Command
     use UsesReviewedApplyPlan;
 
     public function __construct(
-        private readonly NormalizeFilenamesService $normalizer,
+        private readonly NormalizeFilenamesServiceInterface $normalizer,
         private readonly ApplyPlanServiceInterface $applyPlans,
+        private readonly AssetMutationFingerprintService $fingerprints,
     ) {
         parent::__construct();
     }
@@ -73,7 +74,7 @@ class NormalizeFilenamesCommand extends Command
             return $this->render($io, $preview, true);
         }
 
-        $plan = $this->normalizationPlan($selection, $preview);
+        $plan = $this->normalizationPlan($selection);
         if (!$apply) {
             $this->renderPlanToken($io, $this->applyPlans->issue($plan));
 
@@ -84,7 +85,11 @@ class NormalizeFilenamesCommand extends Command
             return Command::INVALID;
         }
 
-        return $this->render($io, $this->normalizer->normalize($selection['assetIds'], dryRun: false), false);
+        return $this->render($io, $this->normalizer->normalize(
+            $selection['assetIds'],
+            dryRun: false,
+            expectedFingerprints: $this->targetFingerprints($plan),
+        ), false);
     }
 
     /**
@@ -155,40 +160,27 @@ class NormalizeFilenamesCommand extends Command
 
     /**
      * @param array{assetIds: list<int>, selector: array<string, mixed>} $selection
-     * @param array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>} $preview
      */
-    private function normalizationPlan(array $selection, array $preview): ApplyPlan
+    private function normalizationPlan(array $selection): ApplyPlan
     {
         return new ApplyPlan(
             'normalize-filenames',
             ActorContext::system(),
             ['assetIds' => $selection['assetIds'], 'selector' => $selection['selector']],
-            ['version' => 1],
-            $this->normalizationTargets($selection['assetIds'], $preview),
+            $this->fingerprints->planConfig(),
+            $this->fingerprints->targets($selection['assetIds']),
         );
     }
 
-    /**
-     * @param list<int> $assetIds
-     * @param array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>} $preview
-     * @return list<ApplyPlanTarget>
-     */
-    private function normalizationTargets(array $assetIds, array $preview): array
+    /** @return array<string, string> */
+    private function targetFingerprints(ApplyPlan $plan): array
     {
-        $changes = [];
-        foreach ($preview['changes'] as $change) {
-            $changes[$change['id']] = $change;
+        $fingerprints = [];
+        foreach ($plan->targets as $target) {
+            $fingerprints[$target->id] = $target->fingerprint;
         }
 
-        return array_map(function (int $assetId) use ($changes, $preview): ApplyPlanTarget {
-            $descriptor = isset($changes[$assetId])
-                ? ['state' => 'planned', 'from' => $changes[$assetId]['from'], 'to' => $changes[$assetId]['to']]
-                : (isset($preview['errors'][$assetId])
-                    ? ['state' => 'failed', 'error' => $preview['errors'][$assetId]]
-                    : ['state' => 'skipped']);
-
-            return new ApplyPlanTarget('asset:' . $assetId, $this->descriptorFingerprint($descriptor));
-        }, $assetIds);
+        return $fingerprints;
     }
 
 }

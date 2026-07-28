@@ -207,6 +207,36 @@ class BulkOrganizeHandlerTest extends TestCase
     }
 
     #[Test]
+    public function releasesTheItemWhenResumeItemThrowsSoTheOrphanedTokenCannotHangTheRun(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $after): BulkOrganizeReport {
+                // beforeObject runs outside the per-object try in the real organizer, so a resumeItem throw
+                // here propagates just like production; beginItem must have released the item on its way out.
+                $before(42);
+
+                return new BulkOrganizeReport([], []);
+            },
+        );
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->method('beginOperationRunItemLease')->willReturn('token-42');
+        $loopGuard->expects(self::once())->method('releaseOperationRunItem')->with('run-1', 'object:42');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willThrowException(new \RuntimeException('MySQL server has gone away'));
+        // beginItem released the item, clearing the token, so failBatch can fail the still-queued item unfenced.
+        $runs->method('completeItem')->with('run-1', 'object:42', OperationRunItemStatus::Failed, [], 'Bulk organization failed.', null)->willReturn(true);
+        $runs->method('finish')->willReturn(OperationRunStatus::Failed);
+
+        ($this->handler($organizer, loopGuard: $loopGuard, runs: $runs))(
+            new BulkOrganizeMessage([42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
     public function latestStateDispatchFailureLeavesTrackedBulkItemResumable(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);

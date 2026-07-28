@@ -168,7 +168,7 @@ class AsyncTransportHealthCheckTest extends TestCase
     #[Test]
     public function routingValidationIncludesTheDependencyProjectionRefreshRoute(): void
     {
-        // M-05: the durable projection-repair route must be validated so an application cannot omit
+        // the durable projection-repair route must be validated so an application cannot omit
         // it while the routing health check still reports healthy.
         $result = $this->check($this->heartbeats(), 1000)->run();
 

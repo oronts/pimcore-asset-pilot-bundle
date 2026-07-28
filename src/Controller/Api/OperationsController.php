@@ -4,35 +4,42 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
+use Oronts\AssetPilotBundle\Api\Serialization\OperationResponseAssembler;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
+use Oronts\AssetPilotBundle\Controller\Api\Support\AuditRowDates;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
-use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
-use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
-use Oronts\AssetPilotBundle\Enum\OperationStatus;
+use Oronts\AssetPilotBundle\Enum\BulkRunOutcomeKind;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
+use Oronts\AssetPilotBundle\Enum\SingleRunOutcomeKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\OrganizationRunDispatchException;
 use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
-use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
-use Oronts\AssetPilotBundle\Service\AssetReorganizer;
-use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
+use Oronts\AssetPilotBundle\Service\AssetReorganizerInterface;
+use Oronts\AssetPilotBundle\Service\FailureReplayServiceInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
+use Oronts\AssetPilotBundle\Service\OrganizeRunDispatchCoordinator;
+use Oronts\AssetPilotBundle\Service\Query\UtcSinceCutoff;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
+use Oronts\AssetPilotBundle\Service\RunItemLease;
+use Oronts\AssetPilotBundle\Service\SynchronousRunExecutor;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -42,7 +49,6 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class OperationsController
@@ -50,24 +56,32 @@ class OperationsController
     use DecodesJsonObject;
     use HandlesBulkIds;
 
+    private readonly SynchronousRunExecutor $syncRunExecutor;
+
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $organizeDispatcher,
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly OrganizeDispatcherInterface $organizeDispatcher,
+        protected readonly AuditQueryInterface $auditLogger,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
-        protected readonly FailureReplayService $failureReplay,
-        protected readonly AssetReorganizer $reorganizer,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly FailureReplayServiceInterface $failureReplay,
+        protected readonly AssetReorganizerInterface $reorganizer,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly OperationRunStoreInterface $runs,
         protected readonly ApplyPlanServiceInterface $applyPlans,
         protected readonly OrganizePlanFingerprint $planFingerprints,
         protected readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
-        protected readonly UrlGeneratorInterface $urlGenerator,
         protected readonly LoggerInterface $logger,
+        private readonly ApiDateFormatterInterface $dates,
+        private readonly RunItemLease $runItemLease,
+        private readonly OperationResponseAssembler $responses,
+        private readonly OrganizeRunDispatchCoordinator $runCoordinator,
         protected readonly int $defaultBatchSize = 50,
         protected readonly array $planConfiguration = [],
-    ) {}
+        ?SynchronousRunExecutor $syncRunExecutor = null,
+    ) {
+        $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease);
+    }
 
     #[Route('/operations/reorganize', name: 'oronts_asset_pilot_operations_reorganize', methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
@@ -92,7 +106,7 @@ class OperationsController
 
         return $this->reviewedSelectionResponse(
             fn (): ReviewedSelectionResult => $this->reviewedOperations->execute(
-                'reorganize',
+                OperationRunKind::Reorganize,
                 $selection['objectIds'],
                 ['folder' => $folder, 'limit' => $limit],
                 TriggerType::Api,
@@ -114,12 +128,16 @@ class OperationsController
             return $data;
         }
 
-        $since = isset($data['since']) ? strtotime((string) $data['since']) : null;
-        if ($since === false) {
-            return new JsonResponse(['error' => 'The "since" value is not a valid date.'], Response::HTTP_BAD_REQUEST);
+        $since = null;
+        if (isset($data['since'])) {
+            try {
+                $since = UtcSinceCutoff::parse((string) $data['since']);
+            } catch (\Exception) {
+                return new JsonResponse(['error' => 'The "since" value is not a valid date.'], Response::HTTP_BAD_REQUEST);
+            }
         }
         $filters = array_filter([
-            'since' => is_int($since) ? date('Y-m-d H:i:s', $since) : null,
+            'since' => $since,
             'rule_name' => $data['rule'] ?? null,
             'object_class' => $data['class'] ?? null,
         ], static fn ($value): bool => $value !== null);
@@ -134,7 +152,7 @@ class OperationsController
 
         return $this->reviewedSelectionResponse(
             fn (): ReviewedSelectionResult => $this->reviewedOperations->execute(
-                'replay',
+                OperationRunKind::Replay,
                 $objectIds,
                 ['filters' => $filters, 'limit' => $limit],
                 TriggerType::Api,
@@ -229,7 +247,7 @@ class OperationsController
 
         $preview = $this->previewObjects([$object]);
         $plan = $this->organizePlan(
-            'organize',
+            OperationRunKind::Organize->value,
             $actor,
             ['objectId' => (int) $objectId, 'trigger' => TriggerType::Api->value],
             $preview['targets'],
@@ -238,7 +256,7 @@ class OperationsController
             return new JsonResponse([
                 'dryRun' => true,
                 'planToken' => $this->applyPlans->issue($plan),
-                'operations' => array_map($this->operationPreview(...), $preview['operations']),
+                'operations' => array_map($this->responses->previewOperation(...), $preview['operations']),
             ]);
         }
 
@@ -254,7 +272,13 @@ class OperationsController
         $expectedFingerprint = $preview['fingerprints'][(int) $objectId];
 
         if ($async) {
-            return $this->queueOrganization((int) $objectId, $actor, $expectedFingerprint);
+            try {
+                $queued = $this->runCoordinator->queueOrganization((int) $objectId, TriggerType::Api, $actor, $expectedFingerprint);
+            } catch (OrganizationRunDispatchException $e) {
+                return new JsonResponse(['error' => 'Organization could not be queued.', 'runId' => $e->runId], Response::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            return new JsonResponse($this->responses->queuedSingle($queued->runId), Response::HTTP_ACCEPTED);
         }
 
         $runId = $this->organizeDispatcher->createRun(
@@ -264,54 +288,27 @@ class OperationsController
             [(int) $objectId => $expectedFingerprint],
         );
         $this->runs->start($runId);
-        $this->runs->startItem($runId, $this->runItemKey((int) $objectId));
-        try {
-            $results = $this->organizer->organize(
-                $object,
-                TriggerType::Api,
-                expectedFingerprint: $expectedFingerprint,
-            );
-            $this->runs->completeItem(
-                $runId,
-                $this->runItemKey((int) $objectId),
-                $this->operationItemStatus($results),
-                ['operationCount' => count($results)],
-            );
-            $this->runs->finish($runId);
-        } catch (StaleApplyPlanException) {
-            $this->runs->completeItem(
-                $runId,
-                $this->runItemKey((int) $objectId),
-                OperationRunItemStatus::Skipped,
-                error: 'Object changed after preview; the immutable plan was not applied.',
-            );
-            $this->runs->finish($runId);
-
-            return new JsonResponse([
-                'error' => 'Object changed after preview. Run a new dry-run before applying.',
-                'runId' => $runId,
-            ], Response::HTTP_CONFLICT);
-        } catch (\Throwable $e) {
-            $this->runs->completeItem($runId, $this->runItemKey((int) $objectId), OperationRunItemStatus::Failed, error: 'Organization failed.');
-            $this->runs->fail($runId, 'Organization failed.');
-            $this->logger->error('Asset Pilot API: organization failed for object {id}', ['id' => $objectId, 'exception' => $e]);
-
-            return new JsonResponse(['error' => 'Organization failed.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR);
+        $outcome = $this->syncRunExecutor->executeSingle($runId, $object, TriggerType::Api, $expectedFingerprint);
+        if ($outcome->kind === SingleRunOutcomeKind::Failed) {
+            $this->logger->error('Asset Pilot API: organization failed for object {id}', ['id' => $objectId, 'exception' => $outcome->cause]);
         }
 
-        return new JsonResponse([
-            'runId' => $runId,
-            'results' => array_map(static fn ($r) => [
-                'status' => $r->status->value,
-                'message' => $r->message,
-                'operation' => $r->operation ? [
-                    'assetId' => $r->operation->assetId,
-                    'sourcePath' => $r->operation->sourcePath,
-                    'targetPath' => $r->operation->targetPath,
-                    'ruleName' => $r->operation->ruleName,
-                ] : null,
-            ], $results),
-        ]);
+        return match ($outcome->kind) {
+            SingleRunOutcomeKind::Completed => new JsonResponse($this->responses->singleRunResult($runId, $outcome->results)),
+            SingleRunOutcomeKind::ClaimConflict => new JsonResponse([
+                'error' => 'The operation could not be claimed for execution; it may have been cancelled or is already running.',
+                'runId' => $runId,
+            ], Response::HTTP_CONFLICT),
+            SingleRunOutcomeKind::LeaseLost => new JsonResponse([
+                'error' => 'The operation ran but its result could not be durably recorded because the run-item lease was lost.',
+                'runId' => $runId,
+            ], Response::HTTP_CONFLICT),
+            SingleRunOutcomeKind::Stale => new JsonResponse([
+                'error' => 'Object changed after preview. Run a new dry-run before applying.',
+                'runId' => $runId,
+            ], Response::HTTP_CONFLICT),
+            SingleRunOutcomeKind::Failed => new JsonResponse(['error' => 'Organization failed.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR),
+        };
     }
 
     #[Route('/organize/bulk', name: 'oronts_asset_pilot_organize_bulk', methods: ['POST'])]
@@ -407,7 +404,7 @@ class OperationsController
                 'dryRun' => true,
                 'planToken' => $this->applyPlans->issue($plan),
                 'objectCount' => count($objectIds),
-                'operations' => array_map($this->operationPreview(...), $preview['operations']),
+                'operations' => array_map($this->responses->previewOperation(...), $preview['operations']),
             ]);
         }
 
@@ -423,57 +420,33 @@ class OperationsController
 
         if ($async) {
             $batchSize = max(1, (int) ($data['batchSize'] ?? $this->defaultBatchSize));
-            return $this->queueBulkOrganization($objectIds, $actor, $preview['fingerprints'], $batchSize);
+            try {
+                $queued = $this->runCoordinator->queueBulkOrganization($objectIds, TriggerType::Api, $actor, $preview['fingerprints'], $batchSize);
+            } catch (OrganizationRunDispatchException $e) {
+                return new JsonResponse(['error' => 'Bulk organization could not be queued.', 'runId' => $e->runId], Response::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            return new JsonResponse(
+                $this->responses->queuedBulk($queued->runId, $queued->objectCount, $queued->batchCount),
+                Response::HTTP_ACCEPTED,
+            );
         }
 
         $runId = $this->organizeDispatcher->createRun($objectIds, TriggerType::Api, $actor, $preview['fingerprints']);
         $this->runs->start($runId);
-        try {
-            $report = $this->organizer->organizeBulkDetailed(
-                $objectIds,
-                TriggerType::Api,
-                shouldCancel: fn (): bool => $this->runs->isCancellationRequested($runId),
-                beforeObject: fn (int $objectId): bool => $this->runs->startItem($runId, $this->runItemKey($objectId)),
-                expectedFingerprints: $preview['fingerprints'],
-            );
-            foreach ($report->objectResults as $result) {
-                $this->runs->completeItem(
-                    $runId,
-                    $this->runItemKey($result->objectId),
-                    $this->bulkItemStatus($result->status),
-                    ['operationCount' => $result->operationCount],
-                    $result->reason,
-                );
-            }
-            $this->runs->finish($runId);
-        } catch (\Throwable $e) {
-            foreach ($objectIds as $objectId) {
-                $this->runs->completeItem($runId, $this->runItemKey($objectId), OperationRunItemStatus::Failed, error: 'Bulk organization failed.');
-            }
-            $this->runs->fail($runId, 'Bulk organization failed.');
-            $this->logger->error('Asset Pilot API: bulk organization failed', ['exception' => $e]);
-
-            return new JsonResponse(['error' => 'Bulk organization failed.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR);
+        $outcome = $this->syncRunExecutor->executeBulk($runId, $objectIds, TriggerType::Api, $preview['fingerprints']);
+        if ($outcome->kind === BulkRunOutcomeKind::Failed) {
+            $this->logger->error('Asset Pilot API: bulk organization failed', ['exception' => $outcome->cause]);
         }
 
-        return new JsonResponse([
-            'runId' => $runId,
-            'objectCount' => $report->attemptedCount(),
-            'resultCount' => count($report->results),
-            'objectCounts' => [
-                'attempted' => $report->attemptedCount(),
-                'succeeded' => $report->succeededCount(),
-                'skipped' => $report->skippedCount(),
-                'failed' => $report->failedCount(),
-            ],
-            'objectResults' => array_map(static fn (BulkObjectResult $result): array => [
-                'objectId' => $result->objectId,
-                'status' => $result->status->value,
-                'reason' => $result->reason,
-                'operationCount' => $result->operationCount,
-            ], $report->objectResults),
-            'observerWarnings' => $report->observerWarnings,
-        ]);
+        return match ($outcome->kind) {
+            BulkRunOutcomeKind::Completed => new JsonResponse($this->responses->bulkRunResult($runId, $outcome->report ?? throw new \LogicException('Completed bulk run outcome must carry a report.'))),
+            BulkRunOutcomeKind::OwnershipLost => new JsonResponse([
+                'error' => 'The bulk operation lost ownership of a run item to a concurrent attempt; that attempt records the item.',
+                'runId' => $runId,
+            ], Response::HTTP_CONFLICT),
+            BulkRunOutcomeKind::Failed => new JsonResponse(['error' => 'Bulk organization failed.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR),
+        };
     }
 
     #[Route('/operations/bulk-preview', name: 'oronts_asset_pilot_bulk_preview', methods: ['POST'])]
@@ -522,7 +495,10 @@ class OperationsController
     public function status(): JsonResponse
     {
         $stats = $this->auditLogger->getStats();
-        $recent = $this->auditLogger->getRecent(20);
+        $recent = array_map(
+            fn (array $row): array => AuditRowDates::normalize($row, $this->dates),
+            $this->auditLogger->getRecent(20),
+        );
 
         return new JsonResponse([
             'stats' => $stats,
@@ -570,7 +546,7 @@ class OperationsController
             'dryRun' => $result->dryRun,
             'planToken' => $result->planToken,
             'runId' => $result->runId,
-            'statusUrl' => $result->runId === null ? null : $this->runStatusUrl($result->runId),
+            'statusUrl' => $result->runId === null ? null : $this->responses->statusUrl($result->runId),
             'objectCount' => $result->objectCount,
             'organized' => $result->organized,
             'dispatched' => $result->dispatched,
@@ -581,7 +557,7 @@ class OperationsController
             $payload['runStatus'] = $result->runStatus->value;
         }
         if ($result->dryRun) {
-            $payload['operations'] = array_map($this->operationPreview(...), $result->operations);
+            $payload['operations'] = array_map($this->responses->previewOperation(...), $result->operations);
         }
         if ($result->objectResults !== []) {
             $payload['objectResults'] = array_map(static fn (BulkObjectResult $item): array => [
@@ -606,7 +582,8 @@ class OperationsController
             ReviewedSelectionError::MalformedPlanToken => Response::HTTP_BAD_REQUEST,
             ReviewedSelectionError::MutationForbidden,
             ReviewedSelectionError::PreflightFailed => Response::HTTP_FORBIDDEN,
-            ReviewedSelectionError::StalePlan => Response::HTTP_CONFLICT,
+            ReviewedSelectionError::StalePlan,
+            ReviewedSelectionError::OwnershipLost => Response::HTTP_CONFLICT,
             ReviewedSelectionError::ExecutionFailed => Response::HTTP_INTERNAL_SERVER_ERROR,
         };
     }
@@ -733,137 +710,4 @@ class OperationsController
         );
     }
 
-    /** @return array<string, int|string|null> */
-    private function operationPreview(MoveOperation $operation): array
-    {
-        return [
-            'assetId' => $operation->assetId,
-            'sourcePath' => $operation->sourcePath,
-            'targetPath' => $operation->targetPath,
-            'ruleName' => $operation->ruleName,
-            'objectId' => $operation->objectId,
-            'objectClass' => $operation->objectClass,
-            'status' => $operation->status->value,
-        ];
-    }
-
-    private function queueOrganization(int $objectId, ActorContext $actor, string $expectedFingerprint): JsonResponse
-    {
-        $runId = $this->organizeDispatcher->createRun(
-            [$objectId],
-            TriggerType::Api,
-            $actor,
-            [$objectId => $expectedFingerprint],
-        );
-        try {
-            $this->organizeDispatcher->dispatchObject(
-                $objectId,
-                TriggerType::Api,
-                $actor,
-                $runId,
-                $expectedFingerprint,
-            );
-        } catch (\Throwable $exception) {
-            $this->runs->fail($runId, 'Organization could not be queued.');
-            $this->logger->error('Asset Pilot API: organization dispatch failed', [
-                'run_id' => $runId,
-                'object_id' => $objectId,
-                'exception' => $exception,
-            ]);
-
-            return new JsonResponse(['error' => 'Organization could not be queued.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        return new JsonResponse([
-            'message' => 'Organization queued',
-            'runId' => $runId,
-            'statusUrl' => $this->runStatusUrl($runId),
-        ], Response::HTTP_ACCEPTED);
-    }
-
-    /**
-     * @param list<int>          $objectIds
-     * @param array<int, string> $expectedFingerprints
-     */
-    private function queueBulkOrganization(array $objectIds, ActorContext $actor, array $expectedFingerprints, int $batchSize): JsonResponse
-    {
-        $batches = array_chunk($objectIds, $batchSize);
-        $runId = $this->organizeDispatcher->createRun($objectIds, TriggerType::Api, $actor, $expectedFingerprints);
-        foreach ($batches as $batchIndex => $batch) {
-            try {
-                $this->organizeDispatcher->dispatchBulk(
-                    $batch,
-                    TriggerType::Api,
-                    $actor,
-                    $runId,
-                    array_intersect_key($expectedFingerprints, array_flip($batch)),
-                );
-            } catch (\Throwable $exception) {
-                $this->failUndispatchedBatches($runId, array_slice($batches, $batchIndex));
-                $this->logger->error('Asset Pilot API: bulk organization dispatch failed', [
-                    'run_id' => $runId,
-                    'batch_index' => $batchIndex,
-                    'exception' => $exception,
-                ]);
-
-                return new JsonResponse(['error' => 'Bulk organization could not be queued.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR);
-            }
-        }
-
-        return new JsonResponse([
-            'message' => 'Bulk organization queued',
-            'runId' => $runId,
-            'statusUrl' => $this->runStatusUrl($runId),
-            'objectCount' => count($objectIds),
-            'batchCount' => count($batches),
-        ], Response::HTTP_ACCEPTED);
-    }
-
-    /** @param list<list<int>> $batches */
-    private function failUndispatchedBatches(string $runId, array $batches): void
-    {
-        foreach ($batches as $batch) {
-            foreach ($batch as $objectId) {
-                $this->runs->completeItem(
-                    $runId,
-                    'object:' . $objectId,
-                    OperationRunItemStatus::Failed,
-                    error: 'Bulk organization could not be queued.',
-                );
-            }
-        }
-        $this->runs->finish($runId);
-    }
-
-    /** @param list<\Oronts\AssetPilotBundle\Model\OperationResult> $results */
-    private function operationItemStatus(array $results): OperationRunItemStatus
-    {
-        if ($results === [] || array_all($results, static fn ($result): bool => $result->status === OperationStatus::Skipped)) {
-            return OperationRunItemStatus::Skipped;
-        }
-        if (array_any($results, static fn ($result): bool => $result->status === OperationStatus::Failed)) {
-            return OperationRunItemStatus::Failed;
-        }
-
-        return OperationRunItemStatus::Completed;
-    }
-
-    private function bulkItemStatus(BulkObjectStatus $status): OperationRunItemStatus
-    {
-        return match ($status) {
-            BulkObjectStatus::Succeeded => OperationRunItemStatus::Completed,
-            BulkObjectStatus::Skipped => OperationRunItemStatus::Skipped,
-            BulkObjectStatus::Failed => OperationRunItemStatus::Failed,
-        };
-    }
-
-    private function runItemKey(int $objectId): string
-    {
-        return 'object:' . $objectId;
-    }
-
-    private function runStatusUrl(string $runId): string
-    {
-        return $this->urlGenerator->generate('oronts_asset_pilot_operation_run_get', ['id' => $runId]);
-    }
 }

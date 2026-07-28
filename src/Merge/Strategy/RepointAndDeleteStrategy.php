@@ -72,8 +72,8 @@ class RepointAndDeleteStrategy implements ResumableDuplicateMergeStrategyInterfa
             }
 
             // Workspace ACL: a flat operate/admin permission is not enough to hard-delete an element the
-            // acting user has no delete right on (the quarantine strategy applies the same gate). isAllowed()
-            // resolves the current user and returns true on CLI.
+            // acting user has no delete right on (the quarantine strategy applies the same gate). The gate
+            // runs through ElementAuthorization: a System actor passes; a resolved user needs the element's delete right.
             if (!$this->isDeletionAllowed($copyId)) {
                 return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'not permitted to delete this asset');
             }

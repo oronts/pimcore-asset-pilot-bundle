@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\OperationRecoveryPlanException;
 use Oronts\AssetPilotBundle\Model\OperationRecoveryResult;
 use Oronts\AssetPilotBundle\Model\ReviewedOperationRecovery;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\OperationRecoveryCoordinatorInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -24,7 +24,7 @@ final class OperationRecoveryController
 
     public function __construct(
         private readonly OperationRecoveryCoordinatorInterface $recovery,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly LoggerInterface $logger,
     ) {}
 

@@ -8,7 +8,9 @@ use Oronts\AssetPilotBundle\Command\NormalizeFilenamesCommand;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
+use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
+use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
 use Oronts\AssetPilotBundle\Service\NormalizeFilenamesService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -85,6 +87,7 @@ final class NormalizeFilenamesCommandTest extends TestCase
                 'assetIds' => [2, 7],
                 'selector' => ['assetIds' => [2, 7], 'mode' => 'asset_ids'],
             ], $plan->request);
+            self::assertSame(['version' => 1, 'lockProperty' => 'asset_pilot_lock', 'contentVerification' => true], $plan->config);
             self::assertSame(['asset:2', 'asset:7'], array_column($plan->targets, 'id'));
             foreach ($plan->targets as $target) {
                 self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $target->fingerprint);
@@ -108,9 +111,12 @@ final class NormalizeFilenamesCommandTest extends TestCase
         $preview = $this->previewResult();
         $normalizer = $this->createMock(NormalizeFilenamesService::class);
         $normalizer->expects(self::exactly(2))->method('normalize')->willReturnCallback(
-            static function (array $assetIds, bool $dryRun) use (&$events, $preview): array {
+            static function (array $assetIds, bool $dryRun, ?array $expectedFingerprints = null) use (&$events, $preview): array {
                 self::assertSame([2, 7], $assetIds);
                 $events[] = $dryRun ? 'preview' : 'mutate';
+                if (!$dryRun) {
+                    self::assertSame(['asset:2' => hash('sha256', 'asset:2'), 'asset:7' => hash('sha256', 'asset:7')], $expectedFingerprints);
+                }
 
                 return $dryRun
                     ? $preview
@@ -159,7 +165,14 @@ final class NormalizeFilenamesCommandTest extends TestCase
         NormalizeFilenamesService $normalizer,
         ApplyPlanServiceInterface $plans,
     ): NormalizeFilenamesCommand {
-        return new NormalizeFilenamesCommand($normalizer, $plans);
+        $fingerprints = $this->createMock(AssetMutationFingerprintService::class);
+        $fingerprints->method('planConfig')->willReturn(['version' => 1, 'lockProperty' => 'asset_pilot_lock', 'contentVerification' => true]);
+        $fingerprints->method('targets')->willReturnCallback(static fn (array $assetIds): array => array_map(
+            static fn (int $assetId): ApplyPlanTarget => new ApplyPlanTarget('asset:' . $assetId, hash('sha256', 'asset:' . $assetId)),
+            $assetIds,
+        ));
+
+        return new NormalizeFilenamesCommand($normalizer, $plans, $fingerprints);
     }
 
     /**

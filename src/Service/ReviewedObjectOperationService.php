@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
-use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
@@ -314,10 +313,14 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
                 previous: $e,
             );
         } catch (\Throwable $e) {
-            foreach ($objectIds as $objectId) {
-                $this->runItemLease->complete($runId, $this->runItemKey($objectId), OperationRunItemStatus::Failed, error: 'Reviewed organization failed.');
+            if (!$this->syncRunExecutor->failOwnedItemsAndRun($runId, $objectIds, 'Reviewed organization failed.')) {
+                throw new ReviewedSelectionException(
+                    ReviewedSelectionError::OwnershipLost,
+                    'A run item was reclaimed by a concurrent attempt before the reviewed operation could record it.',
+                    runId: $runId,
+                    previous: $e,
+                );
             }
-            $this->runs->fail($runId, 'Reviewed organization failed.');
             $this->logger->error('Asset Pilot: reviewed organization failed', ['run_id' => $runId, 'exception' => $e]);
 
             throw new ReviewedSelectionException(
@@ -356,11 +359,6 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
             'status' => $operation->status->value,
             'targetPath' => $operation->targetPath,
         ];
-    }
-
-    private function runItemKey(int $objectId): string
-    {
-        return 'object:' . $objectId;
     }
 
     protected function loadObject(int $id): ?AbstractObject

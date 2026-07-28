@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunActor;
 use Oronts\AssetPilotBundle\Service\OperationRunExecutorInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
@@ -23,8 +24,9 @@ final class OperationRunsController
     public function __construct(
         private readonly OperationRunStoreInterface $runs,
         private readonly OperationRunExecutorInterface $executor,
-        private readonly ElementAuthorization $authorization,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly ApiDateFormatterInterface $dates,
     ) {}
 
     #[Route('/operations/runs', name: 'oronts_asset_pilot_operation_run_list', methods: ['GET'])]
@@ -65,7 +67,7 @@ final class OperationRunsController
             return new JsonResponse(['error' => 'Operation run not found.'], Response::HTTP_NOT_FOUND);
         }
         if (!$this->runs->requestCancellation($id, $actor)) {
-            return new JsonResponse(['error' => 'Only queued or running operations can be cancelled.'], Response::HTTP_CONFLICT);
+            return new JsonResponse(['error' => 'Only pending, queued, or running operations can be cancelled.'], Response::HTTP_CONFLICT);
         }
 
         $status = $this->runs->finish($id);
@@ -89,6 +91,11 @@ final class OperationRunsController
         $kind = OperationRunKind::tryFrom((string) ($run['kind'] ?? ''));
         if ($kind === null || !$this->executor->supports($kind)) {
             return new JsonResponse(['error' => 'This operation kind cannot be retried.'], Response::HTTP_CONFLICT);
+        }
+
+        // DuplicateMerge is Admin-tier; re-assert it here since the retry endpoint is only Operate-gated.
+        if ($kind === OperationRunKind::DuplicateMerge && !$this->authorization->hasGlobalPermission(AssetPilotPermission::Admin->value, $actor)) {
+            return new JsonResponse(['error' => 'Retrying a duplicate merge requires the asset_pilot_admin permission.'], Response::HTTP_FORBIDDEN);
         }
 
         $retryId = $this->runs->retry($id, $actor);
@@ -139,7 +146,7 @@ final class OperationRunsController
     {
         return [
             ...$this->serializeSummary($run),
-            'items' => array_map(static fn (array $item): array => [
+            'items' => array_map(fn (array $item): array => [
                 'key' => $item['item_key'],
                 'targetType' => $item['target_type'],
                 'targetId' => $item['target_id'] === null ? null : (int) $item['target_id'],
@@ -149,9 +156,9 @@ final class OperationRunsController
                 'state' => $item['state_payload'] ?? [],
                 'result' => $item['result_payload'],
                 'error' => $item['error_message'],
-                'createdAt' => $item['created_at'],
-                'updatedAt' => $item['updated_at'],
-                'completedAt' => $item['completed_at'],
+                'createdAt' => $this->dates->fromDatabase((string) $item['created_at']),
+                'updatedAt' => $this->dates->fromDatabase((string) $item['updated_at']),
+                'completedAt' => $this->dates->fromDatabase((string) $item['completed_at']),
             ], $run['items']),
         ];
     }
@@ -173,10 +180,10 @@ final class OperationRunsController
             'retryOf' => $run['retry_of'],
             'request' => $run['request_payload'],
             'error' => $run['error_message'],
-            'createdAt' => $run['created_at'],
-            'startedAt' => $run['started_at'],
-            'updatedAt' => $run['updated_at'],
-            'completedAt' => $run['completed_at'],
+            'createdAt' => $this->dates->fromDatabase((string) $run['created_at']),
+            'startedAt' => $this->dates->fromDatabase((string) $run['started_at']),
+            'updatedAt' => $this->dates->fromDatabase((string) $run['updated_at']),
+            'completedAt' => $this->dates->fromDatabase((string) $run['completed_at']),
         ];
     }
 }

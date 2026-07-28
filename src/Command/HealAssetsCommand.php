@@ -15,10 +15,10 @@ use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Model\HealResult;
 use Oronts\AssetPilotBundle\Model\UndoHealResult;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
+use Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface;
 use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
-use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
+use Oronts\AssetPilotBundle\Service\VersionRollbackHealerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -36,8 +36,8 @@ class HealAssetsCommand extends Command
     use UsesReviewedApplyPlan;
 
     public function __construct(
-        private readonly AssetIntegrityService $integrity,
-        private readonly VersionRollbackHealer $healer,
+        private readonly AssetIntegrityServiceInterface $integrity,
+        private readonly VersionRollbackHealerInterface $healer,
         private readonly ApplyPlanServiceInterface $applyPlans,
         private readonly IntegrityHealFingerprintService $healFingerprints,
         private readonly IntegrityHealLog $healLog,

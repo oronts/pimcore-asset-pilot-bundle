@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
+use Oronts\AssetPilotBundle\Audit\AuditExportInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
+use Oronts\AssetPilotBundle\Controller\Api\Support\AuditRowDates;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\RevertFailure;
 use Oronts\AssetPilotBundle\Exception\RevertException;
-use Oronts\AssetPilotBundle\Service\OperationReverter;
+use Oronts\AssetPilotBundle\Service\OperationReverterInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -24,9 +27,11 @@ class AuditController
     use StreamsCsv;
 
     public function __construct(
-        protected readonly AuditLoggerInterface $auditLogger,
+        private readonly AuditQueryInterface $auditQuery,
+        private readonly AuditExportInterface $auditExport,
         protected readonly LoggerInterface $logger,
-        protected readonly OperationReverter $operationReverter,
+        protected readonly OperationReverterInterface $operationReverter,
+        private readonly ApiDateFormatterInterface $dates,
     ) {}
 
     #[Route('/audit', name: 'oronts_asset_pilot_audit', methods: ['GET'])]
@@ -47,12 +52,17 @@ class AuditController
             'filters' => $filters,
         ]);
 
-        $result = $this->auditLogger->getPaginated(
+        $result = $this->auditQuery->getPaginated(
             $page,
             $limit,
             $filters,
             $request->query->get('sort'),
             $request->query->get('order'),
+        );
+
+        $result['items'] = array_map(
+            fn (array $item): array => AuditRowDates::normalize($item, $this->dates),
+            $result['items'],
         );
 
         return new JsonResponse($result);
@@ -69,7 +79,7 @@ class AuditController
         ]);
 
         $rows = (function () use ($filters): \Generator {
-            foreach ($this->auditLogger->iterateForExport($filters) as $item) {
+            foreach ($this->auditExport->iterateForExport($filters) as $item) {
                 yield [
                     $item['id'] ?? '',
                     $item['asset_id'] ?? '',
@@ -107,7 +117,11 @@ class AuditController
             );
         }
 
-        return new JsonResponse(['message' => 'Operation reverted successfully', 'newPath' => $result->toPath]);
+        return new JsonResponse([
+            'message' => 'Operation reverted successfully',
+            'newPath' => $result->toPath,
+            'warning' => $result->warning,
+        ]);
     }
 
     private function revertStatus(RevertFailure $reason): int
@@ -116,7 +130,8 @@ class AuditController
             RevertFailure::AuditEntryNotFound, RevertFailure::AssetNotFound => Response::HTTP_NOT_FOUND,
             RevertFailure::NotCompleted => Response::HTTP_BAD_REQUEST,
             RevertFailure::PermissionDenied => Response::HTTP_FORBIDDEN,
-            RevertFailure::PathConflict => Response::HTTP_CONFLICT,
+            RevertFailure::AssetLocked, RevertFailure::PathConflict => Response::HTTP_CONFLICT,
+            RevertFailure::RecoveryRequired => Response::HTTP_CONFLICT,
             RevertFailure::ExecutionFailed => Response::HTTP_INTERNAL_SERVER_ERROR,
         };
     }

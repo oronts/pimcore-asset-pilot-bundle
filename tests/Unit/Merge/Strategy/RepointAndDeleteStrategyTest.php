@@ -13,6 +13,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetDeletionFenceInterface;
 use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface;
+use Oronts\AssetPilotBundle\Tests\Unit\Merge\MergeContextStub;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -92,7 +93,7 @@ class RepointAndDeleteStrategyTest extends TestCase
         $fence->method('acquire')->willReturn(null);
         $deleted = new \ArrayObject();
 
-        $disposition = $this->strategy(false, $deleted, fence: $fence)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+        $disposition = $this->strategy(false, $deleted, fence: $fence)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftReferenced, $disposition->outcome);
         self::assertStringContainsString('being deleted by another operation', (string) $disposition->reason);
@@ -109,7 +110,7 @@ class RepointAndDeleteStrategyTest extends TestCase
         $deleted = new \ArrayObject();
 
         try {
-            $this->strategy(false, $deleted, fence: $fence)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+            $this->strategy(false, $deleted, fence: $fence)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
             self::fail('expected the lost fence to abort the disposal');
         } catch (AssetDeletionFenceLostException) {
             // The copy is never deleted, and the fence is still released on the abort.
@@ -123,7 +124,21 @@ class RepointAndDeleteStrategyTest extends TestCase
     {
         $deleted = new \ArrayObject();
 
-        $disposition = $this->strategy(false, $deleted)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+        $disposition = $this->strategy(false, $deleted)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
+
+        self::assertSame(DispositionOutcome::Deleted, $disposition->outcome);
+        self::assertSame([9], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function aThrowingFenceReleaseStillReportsTheSuccessfulDeletion(): void
+    {
+        $deleted = new \ArrayObject();
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->method('acquire')->willReturn('token');
+        $fence->method('release')->willThrowException(new \RuntimeException('fence release failed'));
+
+        $disposition = $this->strategy(false, $deleted, fence: $fence)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::Deleted, $disposition->outcome);
         self::assertSame([9], $deleted->getArrayCopy());
@@ -135,7 +150,7 @@ class RepointAndDeleteStrategyTest extends TestCase
         $deleted = new \ArrayObject();
 
         $disposition = $this->strategy(false, $deleted, protected: true)
-            ->disposeCopy(9, new RepointReport(9, 5, 2, []));
+            ->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftError, $disposition->outcome);
         self::assertStringContainsString('protected', (string) $disposition->reason);
@@ -147,7 +162,7 @@ class RepointAndDeleteStrategyTest extends TestCase
     {
         $deleted = new \ArrayObject();
         $disposition = $this->strategy(false, $deleted)
-            ->disposeCopy(9, new RepointReport(9, 5, 0, ['object 1 still references the copy']));
+            ->disposeCopy(new RepointReport(9, 5, 0, ['object 1 still references the copy']), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftReferenced, $disposition->outcome);
         self::assertSame([], $deleted->getArrayCopy(), 'a blocked copy is never deleted');
@@ -158,7 +173,7 @@ class RepointAndDeleteStrategyTest extends TestCase
     {
         $deleted = new \ArrayObject();
 
-        $disposition = $this->strategy(true, $deleted)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+        $disposition = $this->strategy(true, $deleted)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftReferenced, $disposition->outcome);
         self::assertSame([], $deleted->getArrayCopy());
@@ -179,7 +194,7 @@ class RepointAndDeleteStrategyTest extends TestCase
     {
         $deleted = new \ArrayObject();
 
-        $disposition = $this->strategy(false, $deleted, deleteResult: false)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+        $disposition = $this->strategy(false, $deleted, deleteResult: false)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftError, $disposition->outcome);
     }
@@ -189,7 +204,7 @@ class RepointAndDeleteStrategyTest extends TestCase
     {
         $deleted = new \ArrayObject();
 
-        $disposition = $this->strategy(false, $deleted, deletionAllowed: false)->disposeCopy(9, new RepointReport(9, 5, 2, []));
+        $disposition = $this->strategy(false, $deleted, deletionAllowed: false)->disposeCopy(new RepointReport(9, 5, 2, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftError, $disposition->outcome);
         self::assertSame([], $deleted->getArrayCopy(), 'a copy the user cannot delete is never deleted');
@@ -226,7 +241,7 @@ class RepointAndDeleteStrategyTest extends TestCase
             }
         };
 
-        $disposition = $strategy->disposeCopy(9, new RepointReport(9, 5, 1, []));
+        $disposition = $strategy->disposeCopy(new RepointReport(9, 5, 1, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftReferenced, $disposition->outcome);
         self::assertStringContainsString('not configured', (string) $disposition->reason);
@@ -270,7 +285,7 @@ class RepointAndDeleteStrategyTest extends TestCase
             }
         };
 
-        $disposition = $strategy->disposeCopy(9, new RepointReport(9, 5, 1, []));
+        $disposition = $strategy->disposeCopy(new RepointReport(9, 5, 1, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftReferenced, $disposition->outcome);
         self::assertStringContainsString('hard-coded content reference', (string) $disposition->reason);

@@ -11,7 +11,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Stream tabular data to the client as a CSV download. Shared by every list controller so exports
  * behave identically: cells are formula-injection-neutralised and the output buffer is flushed every
  * 1000 rows, so an arbitrarily large export stays memory-flat. Pass a generator for `$rows` to page a
- * data source lazily.
+ * data source lazily. If that generator returns `true` (its row ceiling cut the export short), a final
+ * marker row is appended so the download is never a silent partial: a streamed body cannot carry a
+ * trailing header, so the truncation notice travels in-band as the last row.
  */
 trait StreamsCsv
 {
@@ -23,14 +25,21 @@ trait StreamsCsv
     {
         return new StreamedResponse(function () use ($header, $rows): void {
             $handle = fopen('php://output', 'w');
-            fputcsv($handle, $header);
+            fputcsv($handle, $header, ',', '"', '\\');
 
             $written = 0;
             foreach ($rows as $row) {
-                fputcsv($handle, array_map($this->sanitizeCsvCell(...), $row));
+                fputcsv($handle, array_map($this->sanitizeCsvCell(...), $row), ',', '"', '\\');
                 if ((++$written % 1000) === 0) {
                     flush();
                 }
+            }
+
+            if ($rows instanceof \Generator && $rows->getReturn() === true) {
+                fputcsv($handle, [sprintf(
+                    'TRUNCATED: export stopped after %d rows at the scan ceiling. Narrow the filters and export again to reach the remaining rows.',
+                    $written,
+                )], ',', '"', '\\');
             }
 
             fclose($handle);

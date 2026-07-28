@@ -23,7 +23,7 @@ final class StuckOperationRunHealthCheckTest extends TestCase
         $result = (new StuckOperationRunHealthCheck($runs, 86400))->run();
 
         self::assertSame(HealthStatus::Ok, $result->status);
-        self::assertSame(0, $result->details['stuck_queued_runs']);
+        self::assertSame(0, $result->details['stuck_backlog_runs']);
     }
 
     #[Test]
@@ -35,7 +35,7 @@ final class StuckOperationRunHealthCheckTest extends TestCase
         $result = (new StuckOperationRunHealthCheck($runs, 3600))->run();
 
         self::assertSame(HealthStatus::Warning, $result->status);
-        self::assertSame(3, $result->details['stuck_queued_runs']);
+        self::assertSame(3, $result->details['stuck_backlog_runs']);
         self::assertStringContainsString('3 operation run(s)', $result->message);
     }
 

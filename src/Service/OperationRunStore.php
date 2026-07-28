@@ -14,7 +14,7 @@ use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 
-class OperationRunStore implements OperationRunStoreInterface
+final class OperationRunStore implements OperationRunStoreInterface
 {
     public function __construct(
         private readonly Connection $connection,

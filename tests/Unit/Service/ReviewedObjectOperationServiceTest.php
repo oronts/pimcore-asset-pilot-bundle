@@ -383,7 +383,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
             OperationRunItemStatus::Completed,
             ['operationCount' => 1],
             null,
-        );
+        )->willReturn(true);
         $service = $this->service([$object], $organizer, $dispatcher, $runs, $lease);
         $selector = ['assetIds' => [10], 'mode' => 'asset_ids'];
         $preview = $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, true, false, actor: ActorContext::system());
@@ -403,6 +403,80 @@ final class ReviewedObjectOperationServiceTest extends TestCase
         self::assertSame(OperationRunStatus::Completed, $result->runStatus);
         self::assertSame(1, $result->organized);
         self::assertSame([$report->objectResults[0]], $result->objectResults);
+    }
+
+    #[Test]
+    public function synchronousApplyFencesCleanupToTheOwnedItemOnFailure(): void
+    {
+        $object = $this->object(42);
+        $operation = $this->operation(42, 10);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('dryRun')->willReturn([$operation]);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, mixed $dispatchedAt, mixed $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $afterObject): BulkOrganizeReport {
+                $before(42);
+
+                throw new \RuntimeException('boom');
+            },
+        );
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->method('createRun')->willReturn('sync-run');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('start')->willReturn(true);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->expects(self::once())->method('fail')->with('sync-run', 'Reviewed organization failed.');
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('token')->willReturnMap([['sync-run', 'object:42', 'tok']]);
+        $lease->expects(self::once())->method('complete')
+            ->with('sync-run', 'object:42', OperationRunItemStatus::Failed, [], 'Reviewed organization failed.')
+            ->willReturn(true);
+        $service = $this->service([$object], $organizer, $dispatcher, $runs, $lease);
+        $selector = ['assetIds' => [10], 'mode' => 'asset_ids'];
+        $preview = $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, true, false, actor: ActorContext::system());
+
+        try {
+            $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, false, false, $preview->planToken, ActorContext::system());
+            self::fail('Expected ReviewedSelectionException');
+        } catch (ReviewedSelectionException $e) {
+            self::assertSame(ReviewedSelectionError::ExecutionFailed, $e->error);
+        }
+    }
+
+    #[Test]
+    public function synchronousApplyRaisesOwnershipLostWhenCleanupLosesTheFence(): void
+    {
+        $object = $this->object(42);
+        $operation = $this->operation(42, 10);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('dryRun')->willReturn([$operation]);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, mixed $dispatchedAt, mixed $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $afterObject): BulkOrganizeReport {
+                $before(42);
+
+                throw new \RuntimeException('boom');
+            },
+        );
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->method('createRun')->willReturn('sync-run');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('start')->willReturn(true);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->expects(self::never())->method('fail');
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('token')->willReturnMap([['sync-run', 'object:42', 'tok']]);
+        $lease->method('complete')->willReturn(false);
+        $service = $this->service([$object], $organizer, $dispatcher, $runs, $lease);
+        $selector = ['assetIds' => [10], 'mode' => 'asset_ids'];
+        $preview = $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, true, false, actor: ActorContext::system());
+
+        try {
+            $service->execute(OperationRunKind::Reorganize, [42], $selector, TriggerType::Manual, false, false, $preview->planToken, ActorContext::system());
+            self::fail('Expected ReviewedSelectionException');
+        } catch (ReviewedSelectionException $e) {
+            self::assertSame(ReviewedSelectionError::OwnershipLost, $e->error);
+        }
     }
 
     #[Test]

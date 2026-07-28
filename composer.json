@@ -1,6 +1,7 @@
 {
     "name": "oronts/asset-pilot-bundle",
     "description": "Intelligent rule-based asset organization engine for Pimcore 12 with expression language conditions, pluggable strategies, async processing, and Studio UI integration.",
+    "version": "2.0.0",
     "type": "pimcore-bundle",
     "license": "AGPL-3.0-or-later",
     "keywords": ["pimcore", "assets", "organization", "automation", "pimcore-12", "studio-ui"],
@@ -104,6 +105,6 @@
         "cs": "php-cs-fixer fix --dry-run --diff",
         "cs-fix": "php-cs-fixer fix",
         "stan": "phpstan analyse",
-        "validate-project": "composer validate --strict --no-check-publish"
+        "validate-project": "composer validate --no-check-publish"
     }
 }

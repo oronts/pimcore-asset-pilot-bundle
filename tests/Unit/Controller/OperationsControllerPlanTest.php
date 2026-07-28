@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter;
+use Oronts\AssetPilotBundle\Api\Serialization\OperationResponseAssembler;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\OperationsController;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Security\ActorContextProvider;
+use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\ApplyPlanService;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
@@ -22,18 +27,18 @@ use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
+use Oronts\AssetPilotBundle\Service\OrganizeRunDispatchCoordinator;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationService;
+use Oronts\AssetPilotBundle\Service\RunItemLease;
+use Oronts\AssetPilotBundle\Tests\Support\InMemoryApplyPlanClaimStore;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
-use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\InMemoryStore;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 #[CoversClass(OperationsController::class)]
@@ -347,7 +352,7 @@ final class OperationsControllerPlanTest extends TestCase
             TriggerType::Api,
             ActorContext::user(7),
             [42 => $fingerprint],
-            'reorganize',
+            OperationRunKind::Reorganize,
             [
                 'objectIds' => [42],
                 'operations' => [$this->operationIdentity($operation)],
@@ -409,7 +414,7 @@ final class OperationsControllerPlanTest extends TestCase
             TriggerType::Api,
             ActorContext::user(7),
             [42 => $fingerprint],
-            'replay',
+            OperationRunKind::Replay,
             [
                 'objectIds' => [42],
                 'operations' => [$this->operationIdentity($operation)],
@@ -451,6 +456,28 @@ final class OperationsControllerPlanTest extends TestCase
         self::assertSame('replay-run', $this->body($apply)['runId']);
     }
 
+    #[Test]
+    public function replayNormalizesTheSinceCutoffToUtc(): void
+    {
+        $captured = null;
+        $replay = $this->createMock(FailureReplayService::class);
+        $replay->method('selectObjects')->willReturnCallback(function (array $filters) use (&$captured): array {
+            $captured = $filters;
+
+            return [];
+        });
+        $controller = $this->controller(
+            [],
+            $this->createMock(AssetOrganizer::class),
+            $this->createMock(OrganizeDispatcher::class),
+            replay: $replay,
+        );
+
+        $controller->replay($this->request(['since' => '2026-07-15 10:00:00+02:00']));
+
+        self::assertSame('2026-07-15 08:00:00', $captured['since'] ?? null, 'the replay since cutoff must normalize to UTC to match UTC-stored created_at');
+    }
+
     /** @param array<int, AbstractObject> $objects */
     private function controller(
         array $objects,
@@ -464,17 +491,22 @@ final class OperationsControllerPlanTest extends TestCase
         $authorization->method('currentActor')->willReturn(ActorContext::user(7));
         $authorization->method('isAllowed')->willReturn(true);
         $runs ??= $this->createMock(OperationRunStoreInterface::class);
-        $plans = new ApplyPlanService('test-secret', new ArrayAdapter(), new LockFactory(new InMemoryStore()));
+        $claims = new InMemoryApplyPlanClaimStore();
+        $plans = new ApplyPlanService('test-secret', $claims);
         $fingerprints = new OrganizePlanFingerprint();
+        $provider = $this->createMock(ActorContextProvider::class);
+        $provider->method('current')->willReturn(ActorContext::system());
         $reviewed = $this->getMockBuilder(ReviewedObjectOperationService::class)
             ->setConstructorArgs([
                 $organizer,
                 $dispatcher,
                 $authorization,
+                new ActorContextStore($provider),
                 $runs,
                 $plans,
                 $fingerprints,
                 new NullLogger(),
+                $this->createMock(RunItemLease::class),
             ])
             ->onlyMethods(['loadObject'])
             ->getMock();
@@ -488,11 +520,12 @@ final class OperationsControllerPlanTest extends TestCase
                 $parameters['id'],
             ),
         );
+        $runCoordinator = new OrganizeRunDispatchCoordinator($dispatcher, $runs, new NullLogger());
 
         return new class (
             $organizer,
             $dispatcher,
-            $this->createMock(AuditLoggerInterface::class),
+            $this->createMock(AuditQueryInterface::class),
             $this->createMock(RuleEngineInterface::class),
             $this->createMock(AssetFieldExtractorInterface::class),
             $replay ?? $this->createMock(FailureReplayService::class),
@@ -502,15 +535,17 @@ final class OperationsControllerPlanTest extends TestCase
             $plans,
             $fingerprints,
             $reviewed,
-            $urls,
             new NullLogger(),
+            $this->createMock(RunItemLease::class),
+            new OperationResponseAssembler($urls),
+            $runCoordinator,
             $objects,
         ) extends OperationsController {
             /** @param array<int, AbstractObject> $objects */
             public function __construct(
                 AssetOrganizer $organizer,
                 OrganizeDispatcher $dispatcher,
-                AuditLoggerInterface $audit,
+                AuditQueryInterface $audit,
                 RuleEngineInterface $rules,
                 AssetFieldExtractorInterface $fields,
                 FailureReplayService $replay,
@@ -520,12 +555,14 @@ final class OperationsControllerPlanTest extends TestCase
                 ApplyPlanService $plans,
                 OrganizePlanFingerprint $fingerprints,
                 ReviewedObjectOperationService $reviewed,
-                UrlGeneratorInterface $urls,
                 NullLogger $logger,
+                RunItemLease $runItemLease,
+                OperationResponseAssembler $responses,
+                OrganizeRunDispatchCoordinator $runCoordinator,
                 private readonly array $objects,
             ) {
                 parent::__construct(
-                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $urls, $logger,
+                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator,
                 );
             }
 

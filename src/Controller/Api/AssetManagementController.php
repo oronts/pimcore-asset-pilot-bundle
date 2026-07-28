@@ -15,16 +15,15 @@ use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
-use Oronts\AssetPilotBundle\Security\ActorContextProvider;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\AssetMetadataMutationService;
-use Oronts\AssetPilotBundle\Service\AssetPropertyService;
+use Oronts\AssetPilotBundle\Service\AssetMetadataMutationServiceInterface;
+use Oronts\AssetPilotBundle\Service\AssetPropertyServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
-use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
-use Oronts\AssetPilotBundle\Service\ZipDownloadTokenStore;
+use Oronts\AssetPilotBundle\Service\ZipDownloadTokenStoreInterface;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
@@ -47,15 +46,14 @@ class AssetManagementController
 
     public function __construct(
         private readonly AssetSearchServiceInterface $searchService,
-        private readonly AssetPropertyService $propertyService,
+        private readonly AssetPropertyServiceInterface $propertyService,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly AssetZipService $zipService,
-        private readonly ElementAuthorization $authorization,
-        private readonly ZipDownloadTokenStore $zipDownloads,
-        private readonly ActorContextProvider $actors,
+        private readonly AssetZipServiceInterface $zipService,
+        private readonly ElementAuthorizationInterface $authorization,
+        private readonly ZipDownloadTokenStoreInterface $zipDownloads,
         private readonly ApplyPlanServiceInterface $applyPlans,
-        private readonly AssetMetadataMutationService $metadataMutations,
+        private readonly AssetMetadataMutationServiceInterface $metadataMutations,
     ) {}
 
     #[Route('/assets/download-zip/prepare', name: 'oronts_asset_pilot_assets_download_zip_prepare', methods: ['POST'])]
@@ -78,7 +76,7 @@ class AssetManagementController
         }
 
         try {
-            $token = $this->zipDownloads->issue($assetIds, $options, $this->actors->current());
+            $token = $this->zipDownloads->issue($assetIds, $options, $this->authorization->currentActor());
         } catch (\Throwable $e) {
             $reference = $this->errorReference();
             $this->logger->error('Asset Pilot: failed to prepare zip download', [
@@ -99,12 +97,12 @@ class AssetManagementController
     #[IsGranted(AssetPilotPermission::View->value)]
     public function downloadPreparedZip(string $token): Response
     {
-        $plan = $this->zipDownloads->resolve($token, $this->actors->current());
+        $plan = $this->zipDownloads->claim($token, $this->authorization->currentActor());
         if ($plan === null) {
             return new JsonResponse(['error' => 'Download token not found or expired.'], Response::HTTP_NOT_FOUND);
         }
 
-        return $this->streamZip($plan->assetIds, $plan->options, $this->actors->current());
+        return $this->streamZip($plan->assetIds, $plan->options, $this->authorization->currentActor());
     }
 
     #[Route('/assets/download-zip', name: 'oronts_asset_pilot_assets_download_zip', methods: ['POST'])]
@@ -126,7 +124,7 @@ class AssetManagementController
             return $options;
         }
 
-        return $this->streamZip($assetIds, $options, $this->actors->current());
+        return $this->streamZip($assetIds, $options, $this->authorization->currentActor());
     }
 
     /** @param list<int> $assetIds */
@@ -143,17 +141,17 @@ class AssetManagementController
             return new JsonResponse(['error' => 'Failed to build the archive.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        if ($result['added'] === 0 || $result['path'] === null) {
+        if (!$result->hasArchive()) {
             return new JsonResponse(['error' => 'No downloadable assets in the selection.'], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $response = new BinaryFileResponse($result['path']);
+        $response = new BinaryFileResponse($result->path);
         $response->deleteFileAfterSend(true);
         $response->headers->set('Content-Type', 'application/zip');
-        $response->headers->set('X-Asset-Pilot-Requested', (string) $result['requested']);
-        $response->headers->set('X-Asset-Pilot-Added', (string) $result['added']);
-        $response->headers->set('X-Asset-Pilot-Skipped', (string) $result['skipped']);
-        $response->headers->set('X-Asset-Pilot-Truncated', $result['truncated'] ? 'true' : 'false');
+        $response->headers->set('X-Asset-Pilot-Requested', (string) $result->requested);
+        $response->headers->set('X-Asset-Pilot-Added', (string) $result->added);
+        $response->headers->set('X-Asset-Pilot-Skipped', (string) $result->skipped);
+        $response->headers->set('X-Asset-Pilot-Truncated', $result->truncated ? 'true' : 'false');
         $response->setContentDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, 'assets.zip');
 
         return $response;
@@ -184,7 +182,7 @@ class AssetManagementController
         }
 
         try {
-            $observerWarnings = $this->propertyService->lockAsset($id, $asset->getRealFullPath());
+            $observerWarnings = $this->propertyService->lockAsset($id);
 
             return new JsonResponse(['message' => 'Asset locked', 'assetId' => $id, 'observerWarnings' => $observerWarnings]);
         } catch (\Throwable $e) {
@@ -256,7 +254,7 @@ class AssetManagementController
 
             if ($query !== '') {
                 $needle = '%' . Like::escape($query) . '%';
-                $listing->setCondition("(name LIKE ? OR CONCAT(idPath, id, '/') LIKE ?)", [$needle, $needle]);
+                $listing->setCondition('(name LIKE ?' . Like::CLAUSE . " OR CONCAT(idPath, id, '/') LIKE ?" . Like::CLAUSE . ')', [$needle, $needle]);
             }
 
             $listing

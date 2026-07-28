@@ -245,9 +245,28 @@ class CleanupUnusedCommandTest extends TestCase
         self::assertStringContainsString('stale or was already used', $tester->getDisplay());
     }
 
+    #[Test]
+    public function previewPlanBindsTheMutationSafetyConfiguration(): void
+    {
+        $finder = $this->createMock(UnusedAssetFinderInterface::class);
+        $finder->method('previewMutation')->with(7, 'delete')->willReturn(null);
+        $plans = $this->createMock(ApplyPlanServiceInterface::class);
+        $plans->expects(self::once())->method('issue')->with(self::callback(static function (\Oronts\AssetPilotBundle\Model\ApplyPlan $plan): bool {
+            self::assertSame(['version' => 1, 'lockProperty' => 'asset_pilot_lock', 'contentVerification' => true], $plan->config);
+
+            return true;
+        }))->willReturn('signed-plan');
+        $plans->method('claim')->willReturn(ApplyPlanStatus::Claimed);
+
+        $status = (new CommandTester($this->command($finder, plans: $plans)))->execute(['--by-ids' => '7']);
+
+        self::assertSame(Command::SUCCESS, $status);
+    }
+
     private function command(UnusedAssetFinderInterface $finder, ?LoopGuard $loopGuard = null, ?ApplyPlanServiceInterface $plans = null): CleanupUnusedCommand
     {
         $fingerprints = $this->createMock(AssetMutationFingerprintService::class);
+        $fingerprints->method('planConfig')->willReturn(['version' => 1, 'lockProperty' => 'asset_pilot_lock', 'contentVerification' => true]);
         $fingerprints->method('fingerprintMap')->willReturnCallback(static function (array $ids): array {
             $result = [];
             foreach ($ids as $id) {

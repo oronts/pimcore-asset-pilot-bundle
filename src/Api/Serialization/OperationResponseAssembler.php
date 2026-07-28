@@ -14,7 +14,7 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * Assembles the organize-family HTTP response payloads from domain results, keeping response shaping out
  * of the controller. Shared by the organize, bulk, queued, dry-run preview, and reviewed-selection paths.
  */
-final readonly class OperationResponseAssembler
+readonly class OperationResponseAssembler
 {
     public function __construct(private UrlGeneratorInterface $urlGenerator) {}
 

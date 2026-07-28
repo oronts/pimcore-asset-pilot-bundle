@@ -7,16 +7,17 @@ namespace Oronts\AssetPilotBundle\MessageHandler;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Security\ActorContextStore;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\RetryableInfrastructureFailure;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -29,9 +30,9 @@ use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 class OrganizeAssetsHandler
 {
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly OrganizeDispatcherInterface $dispatcher,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly ActorContextStore $actors,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
@@ -187,7 +188,7 @@ class OrganizeAssetsHandler
         } catch (StaleApplyPlanException) {
             $this->completeStalePlan($message);
         } catch (\Throwable $e) {
-            if (RetryableInfrastructureFailure::matches($e)) {
+            if ($e instanceof LostRunItemOwnershipException || RetryableInfrastructureFailure::matches($e)) {
                 throw $e;
             }
             $this->failOrganization($message, $e);
@@ -208,7 +209,7 @@ class OrganizeAssetsHandler
                 : $this->organizer->organizeWithHeartbeat(
                     $object,
                     $message->triggerType,
-                    fn () => $this->loopGuard->refreshOperationRunItem($message->runId, $this->itemKey($message->objectId)),
+                    fn () => $this->pulseRunItemLease($message->runId, $this->itemKey($message->objectId)),
                     expectedFingerprint: $message->expectedFingerprint,
                 ),
         );
@@ -223,13 +224,17 @@ class OrganizeAssetsHandler
         ]);
 
         if ($message->runId !== null) {
-            $this->runs->completeItem(
+            $itemKey = $this->itemKey($message->objectId);
+            $owned = $this->runs->completeItem(
                 $message->runId,
-                $this->itemKey($message->objectId),
+                $itemKey,
                 OperationRunItemStatus::Failed,
                 error: 'Async organization failed.',
+                token: $this->loopGuard->operationRunItemToken($message->runId, $itemKey),
             );
-            $this->runs->fail($message->runId, 'Async organization failed.');
+            if ($owned) {
+                $this->runs->fail($message->runId, 'Async organization failed.');
+            }
 
             return;
         }
@@ -291,7 +296,9 @@ class OrganizeAssetsHandler
             return false;
         }
 
-        return $this->runs->resumeItem($message->runId, $this->itemKey($message->objectId));
+        $itemKey = $this->itemKey($message->objectId);
+
+        return $this->runs->resumeItem($message->runId, $itemKey, $this->loopGuard->beginOperationRunItemLease($message->runId, $itemKey));
     }
 
     /** @param list<\Oronts\AssetPilotBundle\Model\OperationResult> $results */
@@ -321,8 +328,25 @@ class OrganizeAssetsHandler
             return;
         }
 
-        $this->runs->completeItem($message->runId, $this->itemKey($message->objectId), $status, $result, $error);
+        $itemKey = $this->itemKey($message->objectId);
+        if (!$this->runs->completeItem($message->runId, $itemKey, $status, $result, $error, $this->loopGuard->operationRunItemToken($message->runId, $itemKey))) {
+            throw LostRunItemOwnershipException::forItem($message->runId, $itemKey);
+        }
         $this->runs->finish($message->runId);
+    }
+
+    /**
+     * Renew both the Symfony item lock and the durable database lease in one heartbeat, aborting the run
+     * if either was lost (the item was reclaimed by a redelivery or reconciled as abandoned). Fires often
+     * enough — around each asset save — that a legitimately long item never lets its lease expire.
+     */
+    private function pulseRunItemLease(string $runId, string $itemKey): void
+    {
+        $this->loopGuard->refreshOperationRunItem($runId, $itemKey);
+        $token = $this->loopGuard->operationRunItemToken($runId, $itemKey);
+        if ($token !== null && !$this->runs->renewItemLease($runId, $itemKey, $token)) {
+            throw new \RuntimeException(sprintf('Lost the durable lease on operation run item "%s"; aborting to prevent a double execution.', $itemKey));
+        }
     }
 
     private function itemKey(int $objectId): string

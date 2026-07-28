@@ -2,10 +2,9 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-// The files whose content determines the built Studio remote. Editing any of these without rebuilding
-// leaves the shipped remote stale; the freshness hash is what makes verify-build catch that, instead of
-// only checking internal manifest/version coherence.
-const SOURCE_ROOTS = ['js/src', 'rsbuild.config.ts', 'package.json']
+// Every input whose content determines the built remote. A new build-time input MUST be added here and
+// to the PHP mirror in tools/release-manifest-assets.php.
+const SOURCE_ROOTS = ['js/src', 'rsbuild.config.ts', 'tsconfig.json', 'package.json', 'package-lock.json', 'scripts/manifest-assets.mjs', 'scripts/publish-build.mjs']
 
 /**
  * A deterministic SHA-256 over the Studio build inputs. Paths are normalized to forward slashes and
@@ -36,6 +35,11 @@ export function computeStudioSourceHash(studioDir) {
 }
 
 function collectFiles(target, out) {
+  // A missing build-input root contributes nothing rather than crashing the hasher, matching the PHP
+  // verifier (which only sees files present in the archive) so both compute the same hash.
+  if (!fs.existsSync(target)) {
+    return
+  }
   const stats = fs.statSync(target)
   if (stats.isFile()) {
     out.push(target)

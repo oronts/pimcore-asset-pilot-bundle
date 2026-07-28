@@ -6,16 +6,17 @@ namespace Oronts\AssetPilotBundle\MessageHandler;
 
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
 use Oronts\AssetPilotBundle\Security\ActorContextStore;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\RetryableInfrastructureFailure;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -27,8 +28,8 @@ use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 class BulkOrganizeHandler
 {
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly OrganizeDispatcherInterface $dispatcher,
         protected readonly ActorContextStore $actors,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
@@ -79,6 +80,9 @@ class BulkOrganizeHandler
             }
         } catch (\Throwable $e) {
             if ($e instanceof RecoverableMessageHandlingException) {
+                throw $e;
+            }
+            if ($e instanceof LostRunItemOwnershipException) {
                 throw $e;
             }
             if (RetryableInfrastructureFailure::matches($e)) {
@@ -139,9 +143,9 @@ class BulkOrganizeHandler
                         return $this->beginItem($message, $objectId, $activeItemKey, $lockConflict);
                     },
                     expectedFingerprints: $message->expectedFingerprints,
-                    heartbeat: $message->runId === null ? null : fn (int $objectId) => $this->loopGuard->refreshOperationRunItem($message->runId, $this->itemKey($objectId)),
-                    afterObject: $message->runId === null ? null : function (BulkObjectResult $result) use ($message, $actor, &$activeItemKey): void {
-                        $this->completeAndReleaseItem($message, $actor, $result, $activeItemKey);
+                    heartbeat: $message->runId === null ? null : fn (int $objectId) => $this->pulseRunItemLease($message->runId, $this->itemKey($objectId)),
+                    afterObject: $message->runId === null ? null : function (BulkObjectResult $result) use ($message, $actor, &$activeItemKey): bool {
+                        return $this->completeAndReleaseItem($message, $actor, $result, $activeItemKey);
                     },
                 );
             },
@@ -156,7 +160,18 @@ class BulkOrganizeHandler
 
             return false;
         }
-        if (!$this->runs->resumeItem((string) $message->runId, $itemKey)) {
+        $token = $this->loopGuard->beginOperationRunItemLease((string) $message->runId, $itemKey);
+        // Release on ANY exit from resumeItem (throw or false), not only the false branch: releasing is the
+        // only thing that clears the minted token from LoopGuard. If resumeItem threw after minting, an
+        // orphaned token would make failBatch's fenced completeItem match zero rows and hang the run.
+        try {
+            $claimed = $this->runs->resumeItem((string) $message->runId, $itemKey, $token);
+        } catch (\Throwable $e) {
+            $this->loopGuard->releaseOperationRunItem((string) $message->runId, $itemKey);
+
+            throw $e;
+        }
+        if (!$claimed) {
             $this->loopGuard->releaseOperationRunItem((string) $message->runId, $itemKey);
 
             return false;
@@ -165,13 +180,28 @@ class BulkOrganizeHandler
 
         return true;
     }
+
+    /**
+     * Renew both the Symfony item lock and the durable database lease in one heartbeat, aborting the run
+     * if either was lost (the item was reclaimed by a redelivery or reconciled as abandoned). Fires often
+     * enough — around each asset save — that a legitimately long item never lets its lease expire.
+     */
+    private function pulseRunItemLease(string $runId, string $itemKey): void
+    {
+        $this->loopGuard->refreshOperationRunItem($runId, $itemKey);
+        $token = $this->loopGuard->operationRunItemToken($runId, $itemKey);
+        if ($token !== null && !$this->runs->renewItemLease($runId, $itemKey, $token)) {
+            throw new \RuntimeException(sprintf('Lost the durable lease on operation run item "%s"; aborting to prevent a double execution.', $itemKey));
+        }
+    }
     /** @param-out null $activeItemKey */
 
-    private function completeAndReleaseItem(BulkOrganizeMessage $message, ActorContext $actor, BulkObjectResult $result, ?string &$activeItemKey): void
+    private function completeAndReleaseItem(BulkOrganizeMessage $message, ActorContext $actor, BulkObjectResult $result, ?string &$activeItemKey): bool
     {
         try {
             $this->requeueDirtyObject($message, $actor, $result->objectId);
-            $this->completeObjectResult((string) $message->runId, $result);
+
+            return $this->completeObjectResult((string) $message->runId, $result);
         } finally {
             if ($activeItemKey !== null) {
                 $this->loopGuard->releaseOperationRunItem((string) $message->runId, $activeItemKey);
@@ -229,21 +259,25 @@ class BulkOrganizeHandler
         }
 
         foreach ($message->objectIds as $objectId) {
+            $itemKey = $this->itemKey($objectId);
             $this->runs->completeItem(
                 $message->runId,
-                $this->itemKey($objectId),
+                $itemKey,
                 OperationRunItemStatus::Failed,
                 error: 'Bulk organization failed.',
+                token: $this->loopGuard->operationRunItemToken($message->runId, $itemKey),
             );
         }
         $this->runs->finish($message->runId);
     }
 
-    private function completeObjectResult(string $runId, BulkObjectResult $result): void
+    private function completeObjectResult(string $runId, BulkObjectResult $result): bool
     {
-        $this->runs->completeItem(
+        $itemKey = $this->itemKey($result->objectId);
+
+        return $this->runs->completeItem(
             $runId,
-            $this->itemKey($result->objectId),
+            $itemKey,
             match ($result->status) {
                 BulkObjectStatus::Succeeded => OperationRunItemStatus::Completed,
                 BulkObjectStatus::Skipped => OperationRunItemStatus::Skipped,
@@ -251,6 +285,7 @@ class BulkOrganizeHandler
             },
             ['operationCount' => $result->operationCount],
             $result->reason,
+            $this->loopGuard->operationRunItemToken($runId, $itemKey),
         );
     }
 

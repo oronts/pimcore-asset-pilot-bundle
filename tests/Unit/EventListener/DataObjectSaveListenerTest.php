@@ -58,7 +58,7 @@ class DataObjectSaveListenerTest extends TestCase
         $listener = $this->createListener(enabled: false);
         $object = $this->createMock(Concrete::class);
 
-        $this->dispatcher->expects(self::never())->method('dispatchObject');
+        $this->dispatcher->expects(self::never())->method('deferObject');
         $this->organizer->expects(self::never())->method('organize');
 
         $listener->onPostUpdate($this->createEvent($object));
@@ -70,7 +70,7 @@ class DataObjectSaveListenerTest extends TestCase
         $listener = $this->createListener();
         $object = $this->createMock(AbstractObject::class);
 
-        $this->dispatcher->expects(self::never())->method('dispatchObject');
+        $this->dispatcher->expects(self::never())->method('deferObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -83,7 +83,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object = $this->createMock(Concrete::class);
         $object->method('getClassName')->willReturn('Product');
 
-        $this->dispatcher->expects(self::never())->method('dispatchObject');
+        $this->dispatcher->expects(self::never())->method('deferObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -98,7 +98,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(42);
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
-        $this->dispatcher->expects(self::once())->method('dispatchObject');
+        $this->dispatcher->expects(self::once())->method('deferObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -113,7 +113,7 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(1);
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
-        $this->dispatcher->expects(self::once())->method('dispatchObject');
+        $this->dispatcher->expects(self::once())->method('deferObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -129,7 +129,7 @@ class DataObjectSaveListenerTest extends TestCase
 
         $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(true);
         $this->loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
-        $this->dispatcher->expects(self::never())->method('dispatchObject');
+        $this->dispatcher->expects(self::never())->method('deferObject');
         $this->organizer->expects(self::never())->method('organize');
 
         $listener->onPostUpdate($this->createEvent($object));
@@ -146,7 +146,7 @@ class DataObjectSaveListenerTest extends TestCase
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
         $this->dispatcher->expects(self::once())
-            ->method('dispatchObject')
+            ->method('deferObject')
             ->with(42, TriggerType::ObjectSave);
 
         $listener->onPostUpdate($this->createEvent($object));
@@ -163,7 +163,7 @@ class DataObjectSaveListenerTest extends TestCase
         $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(false);
         $this->loopGuard->method('wasObjectRecentlyDispatched')->with(42)->willReturn(true);
         $this->loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
-        $this->dispatcher->expects(self::never())->method('dispatchObject');
+        $this->dispatcher->expects(self::never())->method('deferObject');
 
         $listener->onPostUpdate($this->createEvent($object));
     }
@@ -213,7 +213,7 @@ class DataObjectSaveListenerTest extends TestCase
 
         $this->loopGuard->method('isProcessingObject')->willReturn(false);
         $this->dispatcher->expects(self::once())
-            ->method('dispatchObject')
+            ->method('deferObject')
             ->with(10, TriggerType::ObjectSave);
 
         $listener->onPostAdd($this->createEvent($object));

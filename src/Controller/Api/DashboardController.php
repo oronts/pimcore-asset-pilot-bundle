@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
+use Oronts\AssetPilotBundle\Controller\Api\Support\AuditRowDates;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -15,9 +18,10 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class DashboardController
 {
     public function __construct(
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly AuditQueryInterface $auditLogger,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly LoggerInterface $logger,
+        private readonly ApiDateFormatterInterface $dates,
     ) {}
 
     #[Route('/dashboard', name: 'oronts_asset_pilot_dashboard', methods: ['GET'])]
@@ -26,12 +30,17 @@ class DashboardController
     {
         try {
             $stats = $this->auditLogger->getStats();
-            $recent = $this->auditLogger->getRecent(10);
+            $recent = array_map(
+                fn (array $row): array => AuditRowDates::normalize($row, $this->dates),
+                $this->auditLogger->getRecent(10),
+            );
 
             $this->logger->debug('Asset Pilot dashboard requested.');
 
             return new JsonResponse([
-                'totalOrganized' => $stats['completed'] ?? 0,
+                'totalOrganized' => ($stats[OperationStatus::Completed->value] ?? 0)
+                    + ($stats[OperationStatus::CompletedWithObserverError->value] ?? 0),
+                'totalOrganizedWithWarnings' => $stats[OperationStatus::CompletedWithObserverError->value] ?? 0,
                 'totalPending' => $stats['pending'] ?? 0,
                 'totalFailed' => $stats['failed'] ?? 0,
                 'totalSkipped' => $stats['skipped'] ?? 0,

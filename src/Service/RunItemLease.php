@@ -21,12 +21,20 @@ class RunItemLease
     public function start(string $runId, string $itemKey): bool
     {
         $token = $this->begin($runId, $itemKey);
-        if ($this->runs->startItem($runId, $itemKey, $token)) {
-            return true;
-        }
-        $this->release($runId, $itemKey);
+        try {
+            if (!$this->runs->startItem($runId, $itemKey, $token)) {
+                $this->release($runId, $itemKey);
 
-        return false;
+                return false;
+            }
+        } catch (\Throwable $e) {
+            // The durable claim never landed; release the minted token so it cannot be mistaken for ownership.
+            $this->release($runId, $itemKey);
+
+            throw $e;
+        }
+
+        return true;
     }
 
     /**

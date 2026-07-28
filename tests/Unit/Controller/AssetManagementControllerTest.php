@@ -10,15 +10,15 @@ use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
-use Oronts\AssetPilotBundle\Security\ActorContextProvider;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetMetadataMutationService;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
-use Oronts\AssetPilotBundle\Service\AssetZipService;
+use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
 use Oronts\AssetPilotBundle\Service\ZipDownloadTokenStore;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +28,8 @@ use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\InMemoryStore;
 
 #[CoversClass(AssetManagementController::class)]
 final class AssetManagementControllerTest extends TestCase
@@ -63,7 +65,7 @@ final class AssetManagementControllerTest extends TestCase
             'limit' => 2,
             'pages' => 2,
         ], $data);
-        self::assertSame(["(name LIKE ? OR CONCAT(idPath, id, '/') LIKE ?)", ['%foo\\%\\_bar%', '%foo\\%\\_bar%']], $listing->recordedCondition);
+        self::assertSame(["(name LIKE ? ESCAPE '!' OR CONCAT(idPath, id, '/') LIKE ? ESCAPE '!')", ['%foo!%!_bar%', '%foo!%!_bar%']], $listing->recordedCondition);
         self::assertSame(['name', 'id'], $listing->recordedOrderKey);
         self::assertSame(['asc', 'asc'], $listing->recordedOrder);
         self::assertSame(2, $listing->recordedOffset);
@@ -113,10 +115,9 @@ final class AssetManagementControllerTest extends TestCase
             $properties,
             new NullLogger(),
             new EventDispatcher(),
-            $this->createMock(AssetZipService::class),
+            $this->createMock(AssetZipServiceInterface::class),
             $this->createMock(ElementAuthorization::class),
-            new ZipDownloadTokenStore(new ArrayAdapter()),
-            $this->createMock(ActorContextProvider::class),
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
             $this->createMock(ApplyPlanServiceInterface::class),
             $this->createMock(AssetMetadataMutationService::class),
         );
@@ -178,10 +179,9 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
             $dispatcher,
-            $this->createMock(AssetZipService::class),
+            $this->createMock(AssetZipServiceInterface::class),
             $authorization,
-            new ZipDownloadTokenStore(new ArrayAdapter()),
-            $this->createMock(ActorContextProvider::class),
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
             $plans,
             $metadata,
         ) extends AssetManagementController {
@@ -331,22 +331,22 @@ final class AssetManagementControllerTest extends TestCase
     public function zipDownloadPassesTheCurrentStudioActorToTheService(): void
     {
         $actor = ActorContext::user(7);
-        $actors = $this->createMock(ActorContextProvider::class);
-        $actors->method('current')->willReturn($actor);
-        $zip = $this->createMock(AssetZipService::class);
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn($actor);
+        $zip = $this->createMock(AssetZipServiceInterface::class);
         $zip->expects(self::once())
             ->method('buildFromAssetIds')
             ->with([3], self::isInstanceOf(ZipBuildOptions::class), $actor)
-            ->willReturn(['path' => null, 'requested' => 1, 'added' => 0, 'skipped' => 1, 'truncated' => false]);
+            ->willReturn(new ZipBuildResult(null, 1, 0, 1));
         $controller = new AssetManagementController(
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
             new EventDispatcher(),
             $zip,
-            $this->createMock(ElementAuthorization::class),
-            new ZipDownloadTokenStore(new ArrayAdapter()),
-            $actors,
+            $authorization,
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+
             $this->createMock(ApplyPlanServiceInterface::class),
             $this->createMock(AssetMetadataMutationService::class),
         );
@@ -358,20 +358,56 @@ final class AssetManagementControllerTest extends TestCase
     }
 
     #[Test]
-    public function preparesAUserBoundNativeZipDownloadToken(): void
+    public function zipDownloadPublishesTheCompleteBuildResult(): void
     {
-        $tokens = new ZipDownloadTokenStore(new ArrayAdapter());
-        $actors = $this->createMock(ActorContextProvider::class);
-        $actors->method('current')->willReturn(ActorContext::user(7));
+        $archive = (string) tempnam(sys_get_temp_dir(), 'apz_response_');
+        file_put_contents($archive, 'archive');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn(ActorContext::user(7));
+        $zip = $this->createMock(AssetZipServiceInterface::class);
+        $zip->method('buildFromAssetIds')->willReturn(new ZipBuildResult($archive, 4, 2, 1, true));
         $controller = new AssetManagementController(
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
             new EventDispatcher(),
-            $this->createMock(AssetZipService::class),
-            $this->createMock(ElementAuthorization::class),
+            $zip,
+            $authorization,
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+
+            $this->createMock(ApplyPlanServiceInterface::class),
+            $this->createMock(AssetMetadataMutationService::class),
+        );
+        $request = Request::create('/', 'POST', [], [], [], [], json_encode(['assetIds' => [3, 4, 5, 6]], JSON_THROW_ON_ERROR));
+
+        try {
+            $response = $controller->downloadZip($request);
+
+            self::assertInstanceOf(\Symfony\Component\HttpFoundation\BinaryFileResponse::class, $response);
+            self::assertSame('4', $response->headers->get('X-Asset-Pilot-Requested'));
+            self::assertSame('2', $response->headers->get('X-Asset-Pilot-Added'));
+            self::assertSame('1', $response->headers->get('X-Asset-Pilot-Skipped'));
+            self::assertSame('true', $response->headers->get('X-Asset-Pilot-Truncated'));
+        } finally {
+            @unlink($archive);
+        }
+    }
+
+    #[Test]
+    public function preparesAUserBoundNativeZipDownloadToken(): void
+    {
+        $tokens = new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore()));
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn(ActorContext::user(7));
+        $controller = new AssetManagementController(
+            $this->createMock(AssetSearchServiceInterface::class),
+            $this->createMock(AssetPropertyService::class),
+            new NullLogger(),
+            new EventDispatcher(),
+            $this->createMock(AssetZipServiceInterface::class),
+            $authorization,
             $tokens,
-            $actors,
+
             $this->createMock(ApplyPlanServiceInterface::class),
             $this->createMock(AssetMetadataMutationService::class),
         );
@@ -383,14 +419,14 @@ final class AssetManagementControllerTest extends TestCase
 
         $response = $controller->prepareZipDownload($request);
         $data = json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        $plan = $tokens->resolve($data['token'], ActorContext::user(7));
+        $plan = $tokens->claim($data['token'], ActorContext::user(7));
 
         self::assertSame(Response::HTTP_CREATED, $response->getStatusCode());
         self::assertNotNull($plan);
         self::assertSame([3, 7], $plan->assetIds);
         self::assertSame('folder', $plan->options->strategy);
         self::assertSame('web', $plan->options->thumbnail);
-        self::assertNull($tokens->resolve($data['token'], ActorContext::user(8)));
+        self::assertNull($tokens->claim($data['token'], ActorContext::user(8)));
     }
 
     #[Test]
@@ -401,10 +437,9 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
             new EventDispatcher(),
-            $this->createMock(AssetZipService::class),
+            $this->createMock(AssetZipServiceInterface::class),
             $this->createMock(ElementAuthorization::class),
-            new ZipDownloadTokenStore(new ArrayAdapter()),
-            $this->createMock(ActorContextProvider::class),
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
             $this->createMock(ApplyPlanServiceInterface::class),
             $this->createMock(AssetMetadataMutationService::class),
         );
@@ -428,10 +463,9 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
             new EventDispatcher(),
-            $this->createMock(AssetZipService::class),
+            $this->createMock(AssetZipServiceInterface::class),
             $authorization,
-            new ZipDownloadTokenStore(new ArrayAdapter()),
-            $this->createMock(ActorContextProvider::class),
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
             $plans,
             $metadata,
         ) extends AssetManagementController {
@@ -450,10 +484,9 @@ final class AssetManagementControllerTest extends TestCase
                 $this->createMock(AssetPropertyService::class),
                 new NullLogger(),
                 new EventDispatcher(),
-                $this->createMock(AssetZipService::class),
+                $this->createMock(AssetZipServiceInterface::class),
                 $this->createMock(ElementAuthorization::class),
-                new ZipDownloadTokenStore(new ArrayAdapter()),
-                $this->createMock(ActorContextProvider::class),
+                new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
                 $this->createMock(ApplyPlanServiceInterface::class),
                 $this->createMock(AssetMetadataMutationService::class),
             ])

@@ -43,17 +43,51 @@ final class OperationObserverRegistryTest extends TestCase
 
         new OperationObserverRegistry([$this->observer('same'), $this->observer('same')]);
     }
+    #[Test]
+    public function rejectsAnObserverIdThatCannotFitTheDeliveryTable(): void
+    {
+        $this->expectException(\LogicException::class);
+
+        new OperationObserverRegistry([$this->observer(str_repeat('o', 192))]);
+    }
 
     #[Test]
-    public function rejectsDuplicateDeliveryKeysAcrossObservers(): void
+    public function rejectsAPreparedObserverIdThatCannotFitTheDeliveryTable(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new PreparedDelivery(str_repeat('o', 192), 'local', OperationDeliveryOutcome::Success);
+    }
+
+    #[Test]
+    public function allowsTheSameLocalDeliveryKeyAcrossObservers(): void
     {
         $registry = new OperationObserverRegistry([
             $this->observer('first', [new PreparedDelivery('first', 'shared', OperationDeliveryOutcome::Success)]),
             $this->observer('second', [new PreparedDelivery('second', 'shared', OperationDeliveryOutcome::Success)]),
         ]);
 
+        $prepared = $registry->prepare($this->intent());
+
+        self::assertCount(2, $prepared);
+        self::assertSame(
+            ['first', 'second'],
+            array_map(static fn (PreparedDelivery $delivery): string => $delivery->observerId, $prepared),
+        );
+    }
+
+    #[Test]
+    public function rejectsDuplicateDeliveryKeysWithinOneObserver(): void
+    {
+        $registry = new OperationObserverRegistry([
+            $this->observer('first', [
+                new PreparedDelivery('first', 'shared', OperationDeliveryOutcome::Success),
+                new PreparedDelivery('first', 'shared', OperationDeliveryOutcome::Success),
+            ]),
+        ]);
+
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Duplicate durable delivery key "shared".');
+        $this->expectExceptionMessage('Observer "first" prepared duplicate durable delivery key "shared".');
         $registry->prepare($this->intent());
     }
 

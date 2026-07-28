@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Command;
 use Oronts\AssetPilotBundle\Command\ReplayFailuresCommand;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Enum\ActorType;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -31,7 +32,7 @@ final class ReplayFailuresCommandTest extends TestCase
         $selector->expects(self::once())->method('selectObjects')->with(['object_ids' => [42]], 100)->willReturn([42]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'replay',
+            OperationRunKind::Replay,
             [42],
             ['filters' => ['object_ids' => [42]], 'limit' => 100],
             TriggerType::Manual,
@@ -71,7 +72,7 @@ final class ReplayFailuresCommandTest extends TestCase
         $selector->expects(self::once())->method('selectObjects')->with([], 100)->willReturn([42, 43]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'replay',
+            OperationRunKind::Replay,
             [42, 43],
             ['filters' => [], 'limit' => 100],
             TriggerType::Manual,
@@ -117,7 +118,7 @@ final class ReplayFailuresCommandTest extends TestCase
         $selector->expects(self::once())->method('selectObjects')->with($filters, 25)->willReturn([42]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'replay',
+            OperationRunKind::Replay,
             [42],
             ['filters' => $filters, 'limit' => 25],
             TriggerType::Manual,
@@ -159,17 +160,20 @@ final class ReplayFailuresCommandTest extends TestCase
     #[Test]
     public function invalidDatesFailBeforeTheServiceIsCalled(): void
     {
-        $selector = $this->createMock(FailureReplayService::class);
-        $selector->expects(self::never())->method('selectObjects');
-        $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
-        $reviewed->expects(self::never())->method('execute');
+        // An empty --since must be rejected, not silently resolved to "now" (the old strtotime contract).
+        foreach (['not a date', ''] as $since) {
+            $selector = $this->createMock(FailureReplayService::class);
+            $selector->expects(self::never())->method('selectObjects');
+            $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
+            $reviewed->expects(self::never())->method('execute');
 
-        $status = (new CommandTester(new ReplayFailuresCommand($selector, $reviewed, new ReviewedSelectionConsolePresenter())))->execute([
-            '--object-id' => '42',
-            '--since' => 'not a date',
-        ]);
+            $status = (new CommandTester(new ReplayFailuresCommand($selector, $reviewed, new ReviewedSelectionConsolePresenter())))->execute([
+                '--object-id' => '42',
+                '--since' => $since,
+            ]);
 
-        self::assertSame(Command::INVALID, $status);
+            self::assertSame(Command::INVALID, $status, sprintf('--since "%s" must be rejected before selection', $since));
+        }
     }
 
     #[Test]

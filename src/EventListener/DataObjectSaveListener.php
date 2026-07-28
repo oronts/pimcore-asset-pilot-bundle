@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\EventListener;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Pimcore\Event\Model\DataObjectEvent;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
@@ -15,8 +15,8 @@ use Psr\Log\LoggerInterface;
 class DataObjectSaveListener
 {
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly OrganizeDispatcherInterface $dispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly bool $enabled = true,
@@ -106,9 +106,22 @@ class DataObjectSaveListener
             return;
         }
 
-        $this->dispatcher->dispatchObject($objectId, $triggerType);
+        try {
+            // Record the organize intent as a pending-dispatch run in the ambient transaction; the relay
+            // publishes it after commit. A failure here must not fail the already-committed save.
+            $this->dispatcher->deferObject($objectId, $triggerType);
+        } catch (\Throwable $e) {
+            $this->logger->error('DataObjectSaveListener: failed to record async organize for {class}:{id}: {error}', [
+                'class' => $className,
+                'id' => $objectId,
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+
+            return;
+        }
         $this->loopGuard->markObjectDispatched($objectId);
-        $this->logger->debug('DataObjectSaveListener: dispatched async message for {class}:{id}', [
+        $this->logger->debug('DataObjectSaveListener: recorded pending async organize intent for {class}:{id}', [
             'class' => $className,
             'id' => $objectId,
         ]);

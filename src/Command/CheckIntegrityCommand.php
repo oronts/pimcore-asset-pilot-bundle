@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
-use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
+use Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -22,7 +22,7 @@ class CheckIntegrityCommand extends Command
     use ValidatesCliBulkIds;
 
     public function __construct(
-        private readonly AssetIntegrityService $integrity,
+        private readonly AssetIntegrityServiceInterface $integrity,
     ) {
         parent::__construct();
     }

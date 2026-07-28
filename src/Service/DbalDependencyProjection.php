@@ -25,7 +25,7 @@ class DbalDependencyProjection implements DependencyProjectionInterface
     public function __construct(
         private readonly Connection $connection,
         private readonly DependencyProjectionFreshnessInterface $freshness,
-        private readonly AssetDependencyTargetExtractor $targetExtractor,
+        private readonly AssetDependencyTargetExtractorInterface $targetExtractor,
         private readonly ?ProjectionMarkerConnectionInterface $markerConnectionProvider = null,
     ) {}
 

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
+use Oronts\AssetPilotBundle\Audit\AuditExportInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\AuditController;
-use Oronts\AssetPilotBundle\Service\OperationReverter;
+use Oronts\AssetPilotBundle\Service\OperationReverterInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -18,7 +20,7 @@ class AuditControllerCsvTest extends TestCase
 {
     private function controller(): object
     {
-        return new class ($this->createMock(AuditLogger::class), new NullLogger(), $this->createMock(OperationReverter::class)) extends AuditController {
+        return new class ($this->createMock(AuditQueryInterface::class), $this->createMock(AuditExportInterface::class), new NullLogger(), $this->createMock(OperationReverterInterface::class), $this->createMock(ApiDateFormatterInterface::class)) extends AuditController {
             public function sanitize(mixed $v): string
             {
                 return $this->sanitizeCsvCell($v);
@@ -35,7 +37,17 @@ class AuditControllerCsvTest extends TestCase
 
     public static function formulaCells(): array
     {
-        return [['=1+1'], ['+1'], ['-1'], ['@SUM(A1)'], ["\tx"], ["\rx"], ["\nx"]];
+        return [
+            ['=1+1'],
+            ['+1'],
+            ['-1'],
+            ['@SUM(A1)'],
+            ['  =1+1'],
+            [chr(9) . '  @SUM(A1)'],
+            [chr(9) . 'x'],
+            [chr(13) . 'x'],
+            [chr(10) . 'x'],
+        ];
     }
 
     #[Test]
@@ -43,6 +55,7 @@ class AuditControllerCsvTest extends TestCase
     {
         $c = $this->controller();
         self::assertSame('/Products/a.jpg', $c->sanitize('/Products/a.jpg'));
+        self::assertSame('  ordinary', $c->sanitize('  ordinary'));
         self::assertSame('42', $c->sanitize(42));
         self::assertSame('', $c->sanitize(''));
     }

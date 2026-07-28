@@ -171,7 +171,7 @@ class DbalAssetDeletionFence implements AssetDeletionFenceInterface
             ->format('Y-m-d H:i:s');
     }
 
-    protected function assertNoAmbientTransaction(): void
+    private function assertNoAmbientTransaction(): void
     {
         if (!$this->connection->isAutoCommit() || $this->connection->isTransactionActive()) {
             throw new \LogicException(

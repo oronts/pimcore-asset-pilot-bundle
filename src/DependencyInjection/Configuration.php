@@ -22,7 +22,7 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->booleanNode('enabled')
                     ->defaultTrue()
-                    ->info('Enable or disable the Asset Pilot engine globally.')
+                    ->info('Enable automatic organization from Pimcore object-save and asset-upload events. Explicit API, CLI, queue, and maintenance operations remain available.')
                 ->end()
                 ->arrayNode('allowed_classes')
                     ->scalarPrototype()->end()
@@ -39,17 +39,37 @@ class Configuration implements ConfigurationInterface
         $this->addRulesSection($rootNode);
         $this->addNamingSection($rootNode);
         $this->addAsyncSection($rootNode);
+        $this->addIdempotencySection($rootNode);
+        $this->addOperationJournalSection($rootNode);
+        $this->addOperationRunsSection($rootNode);
         $this->addAuditSection($rootNode);
         $this->addProtectionSection($rootNode);
         $this->addConfidenceSection($rootNode);
         $this->addQuarantineSection($rootNode);
         $this->addIntegritySection($rootNode);
         $this->addContentScanSection($rootNode);
+        $this->addDependencyProjectionSection($rootNode);
+        $this->addStorageSection($rootNode);
         $this->addNotificationsSection($rootNode);
         $this->addDuplicatesSection($rootNode);
         $this->addCacheSection($rootNode);
 
         return $treeBuilder;
+    }
+
+    protected function addStorageSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('storage_snapshots')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->booleanNode('enabled')->defaultTrue()->end()
+                        ->integerNode('minimum_interval_seconds')->defaultValue(3600)->min(0)->end()
+                        ->integerNode('retention_days')->defaultValue(365)->min(0)->end()
+                    ->end()
+                ->end()
+            ->end();
     }
 
     protected function addCacheSection(ArrayNodeDefinition $rootNode): void
@@ -83,6 +103,36 @@ class Configuration implements ConfigurationInterface
                             ->min(1)
                             ->info('Maximum number of assets packed into one download archive.')
                         ->end()
+                        ->integerNode('max_uncompressed_bytes')
+                            ->defaultValue(536870912)
+                            ->min(1)
+                            ->info('Maximum total source bytes packed into one archive.')
+                        ->end()
+                        ->integerNode('download_token_ttl')
+                            ->defaultValue(300)
+                            ->min(1)
+                            ->info('Lifetime in seconds for a user-bound native browser download token.')
+                        ->end()
+                    ->end()
+                ->end()
+                ->arrayNode('listing')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('scan_budget')
+                            ->defaultValue(5000)
+                            ->min(1)
+                            ->info('Maximum raw candidate rows an authorized listing scans per page while filling it past native-permission denials. A page that cannot be resolved within this budget is reported as truncated.')
+                        ->end()
+                        ->integerNode('batch_size')
+                            ->defaultValue(100)
+                            ->min(1)
+                            ->info('Raw rows fetched per window while an authorized listing scans and fills a page.')
+                        ->end()
+                        ->integerNode('export_max_rows')
+                            ->defaultValue(200000)
+                            ->min(1)
+                            ->info('Maximum rows an authorized CSV export streams before it stops and appends a truncation marker row.')
+                        ->end()
                     ->end()
                 ->end()
             ->end();
@@ -99,6 +149,16 @@ class Configuration implements ConfigurationInterface
                             ->defaultValue('quarantine')
                             ->cannotBeEmpty()
                             ->info('Default disposition for a duplicate merge: a registered strategy name (built-in: quarantine, delete, isolate). Custom strategies tagged oronts_asset_pilot.duplicate_merge_strategy are selectable too.')
+                        ->end()
+                        ->integerNode('group_scan_budget')
+                            ->defaultValue(5000)
+                            ->min(1)
+                            ->info('Maximum duplicate groups the listing scans per page while filling it past natively-hidden groups. A page that cannot be resolved within this budget is reported as truncated.')
+                        ->end()
+                        ->integerNode('export_group_scan_budget')
+                            ->defaultValue(500000)
+                            ->min(1)
+                            ->info('Maximum duplicate groups the CSV export scans before it stops and appends a truncation marker row.')
                         ->end()
                     ->end()
                 ->end()
@@ -245,6 +305,96 @@ class Configuration implements ConfigurationInterface
                             ->min(1)
                             ->info('Number of asset operations to batch together in a single message.')
                         ->end()
+                        ->integerNode('worker_heartbeat_max_age')
+                            ->defaultValue(120)
+                            ->min(5)
+                            ->info('Maximum worker heartbeat age in seconds before health becomes critical.')
+                        ->end()
+                        ->scalarNode('transport')
+                            ->defaultValue('asset_pilot')
+                            ->cannotBeEmpty()
+                            ->info('Messenger transport that receives Asset Pilot organization messages.')
+                        ->end()
+                        ->scalarNode('failure_transport')
+                            ->defaultValue('asset_pilot_failed')
+                            ->cannotBeEmpty()
+                            ->info('Messenger failure transport inspected by the health check.')
+                        ->end()
+                        ->integerNode('max_queue_depth')
+                            ->defaultValue(1000)
+                            ->min(1)
+                            ->info('Queue depth above which the health check reports a warning.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addIdempotencySection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('idempotency')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->floatNode('lock_ttl')
+                            ->defaultValue(60.0)
+                            ->info('Renewable lock lifetime in seconds for asset mutation and target allocation.')
+                            ->validate()
+                                ->ifTrue(static fn (float $ttl): bool => $ttl <= 0.0)
+                                ->thenInvalid('idempotency.lock_ttl must be greater than zero.')
+                            ->end()
+                        ->end()
+                        ->integerNode('max_object_replays')
+                            ->defaultValue(3)
+                            ->min(1)
+                            ->info('Maximum latest-state passes before a continuously changing object fails and must be retried.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addOperationJournalSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('operation_journal')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('recovery_after_seconds')
+                            ->defaultValue(900)
+                            ->min(1)
+                        ->end()
+                        ->integerNode('delivery_batch_size')
+                            ->defaultValue(100)
+                            ->min(1)
+                            ->max(1000)
+                        ->end()
+                        ->integerNode('dispatch_deduplication_seconds')
+                            ->defaultValue(3600)
+                            ->min(1)
+                        ->end()
+                        ->integerNode('max_attempts')
+                            ->defaultValue(5)
+                            ->min(1)
+                        ->end()
+                        ->integerNode('base_retry_seconds')
+                            ->defaultValue(30)
+                            ->min(1)
+                        ->end()
+                        ->integerNode('max_retry_seconds')
+                            ->defaultValue(3600)
+                            ->min(1)
+                        ->end()
+                        ->integerNode('lease_seconds')
+                            ->defaultValue(300)
+                            ->min(1)
+                        ->end()
+                    ->end()
+                    ->validate()
+                        ->ifTrue(static fn (array $config): bool => $config['max_retry_seconds'] < $config['base_retry_seconds'])
+                        ->thenInvalid('operation_journal.max_retry_seconds must be greater than or equal to base_retry_seconds.')
                     ->end()
                 ->end()
             ->end();
@@ -258,14 +408,34 @@ class Configuration implements ConfigurationInterface
                     ->addDefaultsIfNotSet()
                     ->info('Audit log settings for tracking all asset move operations.')
                     ->children()
-                        ->booleanNode('enabled')
-                            ->defaultTrue()
-                            ->info('Enable audit logging of asset organization operations.')
-                        ->end()
                         ->integerNode('retention_days')
                             ->defaultValue(90)
                             ->min(1)
                             ->info('Number of days to retain audit log entries before cleanup.')
+                        ->end()
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addOperationRunsSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('operation_runs')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('retention_days')->defaultValue(90)->min(1)->end()
+                        ->integerNode('retention_batch_size')->defaultValue(500)->min(1)->max(1_000)->end()
+                        ->integerNode('lease_seconds')
+                            ->defaultValue(300)
+                            ->min(1)
+                            ->info('Durable liveness lease for an in-flight operation-run item. A worker renews it on each heartbeat; maintenance fails an item whose lease expired without one. Keep it above the Symfony lock TTL and the longest single asset save.')
+                        ->end()
+                        ->integerNode('stale_queued_warning_seconds')
+                            ->defaultValue(86400)
+                            ->min(60)
+                            ->info('A run left awaiting dispatch (an unscheduled pimcore:maintenance relay) or queued (a lost broker message) longer than this is surfaced as a health warning. It is never auto-failed, since that would kill a legitimate backlog; an operator checks the scheduler/consumer and cancels/retries it.')
                         ->end()
                     ->end()
                 ->end()
@@ -364,16 +534,55 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->arrayNode('content_scan')
                     ->addDefaultsIfNotSet()
-                    ->info('Opt-in guard: before deleting/moving an "unused" asset, also scan rich-text/text fields of these classes for a hard-coded reference to its path (which the dependency table misses).')
+                    ->info('Opt-in guard: before deleting or moving an unused asset, scan Pimcore content tables for hard-coded paths.')
                     ->children()
                         ->booleanNode('enabled')
                             ->defaultFalse()
                             ->info('Enable the content-reference delete/move guard.')
                         ->end()
-                        ->arrayNode('classes')
-                            ->scalarPrototype()->end()
-                            ->defaultValue([])
-                            ->info('DataObject class names whose wysiwyg/textarea/input fields are scanned. Empty = the guard is inert.')
+                    ->end()
+                ->end()
+            ->end();
+    }
+
+    protected function addDependencyProjectionSection(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('dependency_projection')
+                    ->addDefaultsIfNotSet()
+                    ->info('Indexed asset-reference projection used by destructive safety checks.')
+                    ->children()
+                        ->booleanNode('bootstrap_live_scan')
+                            ->defaultTrue()
+                            ->info('Allow a bounded live scan only before the first projection rebuild has started.')
+                        ->end()
+                        ->integerNode('bootstrap_max_sources')
+                            ->defaultValue(50000)
+                            ->min(1)
+                            ->info('Maximum Pimcore elements inspected by the one-time live bootstrap fallback.')
+                        ->end()
+                        ->integerNode('rebuild_batch_size')
+                            ->defaultValue(1000)
+                            ->min(1)
+                            ->max(10000)
+                            ->info('Default maximum sources processed by one dependency projection rebuild command invocation.')
+                        ->end()
+                        ->integerNode('deletion_fence_lease_seconds')
+                            ->defaultValue(900)
+                            ->min(300)
+                            ->info('Seconds a delete operation owns an asset deletion fence before the row is eligible for reaping. Must exceed the worst-case single-asset delete duration: a lease that expires mid-delete lets the reaper reclaim the fence while the delete is still running.')
+                        ->end()
+                        ->integerNode('deletion_fence_reap_batch_size')
+                            ->defaultValue(1000)
+                            ->min(1)
+                            ->max(10000)
+                            ->info('Maximum stale deletion-fence rows reclaimed by one maintenance reaper run.')
+                        ->end()
+                        ->integerNode('reconcile_stale_seconds')
+                            ->defaultValue(300)
+                            ->min(60)
+                            ->info('Age at which a still-dirty dependency source (e.g. a deferred commit-fenced publication whose refresh message was lost) is re-dispatched for reconciliation, and a stale orphan pending row is cleared, by maintenance.')
                         ->end()
                     ->end()
                 ->end()

@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\EventListener\OperationRunMessageFailureListener;
@@ -94,7 +95,7 @@ final class OperationRunMessageFailureListenerTest extends TestCase
 
         $store = new OperationRunStore($connection);
         $runId = $store->create(
-            'organize',
+            OperationRunKind::Organize,
             ActorContext::system(),
             [
                 ['key' => 'object:1', 'type' => 'data_object'],

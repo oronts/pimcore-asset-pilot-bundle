@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
@@ -36,6 +37,7 @@ final class SynchronousRunExecutor
         if (!$this->runItemLease->start($runId, $itemKey)) {
             return SingleRunOutcome::claimConflict();
         }
+        $itemCompleted = false;
         try {
             $results = $this->organizer->organizeWithHeartbeat(
                 $object,
@@ -46,19 +48,28 @@ final class SynchronousRunExecutor
             if (!$this->runItemLease->complete($runId, $itemKey, $this->operationItemStatus($results), ['operationCount' => count($results)])) {
                 return SingleRunOutcome::leaseLost();
             }
-            $this->runs->finish($runId);
+            $itemCompleted = true;
+            if (!$this->reportsSelfFinalized($this->runs->finish($runId))) {
+                return SingleRunOutcome::leaseLost();
+            }
 
             return SingleRunOutcome::completed($results);
         } catch (StaleApplyPlanException) {
-            if ($this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Skipped, error: 'Object changed after preview; the immutable plan was not applied.')) {
-                $this->runs->finish($runId);
+            if (!$this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Skipped, error: 'Object changed after preview; the immutable plan was not applied.')) {
+                return SingleRunOutcome::leaseLost();
+            }
+            $itemCompleted = true;
+            if (!$this->reportsSelfFinalized($this->runs->finish($runId))) {
+                return SingleRunOutcome::leaseLost();
             }
 
             return SingleRunOutcome::stale();
         } catch (\Throwable $e) {
-            if ($this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Failed, error: 'Organization failed.')) {
-                $this->runs->fail($runId, 'Organization failed.');
+            // Already terminalized means finalization threw, not a lost claim: do not re-complete or report lease loss.
+            if (!$itemCompleted && !$this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Failed, error: 'Organization failed.')) {
+                return SingleRunOutcome::leaseLost();
             }
+            $this->runs->fail($runId, 'Organization failed.');
 
             return SingleRunOutcome::failed($e);
         } finally {
@@ -74,16 +85,23 @@ final class SynchronousRunExecutor
     {
         try {
             $report = $this->runBulkOrganize($runId, $objectIds, $trigger, $fingerprints);
-            $this->runs->finish($runId);
+            $status = $this->runs->finish($runId);
+            if (!$this->reportsSelfFinalized($status)) {
+                return BulkRunOutcome::ownershipLost(new LostRunItemOwnershipException(sprintf(
+                    'The bulk run did not finalize under this attempt (status %s); another attempt or a reconciler owns it.',
+                    $status->value,
+                )));
+            }
 
             return BulkRunOutcome::completed($report);
         } catch (LostRunItemOwnershipException $e) {
             return BulkRunOutcome::ownershipLost($e);
         } catch (\Throwable $e) {
-            foreach ($objectIds as $objectId) {
-                $this->runItemLease->complete($runId, $this->runItemKey($objectId), OperationRunItemStatus::Failed, error: 'Bulk organization failed.');
+            if (!$this->failOwnedItemsAndRun($runId, $objectIds, 'Bulk organization failed.')) {
+                return BulkRunOutcome::ownershipLost(new LostRunItemOwnershipException(
+                    'A run item was reclaimed by a concurrent attempt during bulk-failure cleanup; that attempt records it.',
+                ));
             }
-            $this->runs->fail($runId, 'Bulk organization failed.');
 
             return BulkRunOutcome::failed($e);
         }
@@ -135,6 +153,45 @@ final class SynchronousRunExecutor
             BulkObjectStatus::Skipped => OperationRunItemStatus::Skipped,
             BulkObjectStatus::Failed => OperationRunItemStatus::Failed,
         };
+    }
+
+    private function reportsSelfFinalized(OperationRunStatus $status): bool
+    {
+        // Failed/Cancelled or non-terminal means another attempt or a reconciler owns the run, not this one.
+        return in_array($status, [OperationRunStatus::Completed, OperationRunStatus::Partial, OperationRunStatus::Blocked], true);
+    }
+
+    /**
+     * Terminalize only the still-owned in-flight item (fenced by its claim token) and fail the run. Returns
+     * false when a concurrent attempt reclaimed the owned item, so the caller reports ownership loss instead
+     * of failing a run it no longer owns.
+     *
+     * @param list<int> $objectIds
+     */
+    public function failOwnedItemsAndRun(string $runId, array $objectIds, string $error): bool
+    {
+        $fenceHeld = true;
+        foreach ($objectIds as $objectId) {
+            $itemKey = $this->runItemKey($objectId);
+            if ($this->runItemLease->token($runId, $itemKey) === null) {
+                continue; // never-started or already-released item: not ours to terminalize.
+            }
+            try {
+                if (!$this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Failed, error: $error)) {
+                    $fenceHeld = false;
+                }
+            } catch (\Throwable) {
+                // A throwing completion is indeterminate ownership: release the local token and do NOT run the
+                // unfenced fail(); reconcileExpiredItemLeases reaps the still-Running item.
+                $this->runItemLease->release($runId, $itemKey);
+                $fenceHeld = false;
+            }
+        }
+        if ($fenceHeld) {
+            $this->runs->fail($runId, $error);
+        }
+
+        return $fenceHeld;
     }
 
     private function runItemKey(int $objectId): string

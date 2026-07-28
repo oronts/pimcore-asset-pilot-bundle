@@ -14,6 +14,7 @@ use Pimcore\Model\DataObject\ClassDefinition\Data\Classificationstore as Classif
 use Pimcore\Model\DataObject\ClassDefinition\Data\Fieldcollections;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Localizedfields;
 use Pimcore\Model\DataObject\ClassDefinition\Data\Objectbricks;
+use Pimcore\Model\DataObject\ClassDefinition\Data\Relations\AbstractRelations;
 use Pimcore\Model\DataObject\Classificationstore as ClassificationstoreValue;
 use Pimcore\Model\DataObject\Classificationstore\KeyConfig;
 use Pimcore\Model\DataObject\Classificationstore\Service as ClassificationstoreService;
@@ -22,26 +23,21 @@ use Pimcore\Model\DataObject\Data\BlockElement;
 use Pimcore\Model\DataObject\Data\ElementMetadata;
 use Pimcore\Model\DataObject\Data\Hotspotimage;
 use Pimcore\Model\DataObject\Data\ImageGallery;
+use Pimcore\Model\DataObject\Data\Video;
 use Pimcore\Model\DataObject\Fieldcollection;
 use Pimcore\Model\DataObject\Localizedfield;
 use Pimcore\Model\DataObject\Objectbrick;
+use Pimcore\Model\Document;
 use Pimcore\Tool;
 use Psr\Log\LoggerInterface;
 
 class AssetFieldExtractor implements AssetFieldExtractorInterface
 {
-    protected const array ASSET_FIELD_TYPES = [
+    protected const array DIRECT_ASSET_FIELD_TYPES = [
         'image',
         'video',
-        'document',
-        'archive',
         'imageGallery',
         'hotspotimage',
-        'manyToOneRelation',
-        'manyToManyRelation',
-        'advancedManyToManyRelation',
-        'advancedManyToOneRelation',
-        'manyToManyObjectRelation',
         'block',
     ];
 
@@ -125,8 +121,9 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
                             $complete = false;
                             continue;
                         }
+                        $scalarIdsAreAssets = !$this->relationMayReferenceNonAssets($keyDef);
                         foreach ($valuesByLanguage as $value) {
-                            foreach ($this->assetIdsFromClassificationValue($value, $complete) as $id) {
+                            foreach ($this->assetIdsFromClassificationValue($value, $complete, $scalarIdsAreAssets) as $id) {
                                 $ids[$id] = true;
                             }
                         }
@@ -159,13 +156,28 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
     }
 
     /**
-     * @param bool $complete set to false when a value shape is not a recognized asset reference, so the
-     *                       caller fails closed instead of treating an unparseable asset key as empty
+     * @param bool $complete           set to false when a value shape is not a recognized asset reference, so the
+     *                                 caller fails closed instead of treating an unparseable asset key as empty
+     * @param bool $scalarIdsAreAssets whether a bare numeric id may be trusted as an asset id; false for a
+     *                                 relation that also allows objects/documents, where an id is ambiguous
      *
      * @return list<int>
      */
-    private function assetIdsFromClassificationValue(mixed $value, bool &$complete): array
+    private function assetIdsFromClassificationValue(mixed $value, bool &$complete, bool $scalarIdsAreAssets): array
     {
+        // An array (relation list, gallery items, block rows) is validated per item so an ambiguous or
+        // unsupported sibling still fails the traversal closed even when a valid asset is present alongside it.
+        if (is_array($value)) {
+            $ids = [];
+            foreach ($value as $item) {
+                foreach ($this->assetIdsFromClassificationValue($item, $complete, $scalarIdsAreAssets) as $id) {
+                    $ids[] = $id;
+                }
+            }
+
+            return $ids;
+        }
+
         $ids = [];
         foreach ($this->extractAssetsFromValue($value) as $asset) {
             $id = $asset->getId();
@@ -180,30 +192,50 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         if ($value === null || $value === '') {
             return [];
         }
-        // Raw stored form for an asset key: a numeric id, or a list/relation of ids.
+        // Raw stored form for an asset key: a numeric id. On a relation that also allows objects/documents a
+        // bare id is ambiguous, so it fails closed instead of being read as an asset.
         if (is_int($value)) {
-            return $value > 0 ? [$value] : [];
+            if ($value <= 0) {
+                return [];
+            }
+            if (!$scalarIdsAreAssets) {
+                $complete = false;
+
+                return [];
+            }
+
+            return [$value];
         }
         if (is_string($value)) {
             if (ctype_digit($value)) {
-                return (int) $value > 0 ? [(int) $value] : [];
+                $intValue = (int) $value;
+                // Reject an overflowing or non-canonical digit string (e.g. leading zeros); it would coerce
+                // to a different id, so it is not a trustworthy asset reference.
+                if ((string) $intValue !== $value) {
+                    $complete = false;
+
+                    return [];
+                }
+                if ($intValue <= 0) {
+                    return [];
+                }
+                if (!$scalarIdsAreAssets) {
+                    $complete = false;
+
+                    return [];
+                }
+
+                return [$intValue];
             }
             $complete = false;
 
             return [];
         }
-        if (is_array($value)) {
-            foreach ($value as $item) {
-                foreach ($this->assetIdsFromClassificationValue($item, $complete) as $id) {
-                    $ids[] = $id;
-                }
-            }
-
-            return $ids;
-        }
-        // A recognized asset carrier that resolved to no asset (e.g. an empty image field) is complete.
+        // A recognized asset carrier that resolved to no asset (e.g. an empty image field), or a related
+        // object/document that is a legitimate non-asset member of the relation, is a complete non-asset.
         if ($value instanceof Asset || $value instanceof Hotspotimage || $value instanceof ImageGallery
-            || $value instanceof ElementMetadata || $value instanceof BlockElement) {
+            || $value instanceof Video || $value instanceof ElementMetadata || $value instanceof BlockElement
+            || $value instanceof AbstractObject || $value instanceof Document) {
             return [];
         }
 
@@ -234,6 +266,19 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
             return $this->extractAssetsFromItems($value->getItems());
         }
 
+        if ($value instanceof Video) {
+            // A native Video field carries a primary asset and a poster asset; external URL/id values are
+            // not assets. Deduplicate by id in case both point at the same asset.
+            $assets = [];
+            foreach ([$value->getData(), $value->getPoster()] as $candidate) {
+                if ($candidate instanceof Asset) {
+                    $assets[(int) $candidate->getId()] = $candidate;
+                }
+            }
+
+            return array_values($assets);
+        }
+
         if ($value instanceof ElementMetadata) {
             return $this->extractAssetsFromValue($value->getElement());
         }
@@ -243,8 +288,9 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         if (is_array($value)) {
             return $this->extractAssetsFromItems($value);
         }
-
-        return is_object($value) ? $this->extractAssetsFromObject($value) : [];
+        // A related object/document carries no asset for THIS field; its own internal assets are never
+        // harvested (that was the getImage()/getItems() duck-typing bug). Any other shape yields nothing.
+        return [];
     }
 
     /** @return list<Asset> */
@@ -256,23 +302,6 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
         }
 
         return $assets;
-    }
-
-    /** @return list<Asset> */
-    private function extractAssetsFromObject(object $value): array
-    {
-        if (method_exists($value, 'getImage')) {
-            $image = $value->getImage();
-
-            return $image instanceof Asset ? [$image] : [];
-        }
-        if (!method_exists($value, 'getItems')) {
-            return [];
-        }
-
-        $items = $value->getItems();
-
-        return is_iterable($items) ? $this->extractAssetsFromItems($items) : [];
     }
 
     /**
@@ -470,8 +499,24 @@ class AssetFieldExtractor implements AssetFieldExtractorInterface
 
     protected function isAssetField(Data $fieldDef): bool
     {
-        // Relation field types are included because they may carry assets; extract() filters the
-        // actual referenced assets at runtime, so object-only relations simply yield none.
-        return in_array($fieldDef->getFieldType(), self::ASSET_FIELD_TYPES, true);
+        // A relation carries assets only when its own definition allows them; an object-only relation
+        // (getAssetsAllowed() === false, e.g. manyToManyObjectRelation) is not an asset field, so a related
+        // DataObject/Document never reaches the fail-closed branch and never blocks a valid save. Every
+        // relation exposes the flag via the AbstractRelations trait (Pimcore ^12.3).
+        if ($fieldDef instanceof AbstractRelations) {
+            return $fieldDef->getAssetsAllowed() === true;
+        }
+
+        return in_array($fieldDef->getFieldType(), self::DIRECT_ASSET_FIELD_TYPES, true);
+    }
+
+    /** Whether an asset-capable relation may also hold objects/documents, so a bare scalar id is ambiguous. */
+    protected function relationMayReferenceNonAssets(Data $fieldDef): bool
+    {
+        if (!$fieldDef instanceof AbstractRelations) {
+            return false;
+        }
+
+        return $fieldDef->getObjectsAllowed() || $fieldDef->getDocumentsAllowed();
     }
 }

@@ -23,7 +23,7 @@ class LiveDependencyUsageScanner implements ResetInterface
 
     public function __construct(
         private readonly Connection $connection,
-        private readonly AssetDependencyTargetExtractor $targetExtractor,
+        private readonly AssetDependencyTargetExtractorInterface $targetExtractor,
         private readonly LoggerInterface $logger,
         private readonly int $maxSources = 50000,
     ) {}

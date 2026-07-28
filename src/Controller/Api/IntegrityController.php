@@ -10,13 +10,13 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\HealResult;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
+use Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface;
 use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
-use Oronts\AssetPilotBundle\Service\IntegrityHealHistoryService;
+use Oronts\AssetPilotBundle\Service\IntegrityHealHistoryServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
-use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
+use Oronts\AssetPilotBundle\Service\VersionRollbackHealerInterface;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -36,13 +36,13 @@ class IntegrityController
     private const int MAX_ITEMS = 50;
 
     public function __construct(
-        protected readonly AssetIntegrityService $integrity,
-        protected readonly VersionRollbackHealer $healer,
-        protected readonly IntegrityHealHistoryService $history,
+        protected readonly AssetIntegrityServiceInterface $integrity,
+        protected readonly VersionRollbackHealerInterface $healer,
+        protected readonly IntegrityHealHistoryServiceInterface $history,
         protected readonly LoggerInterface $logger,
         protected readonly ApplyPlanServiceInterface $applyPlans,
         protected readonly IntegrityHealFingerprintService $healFingerprints,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
     ) {}
 
     #[Route('/integrity', name: 'oronts_asset_pilot_integrity', methods: ['GET'])]

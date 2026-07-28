@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Command;
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -165,7 +166,7 @@ class OrganizeCommand extends Command
     ): int {
         try {
             $result = $this->reviewedOperations->execute(
-                'organize',
+                OperationRunKind::Organize,
                 $objectIds,
                 $selector,
                 $trigger,

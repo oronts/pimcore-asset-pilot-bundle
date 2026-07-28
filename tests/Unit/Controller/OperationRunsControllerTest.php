@@ -81,6 +81,8 @@ final class OperationRunsControllerTest extends TestCase
         self::assertSame(1, $body['processedCount']);
         self::assertSame(42, $body['items'][0]['targetId']);
         self::assertSame(['operationCount' => 2], $body['items'][0]['result']);
+        self::assertSame('2026-07-15T10:00:00+00:00', $body['createdAt'], 'run timestamps are emitted as RFC3339 UTC, not raw SQL strings');
+        self::assertSame('2026-07-15T10:00:02+00:00', $body['items'][0]['completedAt']);
     }
 
     #[Test]
@@ -201,13 +203,32 @@ final class OperationRunsControllerTest extends TestCase
         self::assertSame(Response::HTTP_INTERNAL_SERVER_ERROR, $response->getStatusCode());
     }
 
+    #[Test]
+    public function retryingADuplicateMergeRequiresAdmin(): void
+    {
+        $run = $this->runFixture();
+        $run['kind'] = OperationRunKind::DuplicateMerge->value;
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::once())->method('get')->willReturn($run);
+        $runs->expects(self::never())->method('retry');
+        $executor = $this->createMock(OperationRunExecutorInterface::class);
+        $executor->method('supports')->willReturn(true);
+        $executor->expects(self::never())->method('execute');
+
+        $response = $this->controller($runs, ActorContext::user(7), $executor, admin: false)->retry(self::RUN_ID);
+
+        self::assertSame(Response::HTTP_FORBIDDEN, $response->getStatusCode());
+    }
+
     private function controller(
         OperationRunStoreInterface $runs,
         ActorContext $actor,
         ?OperationRunExecutorInterface $executor = null,
+        bool $admin = true,
     ): OperationRunsController {
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn($actor);
+        $authorization->method('hasGlobalPermission')->willReturn($admin);
         $urls = $this->createMock(UrlGeneratorInterface::class);
         $urls->method('generate')->willReturnCallback(
             static fn (string $route, array $parameters): string => sprintf(
@@ -221,6 +242,7 @@ final class OperationRunsControllerTest extends TestCase
             $executor ?? $this->createMock(OperationRunExecutorInterface::class),
             $authorization,
             $urls,
+            new \Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter(),
         );
     }
 

@@ -134,7 +134,7 @@ class Version20260714000000Test extends TestCase
     }
 
     #[Test]
-    public function postUpAggregatesDuplicateHistoricalTypesIntoCompletedRuns(): void
+    public function postUpRetainsOneCompleteSamplePerTimestampTypeThenAggregatesIntoRuns(): void
     {
         $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
         $connection->executeStatement('CREATE TABLE asset_pilot_storage_run (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL, total_count INTEGER NOT NULL, total_size INTEGER NOT NULL, unknown_size_count INTEGER NOT NULL DEFAULT 0, error_message TEXT)');
@@ -153,7 +153,7 @@ class Version20260714000000Test extends TestCase
         self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_snapshot WHERE run_id IS NULL'));
         self::assertSame(3, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_snapshot'));
         self::assertSame(
-            [7, 170, 2],
+            [3, 150, 0],
             $connection->fetchNumeric("SELECT total_count, total_size, unknown_size_count FROM asset_pilot_storage_run WHERE completed_at = '2026-06-18 00:00:00'"),
         );
         self::assertSame(
@@ -161,7 +161,7 @@ class Version20260714000000Test extends TestCase
             $connection->fetchNumeric("SELECT total_count, total_size, unknown_size_count FROM asset_pilot_storage_run WHERE completed_at = '2026-06-17 00:00:00'"),
         );
         self::assertSame(
-            [$canonicalImageId, 6, 120, 2],
+            [$canonicalImageId, 2, 100, 0],
             $connection->fetchNumeric("SELECT id, unused_count, unused_size, unknown_size_count FROM asset_pilot_storage_snapshot WHERE captured_at = '2026-06-18 00:00:00' AND type = 'image'"),
         );
         self::assertSame(1, (int) $connection->fetchOne("SELECT COUNT(*) FROM asset_pilot_storage_snapshot WHERE captured_at = '2026-06-18 00:00:00' AND type = 'image'"));

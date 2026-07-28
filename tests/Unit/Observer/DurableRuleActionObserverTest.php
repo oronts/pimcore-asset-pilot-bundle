@@ -38,7 +38,7 @@ final class DurableRuleActionObserverTest extends TestCase
             'name' => 'sku',
             'type' => 'text',
             'value' => 'A-100',
-        ]);
+        ], self::isInstanceOf(\Oronts\AssetPilotBundle\Action\RuleActionDeliveryContextInterface::class));
         $observer = $this->observer(new RuleActionResolver([$action]), $asset, $object);
         self::assertSame('publish', $observer->requiredAssetPermission());
         $intent = $this->intent([['type' => 'set_property', 'name' => 'sku', 'from' => 'sku']]);

@@ -11,7 +11,7 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -28,7 +28,7 @@ class QuarantinePurgeCommand extends Command
     use UsesReviewedApplyPlan;
 
     public function __construct(
-        private readonly QuarantineService $quarantineService,
+        private readonly QuarantineServiceInterface $quarantineService,
         private readonly ApplyPlanServiceInterface $applyPlans,
     ) {
         parent::__construct();

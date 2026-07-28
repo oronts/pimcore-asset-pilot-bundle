@@ -13,13 +13,13 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\DateFilters;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
-use Oronts\AssetPilotBundle\Service\StorageTrendService;
+use Oronts\AssetPilotBundle\Service\StorageTrendServiceInterface;
 use Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -34,15 +34,13 @@ class UnusedAssetsController
     use HandlesBulkIds;
     use StreamsCsv;
 
-    private const int EXPORT_PAGE = 200;
-    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
         private readonly UnusedAssetFinderInterface $unusedAssetFinder,
-        private readonly QuarantineService $quarantineService,
+        private readonly QuarantineServiceInterface $quarantineService,
         private readonly LoggerInterface $logger,
-        private readonly StorageTrendService $storageTrend,
-        private readonly ElementAuthorization $authorization,
+        private readonly StorageTrendServiceInterface $storageTrend,
+        private readonly ElementAuthorizationInterface $authorization,
         private readonly ApplyPlanServiceInterface $applyPlans,
         private readonly AssetMutationFingerprintService $mutationFingerprints,
     ) {}
@@ -111,19 +109,18 @@ class UnusedAssetsController
         }
 
         $rows = (function () use ($filters): \Generator {
-            $page = 1;
-            do {
-                $result = $this->unusedAssetFinder->findUnused($filters, $page, self::EXPORT_PAGE);
-                foreach ($result['items'] as $item) {
-                    yield [
-                        $item['id'] ?? '',
-                        $item['full_path'] ?? '',
-                        $item['type'] ?? '',
-                        $item['file_size'] ?? '',
-                        $item['modified_at'] ?? '',
-                    ];
-                }
-            } while (count($result['items']) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
+            $source = $this->unusedAssetFinder->iterateForExport($filters);
+            foreach ($source as $item) {
+                yield [
+                    $item['id'] ?? '',
+                    $item['full_path'] ?? '',
+                    $item['type'] ?? '',
+                    $item['file_size'] ?? '',
+                    $item['modified_at'] ?? '',
+                ];
+            }
+
+            return $source->getReturn();
         })();
 
         return $this->streamCsv(

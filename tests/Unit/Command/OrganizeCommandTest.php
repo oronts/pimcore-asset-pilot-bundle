@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Command;
 use Oronts\AssetPilotBundle\Command\OrganizeCommand;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -28,7 +29,7 @@ final class OrganizeCommandTest extends TestCase
     {
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'organize',
+            OperationRunKind::Organize,
             [42],
             ['mode' => 'object_id', 'objectId' => 42],
             TriggerType::Manual,
@@ -51,7 +52,7 @@ final class OrganizeCommandTest extends TestCase
     {
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
-            'organize',
+            OperationRunKind::Organize,
             [1, 2, 3],
             ['class' => 'Product', 'mode' => 'class'],
             TriggerType::BulkOperation,

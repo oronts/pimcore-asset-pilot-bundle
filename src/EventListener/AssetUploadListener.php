@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\EventListener;
 
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Pimcore\Event\Model\AssetEvent;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
@@ -19,8 +19,8 @@ class AssetUploadListener
     private const int DEPENDENCY_PAGE_SIZE = 100;
 
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly OrganizeDispatcherInterface $dispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly bool $enabled = true,
@@ -146,10 +146,22 @@ class AssetUploadListener
                 return;
             }
 
-            $this->dispatcher->dispatchObject($objectId, TriggerType::AssetUpload);
+            try {
+                // Record the organize intent as a pending-dispatch run inside the ambient transaction; the
+                // relay publishes it after commit. Failing to record it must not fail the committed save.
+                $this->dispatcher->deferObject($objectId, TriggerType::AssetUpload);
+            } catch (\Throwable $e) {
+                $this->logger->error('AssetUploadListener: failed to record async organize for object {id}: {error}', [
+                    'id' => $objectId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+
+                return;
+            }
             $this->loopGuard->markObjectDispatched($objectId);
 
-            $this->logger->debug('AssetUploadListener: dispatched async organize for object {id}', [
+            $this->logger->debug('AssetUploadListener: recorded pending async organize intent for object {id}', [
                 'id' => $objectId,
             ]);
 

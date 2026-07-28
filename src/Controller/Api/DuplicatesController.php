@@ -6,18 +6,20 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
+use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
-use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
-use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
-use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
+use Oronts\AssetPilotBundle\Service\DuplicateDetectionServiceInterface;
+use Oronts\AssetPilotBundle\Service\DuplicateMergeServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -33,15 +35,13 @@ class DuplicatesController
     use StreamsCsv;
 
     private const int MAX_LIMIT = 100;
-    private const int EXPORT_PAGE = 200;
-    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
-        protected readonly DuplicateDetectionService $duplicates,
-        protected readonly DuplicateMergeService $merge,
+        protected readonly DuplicateDetectionServiceInterface $duplicates,
+        protected readonly DuplicateMergeServiceInterface $merge,
         protected readonly AssetSearchServiceInterface $assets,
         protected readonly ApplyPlanServiceInterface $applyPlans,
-        protected readonly ElementAuthorization $authorization,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly UrlGeneratorInterface $urlGenerator,
         protected readonly LoggerInterface $logger,
     ) {}
@@ -60,10 +60,13 @@ class DuplicatesController
         $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;
 
         try {
-            $groups = $this->duplicates->findDuplicates($page, $limit, $minCopies, $type);
+            $result = $this->duplicates->findDuplicatePage($page, $limit, $minCopies, $type);
+            $groups = $result['groups'];
             $reps = $this->assets->summarize(array_values(array_filter(
                 array_map(static fn ($group): ?int => $group->assetIds[0] ?? null, $groups),
             )));
+
+            $isSystem = $this->authorization->currentActor()->type === ActorType::System;
 
             return new JsonResponse([
                 'items' => array_map(static function ($group) use ($reps): array {
@@ -84,9 +87,11 @@ class DuplicatesController
                         ],
                     ];
                 }, $groups),
-                'total' => $this->duplicates->countDuplicateGroups($minCopies, $type),
+                'total' => $isSystem ? $this->duplicates->countDuplicateGroups($minCopies, $type) : null,
                 'page' => $page,
                 'limit' => $limit,
+                'hasMore' => $result['hasMore'],
+                'truncated' => $result['truncated'],
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to list duplicate assets.', ['exception' => $e]);
@@ -108,19 +113,18 @@ class DuplicatesController
         $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;
 
         $rows = (function () use ($minCopies, $type): \Generator {
-            $page = 1;
-            do {
-                $groups = $this->duplicates->findDuplicates($page, self::EXPORT_PAGE, $minCopies, $type);
-                foreach ($groups as $group) {
-                    yield [
-                        $group->checksum,
-                        $group->count,
-                        $group->fileSize,
-                        $group->fileSize * max(0, $group->count - 1),
-                        implode(';', $group->assetIds),
-                    ];
-                }
-            } while (count($groups) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
+            $source = $this->duplicates->iterateForExport($minCopies, $type);
+            foreach ($source as $group) {
+                yield [
+                    $group->checksum,
+                    $group->count,
+                    $group->fileSize,
+                    $group->fileSize * max(0, $group->count - 1),
+                    implode(';', $group->assetIds),
+                ];
+            }
+
+            return $source->getReturn();
         })();
 
         return $this->streamCsv(
@@ -202,20 +206,16 @@ class DuplicatesController
     ): JsonResponse {
         $canonicalId ??= min($group->assetIds);
         $resolvedStrategy = $strategy ?? $this->merge->defaultStrategyName();
-        $targets = $this->merge->planTargets($group);
+        $targets = $this->merge->planTargets($group, $canonicalId);
         $plan = $this->duplicateMergePlan($checksum, $canonicalId, $resolvedStrategy, $targets);
         $execution = $this->mergeExecution($data, $plan, $dryRun);
         if ($execution instanceof JsonResponse) {
             return $execution;
         }
 
-        $outcome = $this->merge->merge(
-            $group,
-            $canonicalId,
-            $resolvedStrategy,
-            $dryRun,
-            $execution['fingerprints'],
-        );
+        $outcome = $dryRun
+            ? $this->merge->preview($group, $canonicalId, $resolvedStrategy)
+            : $this->merge->merge($group, $execution['fingerprints'], $canonicalId, $resolvedStrategy);
 
         return $this->mergeResponse($outcome, $dryRun, $execution['planToken'], $outcome->runId);
     }
@@ -224,7 +224,7 @@ class DuplicatesController
     private function duplicateMergePlan(string $checksum, int $canonicalId, string $strategy, array $targets): ApplyPlan
     {
         return new ApplyPlan(
-            kind: 'duplicate-merge',
+            kind: OperationRunKind::DuplicateMerge->value,
             actor: $this->authorization->currentActor(),
             request: ['checksum' => $checksum, 'canonicalId' => $canonicalId, 'strategy' => $strategy],
             config: ['defaultStrategy' => $this->merge->defaultStrategyName()],

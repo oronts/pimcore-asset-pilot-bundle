@@ -27,7 +27,11 @@ const base = {
   'js/src/main.ts': 'export const a = 1\n',
   'js/src/mod/util.ts': 'export const b = 2\n',
   'rsbuild.config.ts': 'export default {}\n',
+  'tsconfig.json': '{"compilerOptions":{"baseUrl":"."}}\n',
   'package.json': '{"version":"2.0.0"}\n',
+  'package-lock.json': '{"lockfileVersion":3}\n',
+  'scripts/manifest-assets.mjs': 'export const isValidBuildId = (id) => Boolean(id)\n',
+  'scripts/publish-build.mjs': 'export const publish = () => 0\n',
 }
 
 describe('computeStudioSourceHash', () => {
@@ -49,6 +53,26 @@ describe('computeStudioSourceHash', () => {
     const withExtra = studioFixture({ ...base, 'js/src/extra.ts': 'export const c = 3\n' })
 
     expect(computeStudioSourceHash(withExtra)).not.toBe(computeStudioSourceHash(studioFixture(base)))
+  })
+
+  it('changes when the lockfile, tsconfig, or a build script changes (transitive build inputs)', () => {
+    const baseHash = computeStudioSourceHash(studioFixture(base))
+    const bumpedLock = studioFixture({ ...base, 'package-lock.json': '{"lockfileVersion":3,"bumped":true}\n' })
+    const changedScript = studioFixture({ ...base, 'scripts/manifest-assets.mjs': 'export const isValidBuildId = () => true\n' })
+    const changedTsconfig = studioFixture({ ...base, 'tsconfig.json': '{"compilerOptions":{"baseUrl":"./src"}}\n' })
+    const changedPublisher = studioFixture({ ...base, 'scripts/publish-build.mjs': 'export const publish = () => 1\n' })
+
+    expect(computeStudioSourceHash(bumpedLock)).not.toBe(baseHash)
+    expect(computeStudioSourceHash(changedScript)).not.toBe(baseHash)
+    expect(computeStudioSourceHash(changedTsconfig)).not.toBe(baseHash)
+    expect(computeStudioSourceHash(changedPublisher)).not.toBe(baseHash)
+  })
+
+  it('stays byte-compatible with the PHP mirror (shared golden parity pin)', () => {
+    const parity = JSON.parse(
+      fs.readFileSync(path.resolve(process.cwd(), '../../tests/Fixtures/studio-source-hash-parity.json'), 'utf8'),
+    )
+    expect(computeStudioSourceHash(studioFixture(parity.files))).toBe(parity.sha256)
   })
 
   it('normalizes CRLF so line endings do not change the hash', () => {

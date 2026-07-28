@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter;
 use Oronts\AssetPilotBundle\Controller\Api\OperationDeliveryRetryController;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
@@ -118,7 +119,7 @@ final class OperationDeliveryRetryControllerTest extends TestCase
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn($actor);
 
-        return new OperationDeliveryRetryController($coordinator, $authorization, new NullLogger());
+        return new OperationDeliveryRetryController($coordinator, $authorization, new NullLogger(), new ApiDateFormatter());
     }
 
     /** @param array<string, mixed> $body */

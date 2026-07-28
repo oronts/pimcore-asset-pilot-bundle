@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter;
+use Oronts\AssetPilotBundle\Api\Serialization\OperationResponseAssembler;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\OperationsController;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
@@ -16,7 +18,9 @@ use Oronts\AssetPilotBundle\Service\FailureReplayService;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
+use Oronts\AssetPilotBundle\Service\OrganizeRunDispatchCoordinator;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
+use Oronts\AssetPilotBundle\Service\RunItemLease;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -35,7 +39,7 @@ class OperationsControllerResolveTest extends TestCase
         $c = new class (
             $organizer = $this->createMock(AssetOrganizer::class),
             $this->createMock(OrganizeDispatcher::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditQueryInterface::class),
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
             $this->createMock(FailureReplayService::class),
@@ -45,8 +49,11 @@ class OperationsControllerResolveTest extends TestCase
             $this->createMock(ApplyPlanServiceInterface::class),
             new OrganizePlanFingerprint(),
             $this->createMock(ReviewedObjectOperationServiceInterface::class),
-            $this->createMock(UrlGeneratorInterface::class),
             new NullLogger(),
+            new ApiDateFormatter(),
+            $this->createMock(RunItemLease::class),
+            new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
+            new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcher::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
         ) extends OperationsController {
             public ?AbstractObject $stub = null;
 
@@ -136,7 +143,7 @@ class OperationsControllerResolveTest extends TestCase
         $controller = new class (
             $organizer = $this->createMock(AssetOrganizer::class),
             $this->createMock(OrganizeDispatcher::class),
-            $this->createMock(AuditLogger::class),
+            $this->createMock(AuditQueryInterface::class),
             $this->createMock(RuleEngine::class),
             $this->createMock(AssetFieldExtractor::class),
             $this->createMock(FailureReplayService::class),
@@ -146,15 +153,17 @@ class OperationsControllerResolveTest extends TestCase
             $this->createMock(ApplyPlanServiceInterface::class),
             new OrganizePlanFingerprint(),
             $this->createMock(ReviewedObjectOperationServiceInterface::class),
-            $this->createMock(UrlGeneratorInterface::class),
             new NullLogger(),
+            $this->createMock(RunItemLease::class),
+            new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
+            new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcher::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
             $objects,
         ) extends OperationsController {
             /** @param list<AbstractObject> $objects */
             public function __construct(
                 AssetOrganizer $organizer,
                 OrganizeDispatcher $dispatcher,
-                AuditLogger $audit,
+                AuditQueryInterface $audit,
                 RuleEngine $rules,
                 AssetFieldExtractor $fields,
                 FailureReplayService $replay,
@@ -164,11 +173,13 @@ class OperationsControllerResolveTest extends TestCase
                 ApplyPlanServiceInterface $plans,
                 OrganizePlanFingerprint $fingerprints,
                 ReviewedObjectOperationServiceInterface $reviewed,
-                UrlGeneratorInterface $urlGenerator,
                 NullLogger $logger,
+                RunItemLease $runItemLease,
+                OperationResponseAssembler $responses,
+                OrganizeRunDispatchCoordinator $runCoordinator,
                 private readonly array $objects,
             ) {
-                parent::__construct($organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $urlGenerator, $logger);
+                parent::__construct($organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator);
             }
 
             protected function objectsForClass(string $className): \Generator

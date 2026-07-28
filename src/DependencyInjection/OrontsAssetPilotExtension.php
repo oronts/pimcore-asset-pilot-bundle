@@ -10,7 +10,9 @@ use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
 use Oronts\AssetPilotBundle\Integrity\IntegrityCheckerInterface;
 use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Notification\NotifierInterface;
+use Oronts\AssetPilotBundle\Observer\DurableOperationObserverInterface;
 use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
+use Oronts\AssetPilotBundle\Strategy\CallbackDecisionInterface;
 use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -32,6 +34,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
      * autoconfiguring them would tag every such service in the project).
      */
     private const array AUTOCONFIGURED_SEAMS = [
+        CallbackDecisionInterface::class => 'oronts_asset_pilot.callback',
         RuleProviderInterface::class => 'oronts_asset_pilot.rule_provider',
         HealthCheckInterface::class => 'oronts_asset_pilot.health_check',
         RuleActionInterface::class => 'oronts_asset_pilot.rule_action',
@@ -40,9 +43,16 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         DuplicateMergeStrategyInterface::class => 'oronts_asset_pilot.duplicate_merge_strategy',
         ZipEntryStrategyInterface::class => 'oronts_asset_pilot.zip_strategy',
         ContextProviderInterface::class => 'oronts_asset_pilot.context_provider',
+        DurableOperationObserverInterface::class => 'oronts_asset_pilot.operation_observer',
     ];
     public function prepend(ContainerBuilder $container): void
     {
+        if ($container->hasExtension('pimcore_studio_backend')) {
+            $container->prependExtensionConfig('pimcore_studio_backend', [
+                'open_api_scan_paths' => [dirname(__DIR__) . '/Controller/Api'],
+            ]);
+        }
+
         if ($container->hasExtension('pimcore_studio_ui')) {
             $loader = new YamlFileLoader(
                 $container,
@@ -77,9 +87,25 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         // Async parameters
         $container->setParameter('oronts_asset_pilot.async.enabled', $config['async']['enabled']);
         $container->setParameter('oronts_asset_pilot.async.batch_size', $config['async']['batch_size']);
+        $container->setParameter('oronts_asset_pilot.async.worker_heartbeat_max_age', $config['async']['worker_heartbeat_max_age']);
+        $container->setParameter('oronts_asset_pilot.async.transport', $config['async']['transport']);
+        $container->setParameter('oronts_asset_pilot.async.failure_transport', $config['async']['failure_transport']);
+        $container->setParameter('oronts_asset_pilot.async.max_queue_depth', $config['async']['max_queue_depth']);
+        $container->setParameter('oronts_asset_pilot.idempotency.lock_ttl', $config['idempotency']['lock_ttl']);
+        $container->setParameter('oronts_asset_pilot.idempotency.max_object_replays', $config['idempotency']['max_object_replays']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.recovery_after_seconds', $config['operation_journal']['recovery_after_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.delivery_batch_size', $config['operation_journal']['delivery_batch_size']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.dispatch_deduplication_seconds', $config['operation_journal']['dispatch_deduplication_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.max_attempts', $config['operation_journal']['max_attempts']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.base_retry_seconds', $config['operation_journal']['base_retry_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.max_retry_seconds', $config['operation_journal']['max_retry_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_journal.lease_seconds', $config['operation_journal']['lease_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_runs.retention_days', $config['operation_runs']['retention_days']);
+        $container->setParameter('oronts_asset_pilot.operation_runs.retention_batch_size', $config['operation_runs']['retention_batch_size']);
+        $container->setParameter('oronts_asset_pilot.operation_runs.lease_seconds', $config['operation_runs']['lease_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_runs.stale_queued_warning_seconds', $config['operation_runs']['stale_queued_warning_seconds']);
 
         // Audit parameters
-        $container->setParameter('oronts_asset_pilot.audit.enabled', $config['audit']['enabled']);
         $container->setParameter('oronts_asset_pilot.audit.retention_days', $config['audit']['retention_days']);
 
         // Protection parameters
@@ -101,7 +127,16 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
 
         // Content-reference scan (delete/move guard)
         $container->setParameter('oronts_asset_pilot.content_scan.enabled', $config['content_scan']['enabled']);
-        $container->setParameter('oronts_asset_pilot.content_scan.classes', $config['content_scan']['classes']);
+        $container->setParameter('oronts_asset_pilot.dependency_projection.bootstrap_live_scan', $config['dependency_projection']['bootstrap_live_scan']);
+        $container->setParameter('oronts_asset_pilot.dependency_projection.bootstrap_max_sources', $config['dependency_projection']['bootstrap_max_sources']);
+        $container->setParameter('oronts_asset_pilot.dependency_projection.rebuild_batch_size', $config['dependency_projection']['rebuild_batch_size']);
+        $container->setParameter('oronts_asset_pilot.dependency_projection.deletion_fence_lease_seconds', $config['dependency_projection']['deletion_fence_lease_seconds']);
+        $container->setParameter('oronts_asset_pilot.dependency_projection.deletion_fence_reap_batch_size', $config['dependency_projection']['deletion_fence_reap_batch_size']);
+        $container->setParameter('oronts_asset_pilot.dependency_projection.reconcile_stale_seconds', $config['dependency_projection']['reconcile_stale_seconds']);
+
+        $container->setParameter('oronts_asset_pilot.storage_snapshots.enabled', $config['storage_snapshots']['enabled']);
+        $container->setParameter('oronts_asset_pilot.storage_snapshots.minimum_interval_seconds', $config['storage_snapshots']['minimum_interval_seconds']);
+        $container->setParameter('oronts_asset_pilot.storage_snapshots.retention_days', $config['storage_snapshots']['retention_days']);
 
         // Notifications
         $container->setParameter('oronts_asset_pilot.notifications.enabled', $config['notifications']['enabled']);
@@ -112,6 +147,13 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
 
         // Duplicate merge
         $container->setParameter('oronts_asset_pilot.duplicates.merge_strategy', $config['duplicates']['merge_strategy']);
+        $container->setParameter('oronts_asset_pilot.duplicates.group_scan_budget', $config['duplicates']['group_scan_budget']);
+        $container->setParameter('oronts_asset_pilot.duplicates.export_group_scan_budget', $config['duplicates']['export_group_scan_budget']);
+
+        // Authorized listing + export scan bounds (explicit, truncation-signalled ceilings)
+        $container->setParameter('oronts_asset_pilot.listing.scan_budget', $config['listing']['scan_budget']);
+        $container->setParameter('oronts_asset_pilot.listing.batch_size', $config['listing']['batch_size']);
+        $container->setParameter('oronts_asset_pilot.listing.export_max_rows', $config['listing']['export_max_rows']);
 
         // Stats caching (read-only dashboard/metrics/unused-storage panels)
         $container->setParameter('oronts_asset_pilot.cache.stats_ttl', $config['cache']['stats_ttl']);
@@ -120,6 +162,8 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         // Download-archive (zip) layout + bounds
         $container->setParameter('oronts_asset_pilot.zip.default_strategy', $config['zip']['default_strategy']);
         $container->setParameter('oronts_asset_pilot.zip.max_assets', $config['zip']['max_assets']);
+        $container->setParameter('oronts_asset_pilot.zip.max_uncompressed_bytes', $config['zip']['max_uncompressed_bytes']);
+        $container->setParameter('oronts_asset_pilot.zip.download_token_ttl', $config['zip']['download_token_ttl']);
 
         // Process rules into Rule objects
         $rules = [];

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\RulesController;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
@@ -18,19 +18,18 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\ApplyPlanService;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LocationDriftService;
+use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer;
 use Oronts\AssetPilotBundle\Service\RulePortability;
 use Oronts\AssetPilotBundle\Service\RulePreviewPlanService;
+use Oronts\AssetPilotBundle\Tests\Support\InMemoryApplyPlanClaimStore;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\NullLogger;
-use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\InMemoryStore;
 
 #[CoversClass(RulesController::class)]
 final class RulesControllerTest extends TestCase
@@ -165,7 +164,12 @@ final class RulesControllerTest extends TestCase
             ->with($object, TriggerType::Api, $rule->name)
             ->willReturn([$operation]);
         $organizer->expects(self::once())->method('organize')
-            ->with($object, TriggerType::Api, $rule->name)
+            ->with(
+                $object,
+                TriggerType::Api,
+                $rule->name,
+                (new OrganizePlanFingerprint())->forOperations($object, [$operation]),
+            )
             ->willReturn([]);
 
         $response = $this->controller(
@@ -198,11 +202,12 @@ final class RulesControllerTest extends TestCase
         $controller = new class (
             $rules,
             $organizer,
-            $this->createMock(AuditLoggerInterface::class),
+            $this->createMock(AuditQueryInterface::class),
             $this->createMock(RulePortability::class),
             $this->createMock(RuleOverlapAnalyzer::class),
             $this->createMock(LocationDriftService::class),
             $plans ?? $this->plans(),
+            new OrganizePlanFingerprint(),
             $authorization ?? $this->createMock(ElementAuthorization::class),
             new NullLogger(),
         ) extends RulesController {
@@ -220,12 +225,13 @@ final class RulesControllerTest extends TestCase
 
     private function plans(): RulePreviewPlanService
     {
+        $claims = new InMemoryApplyPlanClaimStore();
+
         return new RulePreviewPlanService(new ApplyPlanService(
             self::SECRET,
-            new ArrayAdapter(),
-            new LockFactory(new InMemoryStore()),
+            $claims,
             clock: static fn (): int => 1_000,
-        ));
+        ), new OrganizePlanFingerprint());
     }
 
     private function rules(Rule $rule): RuleEngineInterface

@@ -189,6 +189,39 @@ final class OperationRunStoreTest extends TestCase
     }
 
     #[Test]
+    public function reconcileAbandonedRunningRunsFailsAStaleRunningRunButSparesFreshAndQueuedOnes(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+
+        // A synchronous run whose process crashed: started to Running, its item never drained, and its
+        // updated_at is stale because no worker and no message will ever progress it.
+        $stranded = $store->create(OperationRunKind::DuplicateMerge, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+        ]);
+        self::assertTrue($store->start($stranded));
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET updated_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $stranded]);
+
+        // A run a worker is actively progressing has a recent updated_at and must be left alone.
+        $fresh = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:20', 'type' => 'data_object', 'id' => 20],
+        ]);
+        self::assertTrue($store->start($fresh));
+
+        // A queued backlog run is the worker/relay's to claim, not this reconciler's, even when stale.
+        $queued = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:30', 'type' => 'data_object', 'id' => 30],
+        ]);
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET updated_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $queued]);
+
+        self::assertSame(1, $store->reconcileAbandonedRunningRuns(100, 3600));
+
+        self::assertSame(OperationRunStatus::Failed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$stranded]), 'the stale Running run is failed');
+        self::assertSame(OperationRunItemStatus::Failed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$stranded]), 'its stranded queued item is failed');
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$fresh]), 'a fresh Running run is spared');
+        self::assertSame(OperationRunStatus::Queued->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$queued]), 'a queued backlog run is spared');
+    }
+
+    #[Test]
     public function aReclaimedItemLeaseFencesThePreviousWorkersRenewalAndCompletion(): void
     {
         $store = new OperationRunStore($this->connection, leaseSeconds: 300);

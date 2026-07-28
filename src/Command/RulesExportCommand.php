@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
-use Oronts\AssetPilotBundle\Service\RulePortability;
+use Oronts\AssetPilotBundle\Service\RulePortabilityInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -20,7 +20,7 @@ use Symfony\Component\Yaml\Yaml;
 class RulesExportCommand extends Command
 {
     public function __construct(
-        private readonly RulePortability $portability,
+        private readonly RulePortabilityInterface $portability,
     ) {
         parent::__construct();
     }

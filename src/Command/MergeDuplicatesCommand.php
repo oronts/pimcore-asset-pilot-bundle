@@ -12,8 +12,8 @@ use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Model\DuplicateGroup;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
-use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
+use Oronts\AssetPilotBundle\Service\DuplicateDetectionServiceInterface;
+use Oronts\AssetPilotBundle\Service\DuplicateMergeServiceInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -30,8 +30,8 @@ class MergeDuplicatesCommand extends Command
     use UsesReviewedApplyPlan;
 
     public function __construct(
-        private readonly DuplicateDetectionService $duplicates,
-        private readonly DuplicateMergeService $merge,
+        private readonly DuplicateDetectionServiceInterface $duplicates,
+        private readonly DuplicateMergeServiceInterface $merge,
         private readonly ApplyPlanServiceInterface $applyPlans,
     ) {
         parent::__construct();
@@ -102,13 +102,9 @@ class MergeDuplicatesCommand extends Command
             return Command::INVALID;
         }
 
-        $outcome = $this->merge->merge(
-            $group,
-            $canonicalId,
-            $resolvedStrategy,
-            !$apply,
-            $apply ? $this->fingerprints($plan) : null,
-        );
+        $outcome = $apply
+            ? $this->merge->merge($group, $this->fingerprints($plan), $canonicalId, $resolvedStrategy)
+            : $this->merge->preview($group, $canonicalId, $resolvedStrategy);
 
         $this->renderOutcome($io, $outcome);
 
@@ -165,7 +161,7 @@ class MergeDuplicatesCommand extends Command
     {
         $assetIds = array_values($group->assetIds);
         sort($assetIds, SORT_NUMERIC);
-        $targets = $this->merge->planTargets($group);
+        $targets = $this->merge->planTargets($group, $canonicalId);
         usort($targets, static fn (ApplyPlanTarget $left, ApplyPlanTarget $right): int => strcmp($left->id, $right->id));
         $availableStrategies = $this->merge->availableStrategies();
         sort($availableStrategies, SORT_STRING);

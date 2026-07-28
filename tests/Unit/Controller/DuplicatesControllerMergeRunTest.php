@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 use Oronts\AssetPilotBundle\Controller\Api\DuplicatesController;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
@@ -42,19 +43,17 @@ final class DuplicatesControllerMergeRunTest extends TestCase
         $duplicates->method('groupForChecksum')->with('abc')->willReturn($group);
         $merge = $this->createMock(DuplicateMergeService::class);
         $merge->method('defaultStrategyName')->willReturn('quarantine');
-        $merge->expects(self::once())->method('planTargets')->with($group)->willReturn($targets);
-        $merge->expects(self::once())->method('merge')->with(
+        $merge->expects(self::once())->method('planTargets')->with($group, 3)->willReturn($targets);
+        $merge->expects(self::once())->method('preview')->with(
             $group,
             3,
             'quarantine',
-            true,
-            null,
         )->willReturn(new MergeOutcome('abc', 3, [
             new CopyDisposition(9, DispositionOutcome::Skipped, 'Would quarantine duplicate'),
         ]));
         $plans = $this->createMock(ApplyPlanServiceInterface::class);
         $plans->expects(self::once())->method('issue')->with(self::callback(
-            static fn (ApplyPlan $plan): bool => $plan->kind === 'duplicate-merge'
+            static fn (ApplyPlan $plan): bool => $plan->kind === OperationRunKind::DuplicateMerge->value
                 && $plan->actor == ActorContext::user(7)
                 && $plan->request === ['checksum' => 'abc', 'canonicalId' => 3, 'strategy' => 'quarantine']
                 && $plan->targets === $targets,
@@ -85,13 +84,12 @@ final class DuplicatesControllerMergeRunTest extends TestCase
         $duplicates->method('groupForChecksum')->with('abc')->willReturn($group);
         $merge = $this->createMock(DuplicateMergeService::class);
         $merge->method('defaultStrategyName')->willReturn('quarantine');
-        $merge->method('planTargets')->with($group)->willReturn($targets);
+        $merge->method('planTargets')->with($group, 3)->willReturn($targets);
         $merge->expects(self::once())->method('merge')->with(
             $group,
+            ['asset:3' => 'fp-3', 'asset:9' => 'fp-9'],
             3,
             'quarantine',
-            false,
-            ['asset:3' => 'fp-3', 'asset:9' => 'fp-9'],
         )->willReturn(new MergeOutcome('abc', 3, [], 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', OperationRunStatus::Queued));
         $plans = $this->createMock(ApplyPlanServiceInterface::class);
         $plans->expects(self::once())->method('claim')->with('signed-plan', self::isInstanceOf(ApplyPlan::class))

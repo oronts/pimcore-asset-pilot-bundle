@@ -23,7 +23,7 @@ use Psr\Log\NullLogger;
 #[CoversClass(EmptyFolderSweepService::class)]
 class EmptyFolderSweepServiceTest extends TestCase
 {
-    private function folder(int $id, bool $hasChildren, bool $allowed): Asset\Folder
+    private function folder(int $id, bool $hasChildren, bool $allowed, bool $locked = false): Asset\Folder
     {
         $folder = $this->createMock(Asset\Folder::class);
         $folder->method('getId')->willReturn($id);
@@ -31,6 +31,8 @@ class EmptyFolderSweepServiceTest extends TestCase
         $folder->method('isAllowed')->willReturn($allowed);
         $folder->method('getRealFullPath')->willReturn('/folder/' . $id);
         $folder->method('getModificationDate')->willReturn(1_752_572_800);
+        $folder->method('hasProperty')->willReturn($locked);
+        $folder->method('getProperty')->willReturn($locked);
 
         return $folder;
     }
@@ -113,6 +115,18 @@ class EmptyFolderSweepServiceTest extends TestCase
     {
         $deleted = new \ArrayObject();
         $service = $this->service([5 => $this->folder(5, hasChildren: true, allowed: true)], $deleted);
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(0, $result['deleted']);
+        self::assertSame(1, $result['skipped']);
+        self::assertSame([], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function skipsALockedFolder(): void
+    {
+        $deleted = new \ArrayObject();
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true, locked: true)], $deleted);
         $result = $this->apply($service, [5]);
 
         self::assertSame(0, $result['deleted']);

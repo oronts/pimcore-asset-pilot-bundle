@@ -8,7 +8,7 @@ use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 
-class ApplyPlanService implements ApplyPlanServiceInterface
+final class ApplyPlanService implements ApplyPlanServiceInterface
 {
     private const string VERSION = 'v1';
 

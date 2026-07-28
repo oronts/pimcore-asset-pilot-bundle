@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -20,12 +21,11 @@ class QuarantineController
 {
     use StreamsCsv;
 
-    private const int EXPORT_PAGE = 200;
-    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
-        protected readonly QuarantineService $quarantineService,
+        protected readonly QuarantineServiceInterface $quarantineService,
         protected readonly LoggerInterface $logger,
+        private readonly ApiDateFormatterInterface $dates,
     ) {}
 
     #[Route('/quarantine', name: 'oronts_asset_pilot_quarantine_list', methods: ['GET'])]
@@ -33,8 +33,13 @@ class QuarantineController
     public function list(Request $request): JsonResponse
     {
         [$page, $limit] = Pagination::fromRequest($request, 200);
+        $result = $this->quarantineService->listQuarantined($page, $limit, $this->filters($request));
+        $result['items'] = array_map(fn (array $item): array => [
+            ...$item,
+            'quarantined_at' => $this->dates->fromDatabase((string) $item['quarantined_at']),
+        ], $result['items']);
 
-        return new JsonResponse($this->quarantineService->listQuarantined($page, $limit, $this->filters($request)));
+        return new JsonResponse($result);
     }
 
     /** @return array{type?: string, before?: string, after?: string} */
@@ -57,19 +62,18 @@ class QuarantineController
         $filters = $this->filters($request);
 
         $rows = (function () use ($filters): \Generator {
-            $page = 1;
-            do {
-                $result = $this->quarantineService->listQuarantined($page, self::EXPORT_PAGE, $filters);
-                foreach ($result['items'] as $item) {
-                    yield [
-                        $item['asset_id'] ?? '',
-                        $item['filename'] ?? '',
-                        $item['original_path'] ?? '',
-                        $item['type'] ?? '',
-                        $item['quarantined_at'] ?? '',
-                    ];
-                }
-            } while (count($result['items']) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
+            $source = $this->quarantineService->iterateForExport($filters);
+            foreach ($source as $item) {
+                yield [
+                    $item['asset_id'] ?? '',
+                    $item['filename'] ?? '',
+                    $item['original_path'] ?? '',
+                    $item['type'] ?? '',
+                    $item['quarantined_at'] ?? '',
+                ];
+            }
+
+            return $source->getReturn();
         })();
 
         return $this->streamCsv(

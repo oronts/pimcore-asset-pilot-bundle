@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
-use Oronts\AssetPilotBundle\Service\EmptyFolderSweepService;
+use Oronts\AssetPilotBundle\Service\EmptyFolderSweepServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
@@ -26,7 +26,7 @@ class FoldersController
     private const int MAX_DELETE = 200;
 
     public function __construct(
-        protected readonly EmptyFolderSweepService $sweep,
+        protected readonly EmptyFolderSweepServiceInterface $sweep,
         protected readonly ApplyPlanServiceInterface $applyPlans,
         protected readonly LoggerInterface $logger,
     ) {}

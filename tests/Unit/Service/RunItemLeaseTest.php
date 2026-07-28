@@ -40,6 +40,20 @@ final class RunItemLeaseTest extends TestCase
     }
 
     #[Test]
+    public function startReleasesTheMintedTokenWhenTheDurableClaimThrows(): void
+    {
+        $guard = $this->createMock(LoopGuard::class);
+        $guard->method('beginOperationRunItemLease')->willReturn('tok-1');
+        $guard->expects(self::once())->method('releaseOperationRunItem')->with('run', 'object:1');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $error = new \RuntimeException('db down');
+        $runs->method('startItem')->willThrowException($error);
+
+        $this->expectExceptionObject($error);
+        (new RunItemLease($guard, $runs))->start('run', 'object:1');
+    }
+
+    #[Test]
     public function completeReturnsTrueAndReleasesWhenTheFencedCompletionWins(): void
     {
         $guard = $this->createMock(LoopGuard::class);

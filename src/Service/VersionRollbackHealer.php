@@ -597,7 +597,7 @@ class VersionRollbackHealer implements VersionRollbackHealerInterface
      * unloadable to_version (or an unreadable binary) cannot be confirmed and is treated as a
      * mismatch, so undo errs on the side of not overwriting.
      */
-    protected function stillInHealedState(Asset $asset, ?int $toVersion): bool
+    private function stillInHealedState(Asset $asset, ?int $toVersion): bool
     {
         if ($toVersion === null) {
             return false;

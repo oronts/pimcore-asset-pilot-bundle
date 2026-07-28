@@ -62,6 +62,65 @@ class ConfigurationTest extends TestCase
         self::assertSame([], $config['allowed_classes']);
         self::assertSame([], $config['locales']);
         self::assertSame(50, $config['async']['batch_size']);
+        self::assertSame(120, $config['async']['worker_heartbeat_max_age']);
+        self::assertSame('asset_pilot', $config['async']['transport']);
+        self::assertSame('asset_pilot_failed', $config['async']['failure_transport']);
+        self::assertSame(1000, $config['async']['max_queue_depth']);
+        self::assertSame(60.0, $config['idempotency']['lock_ttl']);
+        self::assertSame(3, $config['idempotency']['max_object_replays']);
+        self::assertSame(900, $config['operation_journal']['recovery_after_seconds']);
+        self::assertSame(100, $config['operation_journal']['delivery_batch_size']);
+        self::assertSame(3600, $config['operation_journal']['dispatch_deduplication_seconds']);
+        self::assertSame(5, $config['operation_journal']['max_attempts']);
+        self::assertSame(30, $config['operation_journal']['base_retry_seconds']);
+        self::assertSame(3600, $config['operation_journal']['max_retry_seconds']);
+        self::assertSame(300, $config['operation_journal']['lease_seconds']);
+        self::assertTrue($config['dependency_projection']['bootstrap_live_scan']);
+        self::assertSame(50000, $config['dependency_projection']['bootstrap_max_sources']);
+        self::assertSame(1000, $config['dependency_projection']['rebuild_batch_size']);
+        self::assertSame(536870912, $config['zip']['max_uncompressed_bytes']);
+        self::assertSame(300, $config['zip']['download_token_ttl']);
+        self::assertFalse($config['content_scan']['enabled']);
+    }
+
+    #[Test]
+    public function idempotencyLockTtlMustBePositive(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['idempotency' => ['lock_ttl' => 0]],
+        ]);
+    }
+
+    #[Test]
+    public function objectReplayLimitMustBePositive(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['idempotency' => ['max_object_replays' => 0]],
+        ]);
+    }
+
+    #[Test]
+    public function operationJournalRetryWindowMustBeCoherent(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['operation_journal' => ['base_retry_seconds' => 60, 'max_retry_seconds' => 30]],
+        ]);
+    }
+
+    #[Test]
+    public function workerHeartbeatMaximumAgeMustAllowAWorkerLoop(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['async' => ['worker_heartbeat_max_age' => 1]],
+        ]);
     }
 
     #[Test]
@@ -71,6 +130,46 @@ class ConfigurationTest extends TestCase
 
         (new Processor())->processConfiguration(new Configuration(), [
             ['strategies' => ['default' => 'always']],
+        ]);
+    }
+
+    #[Test]
+    public function removedContentScanClassAllowlistIsRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['content_scan' => ['classes' => ['Product']]],
+        ]);
+    }
+
+    #[Test]
+    public function removedContentScanSourceBudgetIsRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['content_scan' => ['max_sources' => 50000]],
+        ]);
+    }
+
+    #[Test]
+    public function dependencyProjectionBatchSizeIsBounded(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['dependency_projection' => ['rebuild_batch_size' => 10001]],
+        ]);
+    }
+
+    #[Test]
+    public function removedAuditDisableSwitchIsRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [
+            ['audit' => ['enabled' => false]],
         ]);
     }
 

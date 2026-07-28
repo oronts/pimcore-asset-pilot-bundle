@@ -14,6 +14,110 @@ function isValidReleaseBuildId(string $buildId): bool
         && $buildId !== '..';
 }
 
+/**
+ * Deterministic SHA-256 over the Studio build inputs, byte-for-byte compatible with `source-hash.mjs` (paths
+ * sorted, content LF-normalized, each `path\0content\0`). Must stay in sync with the JS or the verifier rejects
+ * a valid release.
+ *
+ * @param array<string, string> $sourceFiles studio-relative path => raw content
+ */
+function computeStudioSourceHash(array $sourceFiles): string
+{
+    $paths = array_keys($sourceFiles);
+    sort($paths, SORT_STRING);
+
+    $hash = hash_init('sha256');
+    foreach ($paths as $relative) {
+        hash_update($hash, $relative);
+        hash_update($hash, "\0");
+        hash_update($hash, str_replace("\r\n", "\n", $sourceFiles[$relative]));
+        hash_update($hash, "\0");
+    }
+
+    return hash_final($hash);
+}
+
+/**
+ * The Studio build-input files present in the release archive (`js/src/**`, `rsbuild.config.ts`,
+ * `tsconfig.json`, `package.json`, `package-lock.json`, `scripts/manifest-assets.mjs`, `scripts/publish-build.mjs` under `assets/studio/`), keyed by
+ * studio-relative path. Must stay in sync with source-hash.mjs SOURCE_ROOTS. Mirrors the JS collector's
+ * exclusions (`node_modules` and dotfiles), so the recomputed hash matches the one the build recorded.
+ *
+ * @return array<string, string>
+ */
+function studioSourceFilesFromArchive(ZipArchive $zip): array
+{
+    $files = [];
+    for ($index = 0; $index < $zip->numFiles; ++$index) {
+        $name = $zip->getNameIndex($index);
+        if (!is_string($name) || str_ends_with($name, '/') || !str_starts_with($name, 'assets/studio/')) {
+            continue;
+        }
+        $relative = substr($name, strlen('assets/studio/'));
+        if (!str_starts_with($relative, 'js/src/')
+            && $relative !== 'rsbuild.config.ts'
+            && $relative !== 'tsconfig.json'
+            && $relative !== 'package.json'
+            && $relative !== 'package-lock.json'
+            && $relative !== 'scripts/manifest-assets.mjs'
+            && $relative !== 'scripts/publish-build.mjs'
+        ) {
+            continue;
+        }
+        foreach (explode('/', $relative) as $segment) {
+            if ($segment === 'node_modules' || str_starts_with($segment, '.')) {
+                continue 2;
+            }
+        }
+        $content = $zip->getFromIndex($index);
+        if ($content === false) {
+            throw new RuntimeException('Cannot read archived Studio source: ' . $relative);
+        }
+        $files[$relative] = $content;
+    }
+
+    return $files;
+}
+
+/**
+ * Validates the archived active Studio build pointer and returns its build id. Requires a valid
+ * `sourceHash` so a release archive whose shipped build was not proven fresh against its Studio source
+ * (the check `npm run verify-build` performs) is rejected here too, not just by the JS verifier.
+ */
+function assertActiveStudioBuildPointer(ZipArchive $zip, string $version): string
+{
+    $pointer = $zip->getFromName('public/studio/build/active.json');
+    if ($pointer === false) {
+        throw new RuntimeException('Missing active Studio build pointer.');
+    }
+
+    $active = json_decode($pointer, true, 512, JSON_THROW_ON_ERROR);
+    $buildId = $active['buildId'] ?? null;
+    if (!is_string($buildId) || !isValidReleaseBuildId($buildId)) {
+        throw new RuntimeException('Invalid active Studio build pointer.');
+    }
+    if (!str_starts_with($buildId, $version . '-')) {
+        throw new RuntimeException('The active Studio build does not match the package version.');
+    }
+
+    $sourceHash = $active['sourceHash'] ?? null;
+    if (!is_string($sourceHash) || preg_match('/^[0-9a-f]{64}$/', $sourceHash) !== 1) {
+        throw new RuntimeException('The active Studio build pointer is missing a valid sourceHash; the shipped build cannot be proven fresh against its Studio source (run `npm run verify-build`).');
+    }
+
+    // Recompute the source hash from the ARCHIVED Studio source and compare, so a stale build in the archive
+    // (source changed without a rebuild) is caught here, not only by the JS verifier at build time.
+    $sourceFiles = studioSourceFilesFromArchive($zip);
+    if ($sourceFiles === []) {
+        throw new RuntimeException('The release archive contains no Studio source (assets/studio/js/src, rsbuild.config.ts, tsconfig.json, package.json, package-lock.json, scripts/manifest-assets.mjs, scripts/publish-build.mjs) to prove the build fresh.');
+    }
+    if (!hash_equals($sourceHash, computeStudioSourceHash($sourceFiles))) {
+        throw new RuntimeException('The active Studio build pointer sourceHash does not match the archived Studio source; the shipped build is stale (rebuild: npm run build + prepare-release-build).');
+    }
+
+    return $buildId;
+}
+
 function verifyReleaseManifestAssets(ZipArchive $zip, string $buildId, array $entrypoints, array $manifest): void
 {
     if (!isValidReleaseBuildId($buildId)) {

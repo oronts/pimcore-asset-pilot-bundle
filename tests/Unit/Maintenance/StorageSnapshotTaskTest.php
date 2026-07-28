@@ -19,7 +19,15 @@ class StorageSnapshotTaskTest extends TestCase
     {
         $trends = $this->createMock(StorageTrendService::class);
         $trends->expects(self::once())->method('capture')
-            ->willReturn(['capturedAt' => '2026-06-19 00:00:00', 'types' => 2, 'totalCount' => 3, 'totalSize' => 150]);
+            ->willReturn([
+                'captured' => true,
+                'runId' => 7,
+                'capturedAt' => '2026-06-19 00:00:00',
+                'types' => 2,
+                'totalCount' => 3,
+                'totalSize' => 150,
+                'unknownSizeCount' => 0,
+            ]);
 
         (new StorageSnapshotTask($trends, new NullLogger()))->execute();
     }

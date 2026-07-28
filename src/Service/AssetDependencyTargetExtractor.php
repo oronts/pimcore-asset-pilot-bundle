@@ -15,7 +15,7 @@ use Pimcore\Model\Element\AbstractElement;
  * the dependency projection (to build edges) and the PRE-save deletion fence (to reject a save that
  * would reference an asset mid-delete), so both observe the exact same target set.
  */
-class AssetDependencyTargetExtractor
+class AssetDependencyTargetExtractor implements AssetDependencyTargetExtractorInterface
 {
     public function __construct(private readonly AssetFieldExtractorInterface $fieldExtractor) {}
 

@@ -433,7 +433,7 @@ HELP
         }
 
         return [
-            'plan' => new ApplyPlan('cleanup-unused', ActorContext::system(), $request, [], $targets),
+            'plan' => new ApplyPlan('cleanup-unused', ActorContext::system(), $request, $this->fingerprints->planConfig(), $targets),
             'fingerprints' => $fingerprints,
         ];
     }
