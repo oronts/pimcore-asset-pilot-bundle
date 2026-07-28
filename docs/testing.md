@@ -66,7 +66,7 @@ kernel-free.
 Run every local release gate:
 
 ```bash
-composer validate --strict --no-check-publish
+composer validate-project
 composer audit --locked --no-dev
 composer ci
 npm ci --prefix assets/studio

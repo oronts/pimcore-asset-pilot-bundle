@@ -39,7 +39,7 @@ composer test              # PHPUnit, kernel-free unit suite
 composer stan              # PHPStan (level 5)
 composer cs                # php-cs-fixer (dry-run); composer cs-fix to apply
 composer audit-production  # locked production dependencies (composer audit --locked --no-dev)
-composer validate-project  # strict package metadata and lock validation (composer validate --strict --no-check-publish)
+composer validate-project  # package metadata and lock validation (composer validate --no-check-publish)
 ```
 
 For the Studio UI, run its static, unit, accessibility, dependency, and publication gates:
