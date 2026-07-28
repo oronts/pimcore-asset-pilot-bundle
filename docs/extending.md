@@ -570,6 +570,7 @@ use Oronts\AssetPilotBundle\Action\RuleActionInterface;
 use Oronts\AssetPilotBundle\Action\RuleActionDeliveryContextInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\Element\Tag;
 
 class AssignReviewTagAction implements RuleActionInterface
 {
@@ -580,15 +581,23 @@ class AssignReviewTagAction implements RuleActionInterface
 
     public function prepare(Asset $asset, AbstractObject $object, array $config): array
     {
+        // Return serializable values only; the Tag element is resolved at delivery time.
         return ['tag' => (string) ($config['tag'] ?? 'review')];
     }
 
     public function applyPrepared(Asset $asset, array $payload, RuleActionDeliveryContextInterface $delivery): void
     {
-        $idempotencyKey = $delivery->deliveryId();
         $delivery->heartbeat();
 
-        // Skip work already recorded for this idempotency key, then assign the tag.
+        $tag = Tag::getByPath('/' . $payload['tag']);
+        if (!$tag instanceof Tag) {
+            return;
+        }
+
+        // Naturally idempotent: the (tag, element) assignment is keyed, so an at-least-once retry
+        // re-adds the same pair without duplicating it. For an external system instead, send
+        // $delivery->deliveryId() as the idempotency key so the retry is deduplicated there.
+        Tag::addTagToElement('asset', (int) $asset->getId(), $tag);
     }
 }
 ```
@@ -826,12 +835,15 @@ observing a version-rollback self-heal:
 
 ## Asset field-type coverage
 
-`AssetFieldExtractor` discovers the assets to organize across image, video, document, archive,
-hotspotimage and imageGallery fields; every relation type (manyToOne / manyToMany / object and the
-advanced relations, unwrapped from `ElementMetadata`); and assets nested in **object bricks**, **field
-collections**, **localized fields** and **block** fields (reported under a qualified field name such
-as `myBrick.image`). Unused-asset detection additionally relies on Pimcore's dependency table, which
-records relation references regardless of where they are nested.
+`AssetFieldExtractor` discovers the assets to organize across the native Pimcore asset field types
+(image, video with its poster, hotspotimage and imageGallery); asset-capable relation fields (manyToOne
+/ manyToMany and the advanced relations, whenever the field definition allows assets via
+`getAssetsAllowed()`, unwrapped from `ElementMetadata`); and assets nested in **object bricks**, **field
+collections**, **localized fields** and **block** fields (reported under a qualified field name such as
+`myBrick.image`). Document and archive assets are referenced through those asset-capable relation
+fields, not through direct field types; object-only relations (for example `manyToManyObjectRelation`)
+carry no assets. Unused-asset detection additionally relies on Pimcore's dependency table, which records
+relation references regardless of where they are nested.
 
 ## Known Limitations
 

@@ -130,7 +130,7 @@ flowchart TD
     style OperationJournal fill:#E8F4FD,stroke:#333
 ```
 
-> **Note:** Extracts assets from: image, video, document fields · gallery, hotspotimage fields · relation fields (many-to-one, many-to-many) · localized fields (all locales)
+> **Note:** Extracts assets from native asset fields (image, video with its poster, gallery, hotspotimage, block) · asset-capable relation fields (many-to-one, many-to-many, advanced) · localized fields (all locales). Document and archive assets are reached through relation fields, not direct field types.
 
 ```
 src/

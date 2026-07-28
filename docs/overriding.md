@@ -19,6 +19,17 @@ therefore work across HTTP, CLI, listeners, and workers without depending on pro
 Only immutable values and invariant helpers such as token signing, lock scope, canonical snapshots, and schema
 queries are closed with `final` or private state-transition methods.
 
+Prefer the interface seams and service decoration for customization: implement or decorate a published
+interface rather than subclassing a safety service to override a step. The apply-plan token service, the
+synchronous run executor, the reviewed-asset lock coordinator, the operation run store, and the
+dependency-projection listener are `final`. The loop guard, run-item lease, and the deletion and claim
+fences keep their token signing, lock acquisition, and fence-handshake steps private, and they are replaced
+through their contract, not subclassed. Several service defaults stay ordinary (non-final) classes so their
+behavior can be specialized in a subclass, but their crypto, authorization, lock-scope, fence, lease, and
+state-transition steps are private on those classes too, so no enforcement decision is reachable from a
+subclass. Where a class exposes a protected method it is a harmless test or template seam (a clock, an
+element lookup, a render helper), never a safety decision.
+
 
 ## The overridable core services
 
@@ -32,6 +43,7 @@ queries are closed with `final` or private state-transition methods.
 | `AssetFilterInterface` | `CompositeFilter` |
 | `AssetFieldExtractorInterface` | `AssetFieldExtractor` |
 | `AssetDependencyResolverInterface` | `AssetDependencyResolver` |
+| `AssetDependencyTargetExtractorInterface` | `AssetDependencyTargetExtractor` |
 | `UnusedAssetFinderInterface` | `UnusedAssetFinder` |
 | `AssetSearchServiceInterface` | `AssetSearchService` |
 | `ConfidenceScorerInterface` | `ConfidenceScorer` |

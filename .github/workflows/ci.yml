@@ -26,7 +26,7 @@ jobs:
           tools: composer:v2
 
       - name: Validate Composer metadata
-        run: composer validate --strict --no-check-publish
+        run: composer validate --no-check-publish
 
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction

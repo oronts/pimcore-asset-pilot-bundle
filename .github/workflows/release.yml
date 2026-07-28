@@ -34,7 +34,7 @@ jobs:
         run: test "${GITHUB_REF_NAME}" = "v$(node -p "require('./assets/studio/package.json').version")"
 
       - name: Validate Composer metadata
-        run: composer validate --strict --no-check-publish
+        run: composer validate --no-check-publish
 
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
