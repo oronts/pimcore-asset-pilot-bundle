@@ -6,10 +6,15 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Schema\Schema;
+use Oronts\AssetPilotBundle\DependencyProjectionSchema;
+use Oronts\AssetPilotBundle\Exception\AssetDeletionFenceLostException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Security\ActorContextProvider;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Service\AssetDeletionFenceInterface;
+use Oronts\AssetPilotBundle\Service\DbalAssetDeletionFence;
 use Oronts\AssetPilotBundle\Service\EmptyFolderSweepService;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
@@ -18,6 +23,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
+use Pimcore\Model\Element\ValidationException;
 use Psr\Log\NullLogger;
 
 #[CoversClass(EmptyFolderSweepService::class)]
@@ -42,9 +48,14 @@ class EmptyFolderSweepServiceTest extends TestCase
      * @param \ArrayObject<int, int>                     $deleted
      * @param list<array{id: int, full_path: string}>    $rows
      */
-    private function service(array $foldersById = [], ?\ArrayObject $deleted = null, array $rows = [], ?array $visibleIds = null, ?LoopGuard $loopGuard = null): EmptyFolderSweepService
+    private function service(array $foldersById = [], ?\ArrayObject $deleted = null, array $rows = [], ?array $visibleIds = null, ?LoopGuard $loopGuard = null, array $referencedIds = [], ?AssetDeletionFenceInterface $fence = null): EmptyFolderSweepService
     {
         $deleted ??= new \ArrayObject();
+
+        if ($fence === null) {
+            $fence = $this->createMock(AssetDeletionFenceInterface::class);
+            $fence->method('acquire')->willReturn('fence-token');
+        }
 
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn(ActorContext::user(7));
@@ -64,20 +75,26 @@ class EmptyFolderSweepServiceTest extends TestCase
             $this->createMock(ActorContextProvider::class),
         );
 
-        return new class ($foldersById, $deleted, $rows, $connection, $authorization, $loopGuard, $workspaceScope) extends EmptyFolderSweepService {
+        return new class ($foldersById, $deleted, $rows, $referencedIds, $connection, $authorization, $loopGuard, $workspaceScope, $fence) extends EmptyFolderSweepService {
             /**
              * @param array<int, ?Asset\Folder>               $foldersById
              * @param \ArrayObject<int, int>                  $deleted
              * @param list<array{id: int, full_path: string}> $rows
+             * @param list<int>                               $referencedIds
              */
-            public function __construct(private readonly array $foldersById, private readonly \ArrayObject $deleted, private readonly array $rows, Connection $connection, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope)
+            public function __construct(private readonly array $foldersById, private readonly \ArrayObject $deleted, private readonly array $rows, private readonly array $referencedIds, Connection $connection, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence);
             }
 
             protected function loadFolder(int $id): ?Asset\Folder
             {
                 return $this->foldersById[$id] ?? null;
+            }
+
+            protected function isReferenced(int $folderId): bool
+            {
+                return in_array($folderId, $this->referencedIds, true);
             }
 
             protected function deleteFolder(Asset\Folder $folder): void
@@ -135,10 +152,33 @@ class EmptyFolderSweepServiceTest extends TestCase
     }
 
     #[Test]
+    public function skipsAFolderReferencedByALiveDependency(): void
+    {
+        $deleted = new \ArrayObject();
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], $deleted, referencedIds: [5]);
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(0, $result['deleted']);
+        self::assertSame(1, $result['skipped']);
+        self::assertSame([], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function previewMarksAReferencedFolderNotEligible(): void
+    {
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], referencedIds: [5]);
+        $result = $service->previewDelete([5]);
+
+        self::assertSame(0, $result['eligible']);
+        self::assertSame(1, $result['skipped']);
+    }
+
+    #[Test]
     public function skipsWhenTheDatabaseRecheckFindsANewChild(): void
     {
         $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
         $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, parentId INTEGER NOT NULL)');
+        $connection->executeStatement('CREATE TABLE dependencies (id INTEGER PRIMARY KEY, targetid INTEGER NOT NULL, targettype TEXT NOT NULL)');
         $connection->insert('assets', ['id' => 9, 'parentId' => 5]);
         $folder = $this->folder(5, hasChildren: false, allowed: true);
         $deleted = new \ArrayObject();
@@ -147,15 +187,61 @@ class EmptyFolderSweepServiceTest extends TestCase
         $authorization->method('isAllowed')->willReturn(true);
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireAsset')->willReturn(true);
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->method('acquire')->willReturn('fence-token');
         $workspaceScope = new AssetWorkspaceQueryScope(
             $connection,
             $authorization,
             $this->createMock(ActorContextProvider::class),
         );
-        $service = new class ($connection, $folder, $deleted, $authorization, $loopGuard, $workspaceScope) extends EmptyFolderSweepService {
-            public function __construct(Connection $connection, private readonly Asset\Folder $folder, private readonly \ArrayObject $deleted, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope)
+        $service = new class ($connection, $folder, $deleted, $authorization, $loopGuard, $workspaceScope, $fence) extends EmptyFolderSweepService {
+            public function __construct(Connection $connection, private readonly Asset\Folder $folder, private readonly \ArrayObject $deleted, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence);
+            }
+
+            protected function loadFolder(int $id): Asset\Folder
+            {
+                return $this->folder;
+            }
+
+            protected function deleteFolder(Asset\Folder $folder): void
+            {
+                $this->deleted->append((int) $folder->getId());
+            }
+        };
+
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(1, $result['skipped']);
+        self::assertSame([], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function skipsAChildlessFolderStillReferencedByADependencyRow(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, parentId INTEGER NOT NULL)');
+        $connection->executeStatement('CREATE TABLE dependencies (id INTEGER PRIMARY KEY, targetid INTEGER NOT NULL, targettype TEXT NOT NULL)');
+        $connection->insert('dependencies', ['id' => 1, 'targetid' => 5, 'targettype' => 'asset']);
+        $folder = $this->folder(5, hasChildren: false, allowed: true);
+        $deleted = new \ArrayObject();
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('currentActor')->willReturn(ActorContext::user(7));
+        $authorization->method('isAllowed')->willReturn(true);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->method('acquire')->willReturn('fence-token');
+        $workspaceScope = new AssetWorkspaceQueryScope(
+            $connection,
+            $authorization,
+            $this->createMock(ActorContextProvider::class),
+        );
+        $service = new class ($connection, $folder, $deleted, $authorization, $loopGuard, $workspaceScope, $fence) extends EmptyFolderSweepService {
+            public function __construct(Connection $connection, private readonly Asset\Folder $folder, private readonly \ArrayObject $deleted, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence)
+            {
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence);
             }
 
             protected function loadFolder(int $id): Asset\Folder
@@ -186,6 +272,111 @@ class EmptyFolderSweepServiceTest extends TestCase
         self::assertSame(1, $result['failed']);
         self::assertArrayHasKey(5, $result['errors']);
         self::assertSame([], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function acquiresRefreshesAndReleasesTheDeletionFenceOnASuccessfulSweep(): void
+    {
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->expects(self::once())->method('acquire')->with(5, 'empty_folder_sweep')->willReturn('token');
+        $fence->expects(self::once())->method('refreshOrFail')->with(5, 'token');
+        $fence->expects(self::once())->method('release')->with(5, 'token');
+        $deleted = new \ArrayObject();
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], $deleted, fence: $fence);
+
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(1, $result['deleted']);
+        self::assertSame([5], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function failsAFolderAnotherOperationIsAlreadyDeleting(): void
+    {
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->method('acquire')->willReturn(null);
+        $fence->expects(self::never())->method('release');
+        $deleted = new \ArrayObject();
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], $deleted, fence: $fence);
+
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(0, $result['deleted']);
+        self::assertSame(1, $result['failed']);
+        self::assertArrayHasKey(5, $result['errors']);
+        self::assertSame([], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function failsAndReleasesWhenTheFenceIsLostBeforeDeletion(): void
+    {
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->method('acquire')->willReturn('token');
+        $fence->method('refreshOrFail')->willThrowException(new AssetDeletionFenceLostException(5));
+        $fence->expects(self::once())->method('release')->with(5, 'token');
+        $deleted = new \ArrayObject();
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], $deleted, fence: $fence);
+
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(0, $result['deleted']);
+        self::assertSame(1, $result['failed']);
+        self::assertSame([], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function stillReportsSuccessWhenTheFenceReleaseThrows(): void
+    {
+        $fence = $this->createMock(AssetDeletionFenceInterface::class);
+        $fence->method('acquire')->willReturn('token');
+        $fence->method('release')->willThrowException(new \RuntimeException('release failed'));
+        $deleted = new \ArrayObject();
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], $deleted, fence: $fence);
+
+        $result = $this->apply($service, [5]);
+
+        self::assertSame(1, $result['deleted']);
+        self::assertSame(0, $result['failed']);
+        self::assertSame([5], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function theSweepFenceBlocksAConcurrentDependencyWriterAcrossConnections(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'asset-pilot-sweep-fence-');
+        self::assertIsString($path);
+        try {
+            $deleterConnection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => $path]);
+            $schema = new Schema();
+            DependencyProjectionSchema::ensure($schema);
+            foreach ($schema->toSql($deleterConnection->getDatabasePlatform()) as $sql) {
+                $deleterConnection->executeStatement($sql);
+            }
+            $deleterConnection->executeStatement('CREATE TABLE assets (id INTEGER PRIMARY KEY, path TEXT, filename TEXT, type TEXT)');
+            $deleterConnection->insert('assets', ['id' => 5, 'path' => '/x/', 'filename' => 'folder5', 'type' => 'folder']);
+
+            $writerConnection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => $path]);
+            $deleterFence = new DbalAssetDeletionFence($deleterConnection);
+            $writerFence = new DbalAssetDeletionFence($writerConnection);
+
+            // The sweep acquires the deletion fence for folder 5, exactly as EmptyFolderSweepService now does.
+            $token = $deleterFence->acquire(5, 'empty_folder_sweep');
+            self::assertNotNull($token);
+
+            // A save on a second connection that would reference folder 5 is blocked while the sweep holds the fence.
+            try {
+                $writerFence->assertWritableTargets([5]);
+                self::fail('Expected the fenced folder to block the concurrent dependency writer.');
+            } catch (ValidationException $e) {
+                self::assertStringContainsString('being deleted', $e->getMessage());
+            }
+
+            // Once the sweep releases the fence, the writer may proceed.
+            $deleterFence->release(5, $token);
+            $writerFence->assertWritableTargets([5]);
+        } finally {
+            @unlink($path);
+        }
     }
 
     #[Test]

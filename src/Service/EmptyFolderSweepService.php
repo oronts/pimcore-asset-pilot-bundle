@@ -29,6 +29,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
     /** The asset tree root (id 1, path '/') is never a sweep candidate. */
     private const int ROOT_ID = 1;
     private const int PLAN_VERSION = 1;
+    private const string FENCE_OPERATION = 'empty_folder_sweep';
 
     public function __construct(
         protected readonly Connection $connection,
@@ -37,6 +38,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
         protected readonly LoopGuard $loopGuard,
         protected readonly ReviewedAssetLockCoordinator $reviewedLocks,
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
+        private readonly AssetDeletionFenceInterface $deletionFence,
         protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
@@ -112,6 +114,10 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                 ++$skipped;
                 continue;
             }
+            if ($this->isReferenced((int) $id)) {
+                ++$skipped;
+                continue;
+            }
             if (!$this->authorization->isAllowed($folder, 'delete')) {
                 $errors[$id] = 'Not permitted to delete this folder';
                 ++$failed;
@@ -163,6 +169,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                 continue;
             }
 
+            $fenceToken = null;
             try {
                 $folder = $this->loadFolder($id);
                 if ($folder === null) {
@@ -186,6 +193,21 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                     continue;
                 }
 
+                $fenceToken = $this->deletionFence->acquire($id, self::FENCE_OPERATION);
+                if ($fenceToken === null) {
+                    $errors[$id] = 'Folder is already being deleted by another operation';
+                    ++$failed;
+                    continue;
+                }
+
+                // Post-fence re-read: the writer/deleter handshake, not a point-in-time count.
+                if ($this->isReferenced($id)) {
+                    ++$skipped;
+                    continue;
+                }
+
+                $this->loopGuard->refreshAsset($id);
+                $this->deletionFence->refreshOrFail($id, $fenceToken);
                 if (!$this->deleteFolderIfStillEmpty($folder)) {
                     ++$skipped;
                     continue;
@@ -199,6 +221,14 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                 $errors[$id] = 'Failed to delete the empty folder.';
                 ++$failed;
                 $this->logger->error('Asset Pilot: failed to delete empty folder {id}.', ['id' => $id, 'exception' => $e]);
+            } finally {
+                if ($fenceToken !== null) {
+                    try {
+                        $this->deletionFence->release($id, $fenceToken);
+                    } catch (\Throwable $e) {
+                        $this->logger->error('Asset Pilot: could not release the deletion fence for folder {id}; it will be reaped.', ['id' => $id, 'exception' => $e]);
+                    }
+                }
             }
         }
 
@@ -266,6 +296,21 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
         $folder = Asset::getById($id);
 
         return $folder instanceof Asset\Folder ? $folder : null;
+    }
+
+    protected function isReferenced(int $folderId): bool
+    {
+        $count = (int) $this->connection->createQueryBuilder()
+            ->select('COUNT(*)')
+            ->from(PimcoreSchema::TABLE_DEPENDENCIES)
+            ->where('targetid = :id')
+            ->andWhere('targettype = :type')
+            ->setParameter('id', $folderId)
+            ->setParameter('type', PimcoreSchema::ELEMENT_TYPE_ASSET)
+            ->executeQuery()
+            ->fetchOne();
+
+        return $count > 0;
     }
 
     protected function deleteFolder(Asset\Folder $folder): void
