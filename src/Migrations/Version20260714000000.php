@@ -76,24 +76,29 @@ class Version20260714000000 extends BundleAwareMigration
                 continue;
             }
 
-            $this->connection->insert(Installer::TABLE_STORAGE_RUN, [
-                'started_at' => $capturedAt,
-                'completed_at' => $capturedAt,
-                'status' => OperationStatus::Completed->value,
-                'total_count' => (int) $totals['total_count'],
-                'total_size' => (int) $totals['total_size'],
-                'unknown_size_count' => (int) $totals['unknown_size_count'],
-                'error_message' => null,
-            ]);
-            $runId = (int) $this->connection->lastInsertId();
-            $this->connection->createQueryBuilder()
-                ->update(Installer::TABLE_STORAGE_SNAPSHOT)
-                ->set('run_id', ':runId')
-                ->where('run_id IS NULL')
-                ->andWhere('captured_at = :capturedAt')
-                ->setParameter('runId', $runId)
-                ->setParameter('capturedAt', $capturedAt)
-                ->executeStatement();
+            // Reconstruct the run and re-assign its snapshots atomically: a crash between the two leaves the
+            // snapshots run_id IS NULL for a clean re-run instead of orphaning a totals-bearing run that would
+            // double-count the sample in the trend history.
+            $this->connection->transactional(function () use ($capturedAt, $totals): void {
+                $this->connection->insert(Installer::TABLE_STORAGE_RUN, [
+                    'started_at' => $capturedAt,
+                    'completed_at' => $capturedAt,
+                    'status' => OperationStatus::Completed->value,
+                    'total_count' => (int) $totals['total_count'],
+                    'total_size' => (int) $totals['total_size'],
+                    'unknown_size_count' => (int) $totals['unknown_size_count'],
+                    'error_message' => null,
+                ]);
+                $runId = (int) $this->connection->lastInsertId();
+                $this->connection->createQueryBuilder()
+                    ->update(Installer::TABLE_STORAGE_SNAPSHOT)
+                    ->set('run_id', ':runId')
+                    ->where('run_id IS NULL')
+                    ->andWhere('captured_at = :capturedAt')
+                    ->setParameter('runId', $runId)
+                    ->setParameter('capturedAt', $capturedAt)
+                    ->executeStatement();
+            });
         }
     }
 

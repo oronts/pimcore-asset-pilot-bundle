@@ -168,6 +168,29 @@ class Version20260714000000Test extends TestCase
     }
 
     #[Test]
+    public function postUpRollsBackTheRunWhenSnapshotAssignmentFailsMidReconstruction(): void
+    {
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $connection->executeStatement('CREATE TABLE asset_pilot_storage_run (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL, total_count INTEGER NOT NULL, total_size INTEGER NOT NULL, unknown_size_count INTEGER NOT NULL DEFAULT 0, error_message TEXT)');
+        $connection->executeStatement('CREATE TABLE asset_pilot_storage_snapshot (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, captured_at TEXT NOT NULL, type TEXT NOT NULL, unused_count INTEGER NOT NULL, unused_size INTEGER NOT NULL, unknown_size_count INTEGER NOT NULL DEFAULT 0, UNIQUE(run_id, type))');
+        $connection->insert(Installer::TABLE_STORAGE_SNAPSHOT, ['run_id' => null, 'captured_at' => '2026-06-18 00:00:00', 'type' => 'image', 'unused_count' => 2, 'unused_size' => 100, 'unknown_size_count' => 0]);
+        // Simulate the process dying on the snapshot run_id re-assignment: any UPDATE aborts.
+        $connection->executeStatement("CREATE TRIGGER fail_snapshot_update BEFORE UPDATE ON asset_pilot_storage_snapshot BEGIN SELECT RAISE(ABORT, 'crash between insert and update'); END");
+
+        $migration = new Version20260714000000($connection, new NullLogger());
+
+        try {
+            $migration->postUp(new Schema());
+            self::fail('Expected the aborted snapshot update to propagate.');
+        } catch (\Throwable) {
+            // expected: the run insert must roll back with the failed snapshot assignment
+        }
+
+        self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_run'), 'The run insert must roll back, leaving no orphan run to double-count.');
+        self::assertSame(1, (int) $connection->fetchOne('SELECT COUNT(*) FROM asset_pilot_storage_snapshot WHERE run_id IS NULL'), 'Snapshots stay unassigned so a re-run reconstructs them exactly once.');
+    }
+
+    #[Test]
     public function isScopedToThisBundle(): void
     {
         $method = new \ReflectionMethod(Version20260714000000::class, 'getBundleName');
