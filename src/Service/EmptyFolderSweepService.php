@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
+use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
@@ -39,6 +40,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
         protected readonly ReviewedAssetLockCoordinator $reviewedLocks,
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
         private readonly AssetDeletionFenceInterface $deletionFence,
+        private readonly DependencyUsageVerifierInterface $dependencyVerifier,
         protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
@@ -114,7 +116,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                 ++$skipped;
                 continue;
             }
-            if ($this->isReferenced((int) $id)) {
+            if ($this->isReferenced((int) $id) || $this->dependencyVerifier->verdict($folder) !== DependencyUsageVerdict::Safe) {
                 ++$skipped;
                 continue;
             }
@@ -200,8 +202,10 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                     continue;
                 }
 
-                // Post-fence re-read: the writer/deleter handshake, not a point-in-time count.
-                if ($this->isReferenced($id)) {
+                // Post-fence re-read: the writer/deleter handshake, not a point-in-time count. The verdict is
+                // Unknown while any source is dirty, so a writer that committed its dirty marker before its own
+                // fence check (but has not yet committed the reference) still blocks this delete.
+                if ($this->isReferenced($id) || $this->dependencyVerifier->verdict($folder) !== DependencyUsageVerdict::Safe) {
                     ++$skipped;
                     continue;
                 }
