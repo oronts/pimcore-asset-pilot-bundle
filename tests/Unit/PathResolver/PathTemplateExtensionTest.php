@@ -82,6 +82,37 @@ class PathTemplateExtensionTest extends TestCase
         self::assertFalse($flag['mutated'], 'A path-template filter must never invoke a non-accessor (mutating) method.');
     }
 
+    #[Test]
+    public function readAccessorsIgnoreNonPublicAndArgumentRequiringMembers(): void
+    {
+        $obj = new class () {
+            public string $publicName = 'pub';
+            protected string $secret = 'nope';
+
+            public function getCode(): string
+            {
+                return 'C1';
+            }
+
+            protected function getHidden(): string
+            {
+                return 'hidden';
+            }
+
+            public function getWithArg(string $x): string
+            {
+                return $x;
+            }
+        };
+        $items = ['items' => [$obj]];
+
+        self::assertSame('C1', $this->render("{{ items|first_of('code') }}", $items));
+        self::assertSame('pub', $this->render("{{ items|first_of('publicName') }}", $items));
+        self::assertSame('unknown', $this->render("{{ items|first_of('hidden') }}", $items));
+        self::assertSame('unknown', $this->render("{{ items|first_of('secret') }}", $items));
+        self::assertSame('unknown', $this->render("{{ items|first_of('getWithArg') }}", $items));
+    }
+
     /**
      * @param array<string, mixed> $context
      */

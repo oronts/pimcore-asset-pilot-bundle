@@ -329,7 +329,7 @@ and token reuse are rejected before any rename.
 
 ```bash
 # Preview empty asset folders and receive a signed plan token
-bin/console asset-pilot:sweep-empty-folders --folder=/Products
+bin/console asset-pilot:sweep-empty-folders --folder=/Products --limit=1000
 
 # Delete the exact reviewed folders
 bin/console asset-pilot:sweep-empty-folders --folder=/Products --apply --plan-token='v1...'
@@ -340,8 +340,9 @@ query (no full-tree walk, never blocks). Preview issues a signed, single-use sys
 folder selector, limit, exact sorted folder ids and folder-state fingerprints. Apply requires the
 same selector plus `--apply --plan-token=...`, then locks and re-verifies every folder before the first
 delete. Changed selections, folders that gained content, expired tokens, and reused tokens are
-rejected without recursively deleting anything. The asset tree root is never a candidate. One pass
-removes the current leaf-empty folders; a parent that only held those is swept on the next run.
+rejected without recursively deleting anything. The asset tree root is never a candidate. The pass is
+bounded by `--limit` (default 500, clamped to 1..1000): one run removes up to that many current
+leaf-empty folders, and a parent that only held those is swept on a subsequent run.
 
 ### Quarantine Purge
 

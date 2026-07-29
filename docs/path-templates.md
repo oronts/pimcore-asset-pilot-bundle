@@ -26,8 +26,8 @@ You can call any method on the `object` and `asset` variables directly in the te
 | Filter | Usage | Description |
 |--------|-------|-------------|
 | `safe_key` | `{{ value\|safe_key }}` | Replace any char that is not a letter, digit, `_`, `-`, or `.` with `-`; empty input becomes `unknown` |
-| `pluck` | `{{ items\|pluck('key') }}` | Extract a property from each item in the list: object entries via getter, method, or public property; array entries by key |
-| `first_of` | `{{ items\|first_of('key', 'default') }}` | Property from the first item only, which must be an object (read via its getter or method); a non-object first entry, e.g. an associative array, yields the fallback. Optional second arg sets the fallback (default `'unknown'`) |
+| `pluck` | `{{ items\|pluck('key') }}` | Extract a property from each item in the list: object entries via a `getKey` getter, a public `get`/`is`/`has` accessor method, or a public property; array entries by key. Non-accessor and non-public members are never invoked |
+| `first_of` | `{{ items\|first_of('key', 'default') }}` | Property from the first item only, which must be an object (read via a `getKey` getter or a public `get`/`is`/`has` accessor method); a non-object first entry, e.g. an associative array, yields the fallback. Optional second arg sets the fallback (default `'unknown'`) |
 | `slug` | `{{ value\|slug }}` | URL-safe lowercase slug |
 | `fallback` | `{{ value\|fallback('default') }}` | Return fallback when value is empty/null |
 | `trim_path` | `{{ value\|trim_path }}` | Strip leading/trailing slashes |

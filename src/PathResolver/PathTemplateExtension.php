@@ -38,18 +38,7 @@ class PathTemplateExtension extends AbstractExtension
                 $values = [];
                 foreach ($items as $item) {
                     if (is_object($item)) {
-                        // Try getter first
-                        $getter = 'get' . ucfirst($property);
-                        if (method_exists($item, $getter)) {
-                            $val = $item->$getter();
-                        } elseif (preg_match('/^(get|is|has)[A-Z0-9]/', $property) && method_exists($item, $property)) {
-                            $val = $item->$property();
-                        } elseif (property_exists($item, $property)) {
-                            $val = $item->$property;
-                        } else {
-                            $val = null;
-                        }
-
+                        $val = self::readAccessor($item, $property);
                         if ($val !== null) {
                             $values[] = (string) $val;
                         }
@@ -70,18 +59,9 @@ class PathTemplateExtension extends AbstractExtension
 
                 foreach ($items as $item) {
                     if (is_object($item)) {
-                        $getter = 'get' . ucfirst($property);
-                        if (method_exists($item, $getter)) {
-                            $val = $item->$getter();
-                            if ($val !== null && $val !== '') {
-                                return (string) $val;
-                            }
-                        }
-                        if (preg_match('/^(get|is|has)[A-Z0-9]/', $property) && method_exists($item, $property)) {
-                            $val = $item->$property();
-                            if ($val !== null && $val !== '') {
-                                return (string) $val;
-                            }
+                        $val = self::readAccessor($item, $property);
+                        if ($val !== null && $val !== '') {
+                            return (string) $val;
                         }
                     }
                     break; // only check first
@@ -132,10 +112,10 @@ class PathTemplateExtension extends AbstractExtension
             // prop(obj, 'method', ...args) — call a read accessor on an object. Restricted to get/is/has
             // accessors so a path template (admin-authored, but still) cannot invoke a mutating method.
             new TwigFunction('prop', static function (mixed $obj, string $method, mixed ...$args): mixed {
-                if ($obj === null || !is_object($obj) || !method_exists($obj, $method)) {
+                if ($obj === null || !is_object($obj) || !preg_match('/^(get|is|has)[A-Z0-9]/', $method)) {
                     return null;
                 }
-                if (!preg_match('/^(get|is|has)[A-Z0-9]/', $method)) {
+                if (!self::isCallablePublicMethod($obj, $method, count($args))) {
                     return null;
                 }
                 return $obj->$method(...$args);
@@ -148,7 +128,7 @@ class PathTemplateExtension extends AbstractExtension
                 }
 
                 $getter = 'get' . ucfirst($relation);
-                if (!method_exists($object, $getter)) {
+                if (!self::isCallablePublicMethod($object, $getter, 0)) {
                     return null;
                 }
 
@@ -167,7 +147,7 @@ class PathTemplateExtension extends AbstractExtension
                 }
 
                 $getter = 'get' . ucfirst($relation);
-                if (!method_exists($object, $getter)) {
+                if (!self::isCallablePublicMethod($object, $getter, 0)) {
                     return false;
                 }
 
@@ -179,5 +159,32 @@ class PathTemplateExtension extends AbstractExtension
                 return $items !== null;
             }),
         ];
+    }
+
+    /** A public, argument-free read accessor (a get/is/has method or a public property), or null so the caller falls back. */
+    private static function readAccessor(object $item, string $name): mixed
+    {
+        $getter = 'get' . ucfirst($name);
+        if (self::isCallablePublicMethod($item, $getter, 0)) {
+            return $item->$getter();
+        }
+        if (preg_match('/^(get|is|has)[A-Z0-9]/', $name) && self::isCallablePublicMethod($item, $name, 0)) {
+            return $item->$name();
+        }
+        if (property_exists($item, $name) && (new \ReflectionProperty($item, $name))->isPublic()) {
+            return $item->$name;
+        }
+
+        return null;
+    }
+
+    private static function isCallablePublicMethod(object $item, string $method, int $availableArgs): bool
+    {
+        if (!method_exists($item, $method)) {
+            return false;
+        }
+        $reflection = new \ReflectionMethod($item, $method);
+
+        return $reflection->isPublic() && $reflection->getNumberOfRequiredParameters() <= $availableArgs;
     }
 }
