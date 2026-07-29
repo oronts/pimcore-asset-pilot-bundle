@@ -679,7 +679,7 @@ class OpenApiAssetManagementSpecification
         new OA\Property(property: 'async', type: 'boolean', default: false),
         new OA\Property(property: 'dryRun', type: 'boolean', default: true, description: 'Preview by default. Set false only with the planToken returned for the same selector and current object state.'),
         new OA\Property(property: 'planToken', type: 'string', nullable: true, description: 'Required when dryRun is false; signed, actor-bound, and single-use.'),
-        new OA\Property(property: 'limit', type: 'integer', minimum: 1, nullable: true),
+        new OA\Property(property: 'limit', type: 'integer', minimum: 1, maximum: 1000, nullable: true),
     ])),
     responses: [
         new OA\Response(response: 200, description: 'Reviewed preview or synchronous reorganization', content: new OA\JsonContent(allOf: [
@@ -714,7 +714,7 @@ class OpenApiAssetManagementSpecification
         new OA\Property(property: 'async', type: 'boolean', default: false),
         new OA\Property(property: 'dryRun', type: 'boolean', default: true, description: 'Preview by default. Set false only with the planToken returned for the same filters and current object state.'),
         new OA\Property(property: 'planToken', type: 'string', nullable: true, description: 'Required when dryRun is false; signed, actor-bound, and single-use.'),
-        new OA\Property(property: 'limit', type: 'integer', minimum: 1, nullable: true),
+        new OA\Property(property: 'limit', type: 'integer', minimum: 1, maximum: 1000, nullable: true),
     ])),
     responses: [
         new OA\Response(response: 200, description: 'Reviewed preview or synchronous replay', content: new OA\JsonContent(allOf: [
@@ -814,7 +814,7 @@ class OpenApiAssetManagementSpecification
         new OA\Property(property: 'objectIds', ref: '#/components/schemas/IdList'),
         new OA\Property(property: 'async', type: 'boolean', default: true),
         new OA\Property(property: 'dryRun', type: 'boolean', default: false, description: 'Set true to preview the resolved object set and receive a signed, single-use planToken.'),
-        new OA\Property(property: 'batchSize', type: 'integer', minimum: 1),
+        new OA\Property(property: 'batchSize', type: 'integer', minimum: 1, maximum: 1000),
         new OA\Property(property: 'planToken', type: 'string', nullable: true, description: 'Required when dryRun is false; bound to the exact selector, resolved objects, actor, configuration, and current operations.'),
     ])),
     responses: [

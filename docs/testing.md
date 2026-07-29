@@ -86,5 +86,7 @@ Before production rollout, add host-application tests for real MySQL schema upgr
 prefix routing, restricted asset/object/document workspaces, queue retry/failure behavior, shared
 locks across processes, remote storage failures, and the supported Studio browser matrix. These
 deployment-level checks are defined as an acceptance matrix in
-[End-to-end acceptance](e2e-acceptance.md) (Playwright + axe under `assets/studio/e2e/`); the matrix
-is a scaffold with a couple of smoke checks, not yet a wired gate.
+[End-to-end acceptance](e2e-acceptance.md) (Playwright + axe under `assets/studio/e2e/`). That matrix
+is exercised by a six-test representative browser suite wired to a manual (`workflow_dispatch`),
+not-yet-required workflow; see the acceptance page for exactly which rows it covers fully versus
+partially.

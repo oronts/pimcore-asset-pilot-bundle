@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\PropertyType;
@@ -24,6 +25,7 @@ use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\ZipDownloadTokenStoreInterface;
+use Oronts\AssetPilotBundle\Support\PropertyValue;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
@@ -41,6 +43,7 @@ class AssetManagementController
 {
     use DecodesJsonObject;
     use HandlesBulkIds;
+    use ReadsRequestScalars;
 
     private const int MAX_TAG_LIMIT = 200;
 
@@ -439,17 +442,30 @@ class AssetManagementController
             return $assetIds;
         }
 
-        $name = trim((string) ($data['name'] ?? ''));
+        $name = $this->requestString($data, 'name', '');
+        if ($name instanceof JsonResponse) {
+            return $name;
+        }
+        $name = trim($name);
         if ($name === '') {
             return new JsonResponse(['error' => 'name is required'], Response::HTTP_BAD_REQUEST);
         }
-        $type = trim((string) ($data['type'] ?? PropertyType::Text->value));
+        $type = $this->requestString($data, 'type', PropertyType::Text->value);
+        if ($type instanceof JsonResponse) {
+            return $type;
+        }
+        $type = trim($type);
         if (!in_array($type, PropertyType::values(), true)) {
             return new JsonResponse(['error' => 'type must be one of: ' . implode(', ', PropertyType::values())], Response::HTTP_BAD_REQUEST);
         }
         $value = $data['data'] ?? '';
         if (!is_scalar($value)) {
             return new JsonResponse(['error' => 'data must be a string, number, or boolean'], Response::HTTP_BAD_REQUEST);
+        }
+        try {
+            $value = PropertyValue::normalize(PropertyType::from($type), $value);
+        } catch (\InvalidArgumentException) {
+            return new JsonResponse(['error' => sprintf('data is not a valid %s value.', $type)], Response::HTTP_BAD_REQUEST);
         }
 
         sort($assetIds, SORT_NUMERIC);
@@ -458,7 +474,7 @@ class AssetManagementController
             'assetIds' => $assetIds,
             'name' => $name,
             'type' => $type,
-            'value' => is_bool($value) ? $value : (string) $value,
+            'value' => $value,
         ];
     }
 

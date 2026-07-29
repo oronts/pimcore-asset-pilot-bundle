@@ -89,17 +89,6 @@ class OperationDeliveryProcessor implements OperationDeliveryProcessorInterface
         }
     }
 
-    /** @return array<string, OperationDeliveryStatus|null> */
-    public function processDue(int $limit = 100): array
-    {
-        $results = [];
-        foreach ($this->deliveries->due($limit) as $deliveryId) {
-            $results[$deliveryId] = $this->process($deliveryId);
-        }
-
-        return $results;
-    }
-
     protected function loadAsset(int $assetId): ?Asset
     {
         return Asset::getById($assetId, ['force' => true]);

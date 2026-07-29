@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\RulePreviewPlanStatus;
@@ -31,6 +32,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class RulesController
 {
     use DecodesJsonObject;
+    use ReadsRequestScalars;
 
     public function __construct(
         protected readonly RuleEngineInterface $ruleEngine,
@@ -307,9 +309,9 @@ class RulesController
             return $data;
         }
 
-        $objectId = (int) ($data['objectId'] ?? 0);
-        if ($objectId <= 0) {
-            return new JsonResponse(['error' => 'objectId is required and must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
+        $objectId = $this->requestPositiveInt($data, 'objectId', null);
+        if ($objectId instanceof JsonResponse) {
+            return $objectId;
         }
 
         $planToken = $data['planToken'] ?? null;

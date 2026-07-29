@@ -20,6 +20,7 @@
     "require": {
         "php": ">=8.4",
         "ext-ctype": "*",
+        "ext-filter": "*",
         "ext-json": "*",
         "ext-mbstring": "*",
         "ext-zip": "*",

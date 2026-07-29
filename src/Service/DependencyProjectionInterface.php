@@ -27,8 +27,6 @@ interface DependencyProjectionInterface
 
     public function discard(DependencySourceToken $token): void;
 
-    public function hasAssetReference(int $assetId): bool;
-
     /**
      * Read "is this asset referenced" and "is any source dirty" in one atomic statement, so a deletion
      * safety check cannot straddle a concurrent refresh commit.

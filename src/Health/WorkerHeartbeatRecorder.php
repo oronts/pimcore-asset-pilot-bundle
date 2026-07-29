@@ -10,19 +10,34 @@ use Symfony\Component\Messenger\Event\WorkerRunningEvent;
 
 class WorkerHeartbeatRecorder
 {
-    public const array REQUIRED_TRANSPORTS = ['asset_pilot', 'pimcore_maintenance'];
+    /** @var list<string> */
+    private readonly array $requiredTransports;
 
     public function __construct(
         protected readonly CacheItemPoolInterface $cache,
         protected readonly int $heartbeatMaxAge,
         protected readonly LoggerInterface $logger,
-    ) {}
+        string $transportName = 'asset_pilot',
+    ) {
+        $this->requiredTransports = self::requiredTransports($transportName);
+    }
+
+    /**
+     * The single source of truth for the receivers whose liveness the health checks require: the
+     * configured Asset Pilot transport plus the Pimcore maintenance receiver.
+     *
+     * @return list<string>
+     */
+    public static function requiredTransports(string $transportName): array
+    {
+        return array_values(array_unique([$transportName, 'pimcore_maintenance']));
+    }
 
     public function onWorkerRunning(WorkerRunningEvent $event): void
     {
         $transportNames = $event->getWorker()->getMetadata()->getTransportNames();
 
-        foreach (array_intersect(self::REQUIRED_TRANSPORTS, $transportNames) as $transportName) {
+        foreach (array_intersect($this->requiredTransports, $transportNames) as $transportName) {
             try {
                 $item = $this->cache->getItem(self::cacheKey($transportName));
                 $item->set($this->now());

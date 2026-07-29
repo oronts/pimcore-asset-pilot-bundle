@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
@@ -27,6 +28,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class IntegrityController
 {
     use DecodesJsonObject;
+    use ReadsRequestScalars;
 
     /**
      * Each checked/healed asset is loaded and render-tested (and a heal probes its versions), so the
@@ -260,10 +262,9 @@ class IntegrityController
         if ($body instanceof JsonResponse) {
             return $body;
         }
-        $rawId = $body['assetId'] ?? null;
-        $assetId = (is_int($rawId) || (is_string($rawId) && ctype_digit($rawId))) ? (int) $rawId : 0;
-        if ($assetId <= 0) {
-            return new JsonResponse(['error' => 'assetId must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
+        $assetId = $this->requestPositiveInt($body, 'assetId', null);
+        if ($assetId instanceof JsonResponse) {
+            return $assetId;
         }
 
         try {

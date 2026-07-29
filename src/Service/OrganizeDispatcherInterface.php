@@ -40,7 +40,4 @@ interface OrganizeDispatcherInterface
     ): string;
 
     public function deferObject(int $objectId, TriggerType $triggerType, ?ActorContext $actor = null, ?string $expectedFingerprint = null): string;
-
-    /** @param int[] $objectIds @param array<int, string> $expectedFingerprints */
-    public function deferBulk(array $objectIds, TriggerType $triggerType, ?ActorContext $actor = null, array $expectedFingerprints = []): string;
 }

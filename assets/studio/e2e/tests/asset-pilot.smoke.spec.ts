@@ -30,7 +30,7 @@ test.describe('Asset Pilot Studio acceptance', () => {
     }
   })
 
-  test('admin: every central tab opens with no serious a11y violation (rows 8, 10)', async ({ page }) => {
+  test('admin: every central tab opens with no serious a11y violation (row 10; row 8 tab-load only)', async ({ page }) => {
     test.setTimeout(120_000)
     await loginAs(page, 'admin')
     await openAssetPilot(page)
@@ -59,11 +59,11 @@ test.describe('Asset Pilot Studio acceptance', () => {
   const API = '/pimcore-studio/api/asset-pilot'
   const LOCK = `${API}/assets/1/lock`
 
-  test('the Studio API rejects an unauthenticated request (row 6)', async ({ request }) => {
+  test('the Studio API rejects an unauthenticated request (authentication boundary)', async ({ request }) => {
     expect((await request.get(`${API}/operations/runs`)).status()).toBe(401)
   })
 
-  test('a View user is stopped at the permission gate for an Operate action (layer 1, row 6)', async ({ page }) => {
+  test('a View user is stopped at the permission gate for an Operate action (layer 1 authorization)', async ({ page }) => {
     await loginAs(page, 'view')
     expect((await page.request.get(`${API}/operations/runs`)).status()).toBe(200)
     const op = await page.request.post(LOCK)
@@ -71,7 +71,7 @@ test.describe('Asset Pilot Studio acceptance', () => {
     expect(await op.text()).toContain('asset_pilot_operate')
   })
 
-  test('an Operate user passes the permission gate but is stopped by workspace authorization (layer 2, row 7)', async ({ page }) => {
+  test('an Operate user passes the permission gate but is stopped by workspace authorization (layer 2 authorization)', async ({ page }) => {
     await loginAs(page, 'operate')
     expect((await page.request.get(`${API}/operations/runs`)).status()).toBe(200)
     const op = await page.request.post(LOCK)

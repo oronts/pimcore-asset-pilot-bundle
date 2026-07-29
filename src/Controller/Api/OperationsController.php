@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\AuditRowDates;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
@@ -55,6 +56,7 @@ class OperationsController
 {
     use DecodesJsonObject;
     use HandlesBulkIds;
+    use ReadsRequestScalars;
 
     private readonly SynchronousRunExecutor $syncRunExecutor;
 
@@ -91,7 +93,11 @@ class OperationsController
         if ($data instanceof JsonResponse) {
             return $data;
         }
-        $folder = trim((string) ($data['folder'] ?? ''));
+        $folder = $this->requestString($data, 'folder', '');
+        if ($folder instanceof JsonResponse) {
+            return $folder;
+        }
+        $folder = trim($folder);
         if ($folder === '') {
             return new JsonResponse(['error' => 'A non-empty "folder" is required.'], Response::HTTP_BAD_REQUEST);
         }
@@ -101,8 +107,11 @@ class OperationsController
             return $options;
         }
         [$dryRun, $async] = $options;
-        $limit = isset($data['limit']) ? max(1, (int) $data['limit']) : 0;
-        $selection = $this->reorganizer->selectFolder($folder, $limit);
+        $limit = $this->requestOptionalPositiveInt($data, 'limit', BulkIds::MAX, null);
+        if ($limit instanceof JsonResponse) {
+            return $limit;
+        }
+        $selection = $this->reorganizer->selectFolder($folder, $limit ?? 0);
 
         return $this->reviewedSelectionResponse(
             fn (): ReviewedSelectionResult => $this->reviewedOperations->execute(
@@ -130,8 +139,12 @@ class OperationsController
 
         $since = null;
         if (isset($data['since'])) {
+            $rawSince = $this->requestString($data, 'since', null);
+            if ($rawSince instanceof JsonResponse) {
+                return $rawSince;
+            }
             try {
-                $since = UtcSinceCutoff::parse((string) $data['since']);
+                $since = UtcSinceCutoff::parse($rawSince);
             } catch (\Exception) {
                 return new JsonResponse(['error' => 'The "since" value is not a valid date.'], Response::HTTP_BAD_REQUEST);
             }
@@ -147,7 +160,10 @@ class OperationsController
             return $options;
         }
         [$dryRun, $async] = $options;
-        $limit = isset($data['limit']) ? max(1, (int) $data['limit']) : null;
+        $limit = $this->requestOptionalPositiveInt($data, 'limit', BulkIds::MAX, null);
+        if ($limit instanceof JsonResponse) {
+            return $limit;
+        }
         $objectIds = $this->failureReplay->selectObjects($filters, $limit);
 
         return $this->reviewedSelectionResponse(
@@ -228,8 +244,14 @@ class OperationsController
         [$object, $data] = $resolved;
 
         $objectId = $object->getId();
-        $dryRun = (bool) ($data['dryRun'] ?? false);
-        $async = (bool) ($data['async'] ?? false);
+        $dryRun = $this->requestBool($data, 'dryRun', false);
+        if ($dryRun instanceof JsonResponse) {
+            return $dryRun;
+        }
+        $async = $this->requestBool($data, 'async', false);
+        if ($async instanceof JsonResponse) {
+            return $async;
+        }
         $actor = $this->authorization->currentActor();
 
         if (!$dryRun && !$this->authorization->isAllowed($object, 'publish')) {
@@ -320,10 +342,28 @@ class OperationsController
             return $data;
         }
 
-        $className = $data['className'] ?? null;
+        $className = $this->requestOptionalString($data, 'className');
+        if ($className instanceof JsonResponse) {
+            return $className;
+        }
         $rawObjectIds = $data['objectIds'] ?? [];
-        $async = (bool) ($data['async'] ?? true);
-        $dryRun = (bool) ($data['dryRun'] ?? false);
+        $async = $this->requestBool($data, 'async', true);
+        if ($async instanceof JsonResponse) {
+            return $async;
+        }
+        $dryRun = $this->requestBool($data, 'dryRun', false);
+        if ($dryRun instanceof JsonResponse) {
+            return $dryRun;
+        }
+        // Validate batchSize up front (only async dispatch uses it) so a malformed value is rejected
+        // before the single-use plan token is claimed, not after.
+        $batchSize = $this->defaultBatchSize;
+        if ($async) {
+            $batchSize = $this->requestOptionalPositiveInt($data, 'batchSize', BulkIds::MAX, $this->defaultBatchSize);
+            if ($batchSize instanceof JsonResponse) {
+                return $batchSize;
+            }
+        }
         $actor = $this->authorization->currentActor();
 
         if ($className === null && empty($rawObjectIds)) {
@@ -419,7 +459,6 @@ class OperationsController
         }
 
         if ($async) {
-            $batchSize = max(1, (int) ($data['batchSize'] ?? $this->defaultBatchSize));
             try {
                 $queued = $this->runCoordinator->queueBulkOrganization($objectIds, TriggerType::Api, $actor, $preview['fingerprints'], $batchSize);
             } catch (OrganizationRunDispatchException $e) {
@@ -458,13 +497,22 @@ class OperationsController
             return $data;
         }
 
-        $className = $data['className'] ?? null;
+        $className = $this->requestOptionalString($data, 'className');
+        if ($className instanceof JsonResponse) {
+            return $className;
+        }
         if ($className === null) {
             return new JsonResponse(['error' => 'className is required'], Response::HTTP_BAD_REQUEST);
         }
 
-        $page = max(1, (int) ($data['page'] ?? 1));
-        $limit = min(200, max(1, (int) ($data['limit'] ?? 50)));
+        $page = $this->requestOptionalPositiveInt($data, 'page', null, 1);
+        if ($page instanceof JsonResponse) {
+            return $page;
+        }
+        $limit = $this->requestOptionalPositiveInt($data, 'limit', 200, 50);
+        if ($limit instanceof JsonResponse) {
+            return $limit;
+        }
         $visibleOffset = ($page - 1) * $limit;
         $total = 0;
         $objects = [];
@@ -601,12 +649,12 @@ class OperationsController
             return $data;
         }
 
-        $objectId = $data['objectId'] ?? null;
-        if ($objectId === null) {
-            return new JsonResponse(['error' => 'objectId is required'], Response::HTTP_BAD_REQUEST);
+        $objectId = $this->requestPositiveInt($data, 'objectId', null);
+        if ($objectId instanceof JsonResponse) {
+            return $objectId;
         }
 
-        $object = $this->loadObject((int) $objectId);
+        $object = $this->loadObject($objectId);
         if ($object === null) {
             return new JsonResponse(['error' => 'Object not found'], Response::HTTP_NOT_FOUND);
         }

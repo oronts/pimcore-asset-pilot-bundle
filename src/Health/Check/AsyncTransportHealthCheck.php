@@ -218,7 +218,7 @@ class AsyncTransportHealthCheck implements HealthCheckInterface
     /** @return list<string> */
     private function requiredTransports(): array
     {
-        return [$this->transportName, 'pimcore_maintenance'];
+        return WorkerHeartbeatRecorder::requiredTransports($this->transportName);
     }
 
     /** @return list<object> */

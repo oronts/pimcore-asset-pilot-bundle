@@ -105,4 +105,26 @@ class OrontsAssetPilotExtensionTest extends TestCase
             self::assertSame([['alias' => $alias]], $tags);
         }
     }
+
+    #[Test]
+    public function allThreeHealthComponentsReceiveTheOneConfiguredTransport(): void
+    {
+        $container = new ContainerBuilder();
+
+        (new OrontsAssetPilotExtension())->load([['async' => ['transport' => 'custom_queue']]], $container);
+
+        self::assertSame('custom_queue', $container->getParameter('oronts_asset_pilot.async.transport'));
+
+        foreach ([
+            \Oronts\AssetPilotBundle\Health\WorkerHeartbeatRecorder::class,
+            \Oronts\AssetPilotBundle\Health\Check\SharedCacheHealthCheck::class,
+            \Oronts\AssetPilotBundle\Health\Check\AsyncTransportHealthCheck::class,
+        ] as $service) {
+            self::assertSame(
+                '%oronts_asset_pilot.async.transport%',
+                $container->getDefinition($service)->getArgument('$transportName'),
+                $service . ' must derive its required transports from the one configured receiver.',
+            );
+        }
+    }
 }

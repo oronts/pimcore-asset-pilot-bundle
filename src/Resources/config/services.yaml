@@ -465,6 +465,7 @@ services:
             $cache: '@cache.app'
             $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
             $heartbeatMaxAge: '%oronts_asset_pilot.async.worker_heartbeat_max_age%'
+            $transportName: '%oronts_asset_pilot.async.transport%'
 
     Oronts\AssetPilotBundle\Health\Check\AsyncTransportHealthCheck:
         arguments:
@@ -486,6 +487,7 @@ services:
         arguments:
             $cache: '@cache.app'
             $heartbeatMaxAge: '%oronts_asset_pilot.async.worker_heartbeat_max_age%'
+            $transportName: '%oronts_asset_pilot.async.transport%'
         tags:
             - { name: 'kernel.event_listener', event: 'Symfony\Component\Messenger\Event\WorkerRunningEvent', method: 'onWorkerRunning' }
 

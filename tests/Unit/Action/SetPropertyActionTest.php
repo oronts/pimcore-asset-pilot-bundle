@@ -92,6 +92,16 @@ class SetPropertyActionTest extends TestCase
     }
 
     #[Test]
+    public function validateConfigRejectsAnUnknownBooleanValue(): void
+    {
+        $errors = (new SetPropertyAction($this->createMock(AssetPropertyService::class)))
+            ->validateConfig(['name' => 'flag', 'property_type' => 'bool', 'value' => 'definitely']);
+
+        self::assertNotEmpty($errors);
+        self::assertStringContainsString('boolean', implode(' ', $errors));
+    }
+
+    #[Test]
     public function derivesAValueFromAnObjectGetter(): void
     {
         $action = new class ($this->createMock(AssetPropertyService::class)) extends SetPropertyAction {

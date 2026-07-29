@@ -24,11 +24,14 @@ browser specs that help exercise it.
 > a real click on the real-user path. The dashboard root carries a `data-testid="asset-pilot-root"` so axe
 > scopes to bundle-owned UI (header, tabs, panel) and excludes the surrounding Pimcore shell.
 >
-> This slice covers matrix rows 5, 6, 7, and 10 at the browser layer, and row 8 only partially: every
-> central tab loads, but the per-flow interactions ("load and act") are exercised by the unit and
-> live-stack evidence, not yet by the browser suite. Real durable mutations, RFC 3339 timestamp
-> localization, and the full run/recovery flows remain browser-unautomated. The workflow stays on
-> `workflow_dispatch` until
+> At the browser layer this slice fully covers row 10 (axe on every central tab) and gives partial
+> permission-layer evidence toward rows 5-7: tab-visibility gating (a View user cannot see Storage) and
+> the two-layer authorization matrix on one Operate action. It does NOT execute the full role acceptance
+> flows those rows require, namely the View Storage API `403`, an Operate organize/heal/quarantine
+> execute-and-deny-revert, or an Admin revert with actor-attributed audit. Row 8 is partial: every central
+> tab loads, but the per-flow interactions ("load and act") are covered by the unit and live-stack
+> evidence, not the browser suite. Real durable mutations, RFC 3339 timestamp localization, and the full
+> run/recovery flows remain browser-unautomated. The workflow stays on `workflow_dispatch` until
 > the full skeleton install has run green once on the target runner (that install has environment-specific
 > details: the Studio security/firewall Flex recipes and the installer secrets). Promote it to a required
 > gate (add `push`/`pull_request` triggers plus branch protection) after that first green run.

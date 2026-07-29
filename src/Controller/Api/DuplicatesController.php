@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
@@ -33,6 +34,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class DuplicatesController
 {
     use DecodesJsonObject;
+    use ReadsRequestScalars;
     use StreamsCsv;
 
     private const int MAX_LIMIT = 100;
@@ -172,9 +174,15 @@ class DuplicatesController
         if ($checksum === '') {
             return new JsonResponse(['error' => 'A checksum is required.'], JsonResponse::HTTP_BAD_REQUEST);
         }
-        $canonicalId = isset($data['canonicalId']) ? (int) $data['canonicalId'] : null;
+        $canonicalId = $this->requestOptionalPositiveInt($data, 'canonicalId', null, null);
+        if ($canonicalId instanceof JsonResponse) {
+            return $canonicalId;
+        }
         $strategy = is_string($data['strategy'] ?? null) ? $data['strategy'] : null;
-        $dryRun = ($data['dryRun'] ?? false) === true;
+        $dryRun = $this->requestBool($data, 'dryRun', false);
+        if ($dryRun instanceof JsonResponse) {
+            return $dryRun;
+        }
 
         $group = $this->duplicates->groupForChecksum($checksum);
         if ($group === null) {

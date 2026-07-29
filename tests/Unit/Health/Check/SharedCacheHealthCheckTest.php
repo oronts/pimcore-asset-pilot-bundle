@@ -58,6 +58,32 @@ class SharedCacheHealthCheckTest extends TestCase
         $result = $check->run();
 
         self::assertSame(HealthStatus::Ok, $result->status);
-        self::assertSame(WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS, $result->details['verified_by']);
+        self::assertSame(WorkerHeartbeatRecorder::requiredTransports('asset_pilot'), $result->details['verified_by']);
+    }
+
+    #[Test]
+    public function requiresTheConfiguredTransportHeartbeatNotTheDefault(): void
+    {
+        $pool = $this->createMock(CacheItemPoolInterface::class);
+        $values = ['custom_queue' => 990, 'pimcore_maintenance' => 995];
+        $pool->method('getItem')->willReturnCallback(function (string $key) use ($values) {
+            $transport = str_replace('asset_pilot.worker_heartbeat.', '', $key);
+            $item = $this->createStub(\Psr\Cache\CacheItemInterface::class);
+            $item->method('isHit')->willReturn(isset($values[$transport]));
+            $item->method('get')->willReturn($values[$transport] ?? null);
+
+            return $item;
+        });
+        $check = new class ($pool, true, 120, 'custom_queue') extends SharedCacheHealthCheck {
+            protected function now(): int
+            {
+                return 1000;
+            }
+        };
+
+        $result = $check->run();
+
+        self::assertSame(HealthStatus::Ok, $result->status);
+        self::assertSame(['custom_queue', 'pimcore_maintenance'], $result->details['verified_by']);
     }
 }

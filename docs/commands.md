@@ -414,7 +414,8 @@ Built-in checks (extensible via the `oronts_asset_pilot.health_check` tag):
 - `async_transport`: always verifies durable-delivery routing, and additionally verifies organize
   and bulk routing when async organization is enabled. It checks the configured receiver and failure
   receiver, inspects native queue depths, warns on backlog or failed messages, and always requires
-  fresh `pimcore_maintenance` and `asset_pilot` heartbeats.
+  fresh `pimcore_maintenance` and configured Asset Pilot receiver heartbeats (the receiver is
+  `asset_pilot` by default, or whatever `async.transport` is set to).
 - `operation_journal`: warns on stale unfinished operations or overdue deliveries and reports
   CRITICAL for recovery-required operations or dead observer deliveries.
 - `dependency_tracking`: reports live projection generation, cursor, source/edge counts, and dirty

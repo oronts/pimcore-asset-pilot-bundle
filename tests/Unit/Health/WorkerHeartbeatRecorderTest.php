@@ -45,6 +45,37 @@ class WorkerHeartbeatRecorderTest extends TestCase
     }
 
     #[Test]
+    public function recordsTheConfiguredTransportNotTheHardcodedDefault(): void
+    {
+        $cache = new ArrayAdapter();
+        $recorder = new class ($cache, 120, new NullLogger(), 'custom_queue') extends WorkerHeartbeatRecorder {
+            protected function now(): int
+            {
+                return 1000;
+            }
+        };
+        $worker = new Worker(
+            [
+                'custom_queue' => $this->createStub(ReceiverInterface::class),
+                'asset_pilot' => $this->createStub(ReceiverInterface::class),
+            ],
+            $this->createStub(MessageBusInterface::class),
+        );
+
+        $recorder->onWorkerRunning(new WorkerRunningEvent($worker, true));
+
+        self::assertSame(1000, $cache->getItem(WorkerHeartbeatRecorder::cacheKey('custom_queue'))->get());
+        self::assertFalse($cache->hasItem(WorkerHeartbeatRecorder::cacheKey('asset_pilot')));
+    }
+
+    #[Test]
+    public function requiredTransportsPairsTheConfiguredTransportWithMaintenanceAndDeduplicates(): void
+    {
+        self::assertSame(['custom_queue', 'pimcore_maintenance'], WorkerHeartbeatRecorder::requiredTransports('custom_queue'));
+        self::assertSame(['pimcore_maintenance'], WorkerHeartbeatRecorder::requiredTransports('pimcore_maintenance'));
+    }
+
+    #[Test]
     public function cacheFailureDoesNotStopTheWorker(): void
     {
         $cache = $this->createMock(CacheItemPoolInterface::class);

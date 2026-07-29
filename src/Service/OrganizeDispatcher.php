@@ -133,21 +133,6 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
         );
     }
 
-    /**
-     * @param int[]              $objectIds
-     * @param array<int, string> $expectedFingerprints
-     */
-    public function deferBulk(array $objectIds, TriggerType $triggerType, ?ActorContext $actor = null, array $expectedFingerprints = []): string
-    {
-        return $this->createRun(
-            $objectIds,
-            $triggerType,
-            $actor,
-            $expectedFingerprints,
-            initialStatus: OperationRunStatus::PendingDispatch,
-        );
-    }
-
     private function failOwnedRun(string $runId, bool $ownsRun): void
     {
         if ($ownsRun) {

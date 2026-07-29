@@ -71,6 +71,16 @@ class AssetPropertyServiceTest extends TestCase
     }
 
     #[Test]
+    public function boolPropertyRejectsUnknownValueInsteadOfCoercingToFalse(): void
+    {
+        [$asset, $loopGuard, $authorization] = $this->mutableAsset();
+        $service = $this->service($asset, $loopGuard, $authorization, new EventDispatcher());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->bulkSetPropertyOnLockedAssets([$asset], 'flag', 'bool', 'definitely');
+    }
+
+    #[Test]
     public function unlockAssetUsesNativeRemovalAndSave(): void
     {
         [$asset, $loopGuard, $authorization] = $this->mutableAsset();

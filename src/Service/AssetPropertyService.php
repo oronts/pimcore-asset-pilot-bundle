@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Support\PropertyValue;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
@@ -81,7 +82,7 @@ class AssetPropertyService implements AssetPropertyServiceInterface
         $errors = [];
 
         if ($type === PropertyType::Bool->value) {
-            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            $value = PropertyValue::normalize(PropertyType::Bool, $value);
         }
 
         foreach ($assetIds as $id) {
@@ -125,7 +126,7 @@ class AssetPropertyService implements AssetPropertyServiceInterface
         $errors = [];
 
         if ($type === PropertyType::Bool->value) {
-            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            $value = PropertyValue::normalize(PropertyType::Bool, $value);
         }
 
         foreach ($assets as $asset) {
@@ -273,9 +274,7 @@ class AssetPropertyService implements AssetPropertyServiceInterface
             throw new \InvalidArgumentException('Invalid asset property name.');
         }
 
-        $value = $propertyType === PropertyType::Bool
-            ? filter_var($data, FILTER_VALIDATE_BOOLEAN)
-            : $data;
+        $value = PropertyValue::normalize($propertyType, $data);
 
         return [$propertyType, $value];
     }

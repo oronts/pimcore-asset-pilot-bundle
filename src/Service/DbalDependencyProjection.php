@@ -184,18 +184,6 @@ class DbalDependencyProjection implements DependencyProjectionInterface
         ]);
     }
 
-    public function hasAssetReference(int $assetId): bool
-    {
-        if ($assetId <= 0) {
-            return false;
-        }
-
-        return $this->connection->fetchOne(
-            'SELECT 1 FROM ' . Installer::TABLE_DEPENDENCY_EDGE . ' WHERE target_asset_id = ? LIMIT 1',
-            [$assetId],
-        ) !== false;
-    }
-
     public function referenceSnapshot(int $assetId): DependencyReferenceSnapshot
     {
         $row = $this->connection->fetchAssociative(

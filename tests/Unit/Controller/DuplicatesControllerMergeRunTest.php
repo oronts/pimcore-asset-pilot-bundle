@@ -33,6 +33,18 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 final class DuplicatesControllerMergeRunTest extends TestCase
 {
     #[Test]
+    public function mergeRejectsMalformedCanonicalIdAndNonBooleanDryRun(): void
+    {
+        $controller = $this->controller($this->createMock(DuplicateMergeService::class));
+
+        $badId = $controller->merge($this->jsonRequest(['checksum' => 'abc', 'canonicalId' => 'not-an-id']));
+        self::assertSame(Response::HTTP_BAD_REQUEST, $badId->getStatusCode());
+
+        $badBool = $controller->merge($this->jsonRequest(['checksum' => 'abc', 'dryRun' => 'false']));
+        self::assertSame(Response::HTTP_BAD_REQUEST, $badBool->getStatusCode());
+    }
+
+    #[Test]
     public function dryRunIssuesTheExactPlanAndPreviewsWithoutFingerprints(): void
     {
         $group = new DuplicateGroup('abc', 128, 2, [9, 3]);

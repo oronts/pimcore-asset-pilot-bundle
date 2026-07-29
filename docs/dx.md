@@ -59,8 +59,11 @@ curated subset, not an exhaustive list of every service alias.
 ## Events
 
 The supported extension boundaries below dispatch typed events you can subscribe to. Constants live
-on `AssetPilotEvents`; maintenance-only operations such as snapshot capture, audit retention,
-filename normalization, and empty-folder sweeping are intentionally not part of this event contract.
+on `AssetPilotEvents`. Purely scheduled maintenance (snapshot capture, audit retention) is intentionally
+outside this contract. A few interactive mutations currently have no dedicated completion event, notably
+filename normalization and empty-folder deletion (an Operate action behind a signed preview/apply plan):
+observe those through the durable operation journal and audit log, or by decorating their replaceable
+service.
 
 | Group | Events |
 |-------|--------|

@@ -53,7 +53,7 @@ class AsyncTransportHealthCheckTest extends TestCase
     public function isOkWhenBothConsumerHeartbeatsAreFresh(): void
     {
         $cache = new ArrayAdapter();
-        foreach (WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS as $transportName) {
+        foreach (WorkerHeartbeatRecorder::requiredTransports('asset_pilot') as $transportName) {
             $item = $cache->getItem(WorkerHeartbeatRecorder::cacheKey($transportName));
             $item->set(950);
             $cache->save($item);
@@ -83,7 +83,7 @@ class AsyncTransportHealthCheckTest extends TestCase
     public function isCriticalWhenAConsumerHeartbeatIsStale(): void
     {
         $cache = new ArrayAdapter();
-        foreach (WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS as $transportName) {
+        foreach (WorkerHeartbeatRecorder::requiredTransports('asset_pilot') as $transportName) {
             $item = $cache->getItem(WorkerHeartbeatRecorder::cacheKey($transportName));
             $item->set($transportName === 'asset_pilot' ? 800 : 950);
             $cache->save($item);
@@ -96,7 +96,7 @@ class AsyncTransportHealthCheckTest extends TestCase
     public function synchronousOrganizationIsOkWhenDurableDeliveryInfrastructureIsHealthy(): void
     {
         $cache = new ArrayAdapter();
-        foreach (WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS as $transportName) {
+        foreach (WorkerHeartbeatRecorder::requiredTransports('asset_pilot') as $transportName) {
             $item = $cache->getItem(WorkerHeartbeatRecorder::cacheKey($transportName));
             $item->set(950);
             $cache->save($item);
@@ -212,7 +212,7 @@ class AsyncTransportHealthCheckTest extends TestCase
     private function heartbeats(): ArrayAdapter
     {
         $cache = new ArrayAdapter();
-        foreach (WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS as $transportName) {
+        foreach (WorkerHeartbeatRecorder::requiredTransports('asset_pilot') as $transportName) {
             $item = $cache->getItem(WorkerHeartbeatRecorder::cacheKey($transportName));
             $item->set(950);
             $cache->save($item);

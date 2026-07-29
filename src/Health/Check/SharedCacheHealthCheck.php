@@ -19,6 +19,7 @@ class SharedCacheHealthCheck implements HealthCheckInterface
         protected readonly CacheItemPoolInterface $cache,
         protected readonly bool $asyncEnabled = true,
         protected readonly int $heartbeatMaxAge = 120,
+        protected readonly string $transportName = 'asset_pilot',
     ) {}
 
     public function name(): string
@@ -63,7 +64,7 @@ class SharedCacheHealthCheck implements HealthCheckInterface
     /** @return list<string> */
     private function freshWorkerHeartbeats(): array
     {
-        $required = $this->asyncEnabled ? WorkerHeartbeatRecorder::REQUIRED_TRANSPORTS : ['pimcore_maintenance'];
+        $required = $this->asyncEnabled ? WorkerHeartbeatRecorder::requiredTransports($this->transportName) : ['pimcore_maintenance'];
         $now = $this->now();
         $fresh = [];
         foreach ($required as $transportName) {

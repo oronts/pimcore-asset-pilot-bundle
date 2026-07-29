@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Action;
 
 use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Service\AssetPropertyServiceInterface;
+use Oronts\AssetPilotBundle\Support\PropertyValue;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\Property;
@@ -53,7 +54,7 @@ class SetPropertyAction implements RuleActionInterface, RuleActionConfigValidato
         }
 
         $property = $asset->getProperty($name, true);
-        $expectedValue = $type === PropertyType::Bool->value ? filter_var($value, FILTER_VALIDATE_BOOLEAN) : $value;
+        $expectedValue = $type === PropertyType::Bool->value ? PropertyValue::normalize(PropertyType::Bool, $value) : $value;
         if ($property instanceof Property && $property->getType() === $type && $property->getData() === $expectedValue) {
             return;
         }
@@ -73,6 +74,17 @@ class SetPropertyAction implements RuleActionInterface, RuleActionConfigValidato
         }
         if (!array_key_exists('value', $config) && trim((string) ($config['from'] ?? '')) === '') {
             $errors[] = 'requires either "value" or a non-empty "from"';
+        }
+        if ($type === PropertyType::Bool->value && array_key_exists('value', $config)) {
+            if (!is_scalar($config['value'])) {
+                $errors[] = 'value must be a boolean for property_type "bool"';
+            } else {
+                try {
+                    PropertyValue::normalize(PropertyType::Bool, $config['value']);
+                } catch (\InvalidArgumentException) {
+                    $errors[] = 'value must be a boolean (true/false/1/0/yes/no/on/off) for property_type "bool"';
+                }
+            }
         }
 
         return $errors;
