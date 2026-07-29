@@ -34,60 +34,85 @@ final class SynchronousRunExecutor
     public function executeSingle(string $runId, AbstractObject $object, TriggerType $trigger, string $expectedFingerprint): SingleRunOutcome
     {
         $itemKey = $this->runItemKey((int) $object->getId());
-        if (!$this->runItemLease->start($runId, $itemKey)) {
+        try {
+            $started = $this->runItemLease->start($runId, $itemKey);
+        } catch (\Throwable) {
+            // start() re-throws after releasing its own minted token; a DB failure claiming the item is a
+            // claim conflict (409), not an unmapped exception escaping the typed outcome as a 500.
             return SingleRunOutcome::claimConflict();
         }
-        $itemCompleted = false;
+        if (!$started) {
+            return SingleRunOutcome::claimConflict();
+        }
         try {
-            $results = $this->organizer->organizeWithHeartbeat(
-                $object,
-                $trigger,
-                fn () => $this->runItemLease->pulse($runId, $itemKey),
-                expectedFingerprint: $expectedFingerprint,
-            );
             try {
-                $completed = $this->runItemLease->complete($runId, $itemKey, $this->operationItemStatus($results), ['operationCount' => count($results)]);
-            } catch (\Throwable) {
-                // The mutation succeeded but recording its completion is indeterminate (e.g. a DB failure after
-                // the item update). Report lease loss so the API returns 409 and the reconciler decides durable
-                // truth from the journal; never re-complete a succeeded item as failed or fail the run.
-                return SingleRunOutcome::leaseLost();
-            }
-            if (!$completed) {
-                return SingleRunOutcome::leaseLost();
-            }
-            $itemCompleted = true;
-            if (!$this->reportsSelfFinalized($this->runs->finish($runId))) {
-                return SingleRunOutcome::leaseLost();
+                $results = $this->organizer->organizeWithHeartbeat(
+                    $object,
+                    $trigger,
+                    fn () => $this->runItemLease->pulse($runId, $itemKey),
+                    expectedFingerprint: $expectedFingerprint,
+                );
+            } catch (StaleApplyPlanException) {
+                return $this->completeItemThenFinish($runId, $itemKey, OperationRunItemStatus::Skipped, [], 'Object changed after preview; the immutable plan was not applied.', SingleRunOutcome::stale());
             }
 
-            return SingleRunOutcome::completed($results);
-        } catch (StaleApplyPlanException) {
-            try {
-                $completed = $this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Skipped, error: 'Object changed after preview; the immutable plan was not applied.');
-            } catch (\Throwable) {
-                return SingleRunOutcome::leaseLost();
-            }
-            if (!$completed) {
-                return SingleRunOutcome::leaseLost();
-            }
-            $itemCompleted = true;
-            if (!$this->reportsSelfFinalized($this->runs->finish($runId))) {
-                return SingleRunOutcome::leaseLost();
-            }
-
-            return SingleRunOutcome::stale();
+            return $this->completeItemThenFinish($runId, $itemKey, $this->operationItemStatus($results), ['operationCount' => count($results)], null, SingleRunOutcome::completed($results));
         } catch (\Throwable $e) {
-            // Already terminalized means finalization threw, not a lost claim: do not re-complete or report lease loss.
-            if (!$itemCompleted && !$this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Failed, error: 'Organization failed.')) {
-                return SingleRunOutcome::leaseLost();
-            }
-            $this->runs->fail($runId, 'Organization failed.');
-
-            return SingleRunOutcome::failed($e);
+            return $this->failItemAndRun($runId, $itemKey, $e);
         } finally {
             $this->runItemLease->release($runId, $itemKey);
         }
+    }
+
+    /**
+     * Complete the terminal item, then finalize the parent as a separate domain: any indeterminate completion
+     * or finish() returns leaseLost so the reconciler derives the status; a completed item is never re-failed.
+     *
+     * @param array<string, int> $data
+     */
+    private function completeItemThenFinish(string $runId, string $itemKey, OperationRunItemStatus $status, array $data, ?string $error, SingleRunOutcome $onFinalized): SingleRunOutcome
+    {
+        try {
+            $completed = $this->runItemLease->complete($runId, $itemKey, $status, $data, $error);
+        } catch (\Throwable) {
+            return SingleRunOutcome::leaseLost();
+        }
+        if (!$completed) {
+            return SingleRunOutcome::leaseLost();
+        }
+        try {
+            $finalStatus = $this->runs->finish($runId);
+        } catch (\Throwable) {
+            return SingleRunOutcome::leaseLost();
+        }
+        if (!$this->reportsSelfFinalized($finalStatus)) {
+            return SingleRunOutcome::leaseLost();
+        }
+
+        return $onFinalized;
+    }
+
+    /**
+     * Organization failed: record the Failed item and fail the run, keeping bookkeeping exceptions inside the
+     * typed contract (a throwing completion or fail() returns leaseLost, never an escaping exception).
+     */
+    private function failItemAndRun(string $runId, string $itemKey, \Throwable $e): SingleRunOutcome
+    {
+        try {
+            $completed = $this->runItemLease->complete($runId, $itemKey, OperationRunItemStatus::Failed, error: 'Organization failed.');
+        } catch (\Throwable) {
+            return SingleRunOutcome::leaseLost();
+        }
+        if (!$completed) {
+            return SingleRunOutcome::leaseLost();
+        }
+        try {
+            $this->runs->fail($runId, 'Organization failed.');
+        } catch (\Throwable) {
+            return SingleRunOutcome::leaseLost();
+        }
+
+        return SingleRunOutcome::failed($e);
     }
 
     /**
@@ -98,15 +123,6 @@ final class SynchronousRunExecutor
     {
         try {
             $report = $this->runBulkOrganize($runId, $objectIds, $trigger, $fingerprints);
-            $status = $this->runs->finish($runId);
-            if (!$this->reportsSelfFinalized($status)) {
-                return BulkRunOutcome::ownershipLost(new LostRunItemOwnershipException(sprintf(
-                    'The bulk run did not finalize under this attempt (status %s); another attempt or a reconciler owns it.',
-                    $status->value,
-                )));
-            }
-
-            return BulkRunOutcome::completed($report);
         } catch (LostRunItemOwnershipException $e) {
             return BulkRunOutcome::ownershipLost($e);
         } catch (\Throwable $e) {
@@ -118,6 +134,23 @@ final class SynchronousRunExecutor
 
             return BulkRunOutcome::failed($e);
         }
+
+        // Finalize the parent separately so a throwing finish() reports ownership loss, not a failed run.
+        try {
+            $status = $this->runs->finish($runId);
+        } catch (\Throwable) {
+            return BulkRunOutcome::ownershipLost(new LostRunItemOwnershipException(
+                'The bulk run items completed but parent finalization threw; a reconciler derives the durable status.',
+            ));
+        }
+        if (!$this->reportsSelfFinalized($status)) {
+            return BulkRunOutcome::ownershipLost(new LostRunItemOwnershipException(sprintf(
+                'The bulk run did not finalize under this attempt (status %s); another attempt or a reconciler owns it.',
+                $status->value,
+            )));
+        }
+
+        return BulkRunOutcome::completed($report);
     }
 
     /**
@@ -201,7 +234,12 @@ final class SynchronousRunExecutor
             }
         }
         if ($fenceHeld) {
-            $this->runs->fail($runId, $error);
+            try {
+                $this->runs->fail($runId, $error);
+            } catch (\Throwable) {
+                // A throwing fail() is indeterminate finalization: report ownership loss, never leak the exception.
+                return false;
+            }
         }
 
         return $fenceHeld;

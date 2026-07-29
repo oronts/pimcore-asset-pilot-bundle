@@ -179,6 +179,22 @@ final class OperationsControllerSyncRunTest extends TestCase
         self::assertSame('run-sync', $this->body($response)['runId']);
     }
 
+    #[Test]
+    public function syncBulkReturns409WhenTheParentDoesNotFinalizeUnderThisAttempt(): void
+    {
+        $op = $this->operation(1, 11);
+        $organizer = $this->organizer([$op]);
+        $organizer->expects(self::once())->method('organizeBulkDetailed')->willReturn(new BulkOrganizeReport([], []));
+        $lease = $this->createMock(RunItemLease::class);
+        $runs = $this->runs();
+        $runs->expects(self::once())->method('finish')->with('run-sync')->willReturn(OperationRunStatus::Failed);
+        $runs->expects(self::never())->method('fail');
+
+        $response = $this->applyBulk($organizer, $lease, $runs);
+
+        self::assertSame(Response::HTTP_CONFLICT, $response->getStatusCode());
+    }
+
     private function applySingle(AssetOrganizer $organizer, RunItemLease $lease, OperationRunStoreInterface $runs): Response
     {
         $controller = $this->controller([42 => $this->object(42)], $organizer, $lease, $runs);

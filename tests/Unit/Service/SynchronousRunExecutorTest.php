@@ -41,6 +41,20 @@ final class SynchronousRunExecutorTest extends TestCase
     }
 
     #[Test]
+    public function executeSingleReturnsClaimConflictWhenStartingTheLeaseThrows(): void
+    {
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->expects(self::never())->method('organizeWithHeartbeat');
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willThrowException(new \RuntimeException('db error claiming the item'));
+
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+
+        self::assertSame(SingleRunOutcomeKind::ClaimConflict, $outcome->kind);
+    }
+
+    #[Test]
     public function executeSingleCompletesAndFinishesTheRun(): void
     {
         $organizer = $this->createMock(AssetOrganizerInterface::class);
@@ -291,22 +305,57 @@ final class SynchronousRunExecutorTest extends TestCase
     }
 
     #[Test]
-    public function executeSingleFailsTheRunWhenFinalizationThrowsAfterTheItemCompleted(): void
+    public function executeSingleReportsLeaseLostWhenParentFinalizationThrowsAfterTheItemCompleted(): void
     {
-        $finishError = new \RuntimeException('finalize boom');
+        // The item is durably terminal; a throwing parent finish() is indeterminate finalization, not a failure.
+        // reconcileUnfinalizedRuns derives the parent status from the item outcomes, so the run must NOT be failed.
         $organizer = $this->createMock(AssetOrganizerInterface::class);
         $organizer->method('organizeWithHeartbeat')->willReturn([]);
         $runs = $this->createMock(OperationRunStoreInterface::class);
-        $runs->method('finish')->willThrowException($finishError);
-        $runs->expects(self::once())->method('fail')->with(self::RUN, 'Organization failed.');
+        $runs->method('finish')->willThrowException(new \RuntimeException('finalize boom'));
+        $runs->expects(self::never())->method('fail');
         $lease = $this->createMock(RunItemLease::class);
         $lease->method('start')->willReturn(true);
-        $lease->method('complete')->willReturnOnConsecutiveCalls(true, false);
+        $lease->expects(self::once())->method('complete')->willReturn(true);
+        $lease->expects(self::once())->method('release');
 
         $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
 
-        self::assertSame(SingleRunOutcomeKind::Failed, $outcome->kind);
-        self::assertSame($finishError, $outcome->cause);
+        self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
+    }
+
+    #[Test]
+    public function executeSingleReportsLeaseLostWhenFailedItemCompletionThrows(): void
+    {
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeWithHeartbeat')->willThrowException(new \RuntimeException('boom'));
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::never())->method('fail');
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('complete')->willThrowException(new \RuntimeException('db error recording the failure'));
+        $lease->expects(self::once())->method('release');
+
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+
+        self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
+    }
+
+    #[Test]
+    public function executeSingleReportsLeaseLostWhenTheRunWideFailThrows(): void
+    {
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeWithHeartbeat')->willThrowException(new \RuntimeException('boom'));
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('fail')->willThrowException(new \RuntimeException('db error failing the run'));
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('complete')->willReturn(true);
+        $lease->expects(self::once())->method('release');
+
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+
+        self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
 
     #[Test]
@@ -338,6 +387,24 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('token')->willReturnMap([[self::RUN, 'object:1', 'tok']]);
         $lease->expects(self::once())->method('release')->with(self::RUN, 'object:1');
         $lease->method('complete')->willThrowException(new \RuntimeException('cleanup db error'));
+
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+
+        self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
+    }
+
+    #[Test]
+    public function executeBulkReportsOwnershipLostWhenParentFinalizationThrows(): void
+    {
+        // Every item completed and released its token; a throwing parent finish() must not fail the run.
+        $report = $this->createMock(BulkOrganizeReport::class);
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeBulkDetailed')->willReturn($report);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('finish')->willThrowException(new \RuntimeException('bulk finalize boom'));
+        $runs->expects(self::never())->method('fail');
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('token')->willReturn(null);
 
         $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
 
