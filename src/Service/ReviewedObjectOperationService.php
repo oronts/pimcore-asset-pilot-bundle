@@ -304,7 +304,6 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
         }
         try {
             $report = $this->syncRunExecutor->runBulkOrganize($runId, $objectIds, $triggerType, $fingerprints);
-            $status = $this->runs->finish($runId);
         } catch (LostRunItemOwnershipException $e) {
             throw new ReviewedSelectionException(
                 ReviewedSelectionError::OwnershipLost,
@@ -326,6 +325,18 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
             throw new ReviewedSelectionException(
                 ReviewedSelectionError::ExecutionFailed,
                 'The reviewed operation failed.',
+                runId: $runId,
+                previous: $e,
+            );
+        }
+
+        // Finalize the parent separately so a throwing finish() reports ownership loss, not a failed run.
+        try {
+            $status = $this->runs->finish($runId);
+        } catch (\Throwable $e) {
+            throw new ReviewedSelectionException(
+                ReviewedSelectionError::OwnershipLost,
+                'The reviewed run items completed but parent finalization failed; a reconciler derives the durable status.',
                 runId: $runId,
                 previous: $e,
             );
