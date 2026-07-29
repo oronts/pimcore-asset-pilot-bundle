@@ -22,7 +22,13 @@ export async function loginAs(page: Page, role: Role): Promise<void> {
   await page.getByPlaceholder(/username/i).fill(user)
   await page.getByPlaceholder(/password/i).fill(pass)
   await page.getByRole('button', { name: /login/i }).click()
-  await page.waitForURL(/\/(admin|pimcore-studio)(\/|$)/)
+  // /admin/login also matches the shell URL, so exclude it: a rejected login must not read as authenticated.
+  // The explicit timeout (below the test timeout) makes a rejected login reject here instead of hanging.
+  await page.waitForURL(
+    (url) => /^\/(admin|pimcore-studio)(\/|$)/.test(url.pathname) && !url.pathname.startsWith('/admin/login'),
+    { timeout: 15_000 },
+  )
+  await expect(page.getByRole('button', { name: /login/i })).toHaveCount(0)
 }
 
 // Opens the Asset Pilot Studio module. The bundle registers a Module Federation remote in the

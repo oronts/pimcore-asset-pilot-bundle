@@ -25,6 +25,9 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      - name: Verify version consistency
+        run: php tools/verify-version-consistency.php
+
       - name: Validate Composer metadata
         run: composer validate --no-check-publish
 

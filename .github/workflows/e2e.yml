@@ -158,7 +158,7 @@ jobs:
       - name: Install Playwright
         run: |
           cd bundle/assets/studio/e2e
-          npm install
+          npm ci
           npm run install-browsers
 
       - name: Run acceptance matrix

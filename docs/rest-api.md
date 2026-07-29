@@ -211,9 +211,9 @@ two live assets) returns `404`. An actor who may not merge the group returns `40
 `409`. Both apply and resume also return `409` with the message
 `The duplicate merge run could not be finalized; retry to complete it.` when the copies were repointed
 and disposed but the run parent could not be finalized (a lost merge lease or finalization race). That
-case is retryable: POST the same `{runId}` to complete the finalization (recover the id from
-`GET /operations/runs` if the failing apply response did not carry it). A resume for an unknown run
-returns `404`.
+case is retryable and self-describing: the `409` body carries the run's `runId` and its `statusUrl`, so
+POST that same `{runId}` back to `/duplicates/merge` to complete the finalization. A resume for an
+unknown run returns `404`.
 
 ### Operations
 

@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
+use Oronts\AssetPilotBundle\Exception\MergeLeaseLostException;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -130,6 +131,45 @@ final class DuplicatesControllerMergeRunTest extends TestCase
         self::assertSame('blocked', $body['status']);
         self::assertSame('/configured/operations/runs/' . $runId, $body['statusUrl']);
         self::assertSame('blocked', $body['dispositions'][0]['outcome']);
+    }
+
+    #[Test]
+    public function applyReturnsResumableRunIdOnFinalizationConflictAndResumeCompletesIt(): void
+    {
+        $runId = 'cccccccccccccccccccccccccccccccc';
+        $group = new DuplicateGroup('abc', 128, 2, [3, 9]);
+        $targets = [new ApplyPlanTarget('asset:3', 'fp-3'), new ApplyPlanTarget('asset:9', 'fp-9')];
+        $duplicates = $this->createMock(DuplicateDetectionService::class);
+        $duplicates->method('groupForChecksum')->with('abc')->willReturn($group);
+        $merge = $this->createMock(DuplicateMergeService::class);
+        $merge->method('defaultStrategyName')->willReturn('quarantine');
+        $merge->method('planTargets')->with($group, 3)->willReturn($targets);
+        $merge->method('merge')->willThrowException(MergeLeaseLostException::forRun(
+            $runId,
+            $runId,
+            'The duplicate merge run could not be finalized; retry to complete it.',
+        ));
+        $merge->method('resume')->with($runId)->willReturn(new MergeOutcome('abc', 3, [], $runId, OperationRunStatus::Completed));
+        $plans = $this->createMock(ApplyPlanServiceInterface::class);
+        $plans->method('claim')->willReturn(ApplyPlanStatus::Claimed);
+        $controller = $this->controller($merge, $duplicates, $plans);
+
+        // Apply hits a finalization conflict after the plan token is consumed: the 409 must carry the resumable id.
+        $apply = $controller->merge($this->jsonRequest([
+            'checksum' => 'abc',
+            'canonicalId' => 3,
+            'planToken' => 'signed-plan',
+        ]));
+        $applyBody = json_decode((string) $apply->getContent(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(Response::HTTP_CONFLICT, $apply->getStatusCode());
+        self::assertSame($runId, $applyBody['runId']);
+        self::assertSame('/configured/operations/runs/' . $runId, $applyBody['statusUrl']);
+
+        // The caller resumes directly with the returned id -- no consumed plan token, no run-list search.
+        $resume = $controller->merge($this->jsonRequest(['runId' => $applyBody['runId']]));
+        $resumeBody = json_decode((string) $resume->getContent(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(Response::HTTP_OK, $resume->getStatusCode());
+        self::assertSame('completed', $resumeBody['status']);
     }
 
     private function controller(

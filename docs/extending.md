@@ -703,7 +703,7 @@ it. A long-running or externally-integrated one must use it to stay safe while i
   as soon as it throws.
 - `save(callable $mutator)` performs a guarded save of the copy under the held lock (it heartbeats first,
   so a write can never land after ownership lapsed).
-- `idempotencyKey()` (`duplicate-merge:<runId>:<checksum>:<copyId>`) is stable across attempt, resume,
+- `idempotencyKey()` (`duplicate-merge:<rootRunId>:<checksum>:<copyId>`) is stable across attempt, resume,
   and retry, so external side effects can dedupe. `operationId()`, `itemKey()`, `copyId()`,
   `canonicalId()`, `attempt()`, and `actor()` identify the work.
 

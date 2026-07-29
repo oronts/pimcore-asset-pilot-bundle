@@ -183,7 +183,9 @@ class DuplicatesController
 
         try {
             return $this->mergeGroup($data, $group, $checksum, $canonicalId, $strategy, $dryRun);
-        } catch (StaleApplyPlanException|MergeLeaseLostException $e) {
+        } catch (MergeLeaseLostException $e) {
+            return $this->mergeLeaseConflict($e);
+        } catch (StaleApplyPlanException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_CONFLICT);
         } catch (NotPermittedException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
@@ -306,7 +308,7 @@ class DuplicatesController
 
             return $this->mergeResponse($outcome, false, null, $runId);
         } catch (MergeLeaseLostException $e) {
-            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_CONFLICT);
+            return $this->mergeLeaseConflict($e);
         } catch (NotPermittedException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
         } catch (\InvalidArgumentException $e) {
@@ -316,5 +318,23 @@ class DuplicatesController
 
             return new JsonResponse(['error' => 'Failed to resume duplicate merge.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * A duplicate-merge finalization conflict is recoverable: return the run's id and status URL so the
+     * caller can resume it directly, instead of replaying a consumed plan token or searching the run list.
+     */
+    private function mergeLeaseConflict(MergeLeaseLostException $e): JsonResponse
+    {
+        $body = ['error' => $e->getMessage()];
+        if ($e->runId !== null) {
+            $body['runId'] = $e->runId;
+            $body['statusUrl'] = $this->urlGenerator->generate('oronts_asset_pilot_operation_run_get', ['id' => $e->runId]);
+            if ($e->rootRunId !== null && $e->rootRunId !== $e->runId) {
+                $body['rootRunId'] = $e->rootRunId;
+            }
+        }
+
+        return new JsonResponse($body, JsonResponse::HTTP_CONFLICT);
     }
 }

@@ -28,6 +28,16 @@ try {
         throw new RuntimeException('Invalid Studio package version.');
     }
 
+    $composerJson = $zip->getFromName('composer.json');
+    if ($composerJson === false) {
+        throw new RuntimeException('Missing composer metadata.');
+    }
+    $composer = json_decode($composerJson, true, 512, JSON_THROW_ON_ERROR);
+    $composerVersion = is_array($composer) ? ($composer['version'] ?? null) : null;
+    if (!is_string($composerVersion) || $composerVersion !== $version) {
+        throw new RuntimeException('Archived composer.json version does not match the Studio package version.');
+    }
+
     $buildId = \Oronts\AssetPilotBundle\Tools\assertActiveStudioBuildPointer($zip, $version);
 
     \Oronts\AssetPilotBundle\Tools\assertReleaseArchiveLayout($zip, $buildId);

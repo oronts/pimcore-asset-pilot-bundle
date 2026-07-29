@@ -440,7 +440,12 @@ class OpenApiRulesSpecification
         new OA\Response(response: 400, description: 'Invalid checksum, strategy, or JSON', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 403, description: 'Merge is not permitted', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 404, description: 'Duplicate group not found', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
-        new OA\Response(response: 409, description: 'Preview plan is stale or already consumed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 409, description: 'Merge conflict: the preview plan is stale or already consumed, or a merge ownership/lease or finalization conflict occurred. On a finalization conflict the body also carries the resumable runId and its statusUrl; POST that runId back to complete the run.', content: new OA\JsonContent(type: 'object', required: ['error'], additionalProperties: true, properties: [
+            new OA\Property(property: 'error', type: 'string'),
+            new OA\Property(property: 'runId', type: 'string', pattern: '^[a-f0-9]{32}$', nullable: true, description: 'Present only for a finalization conflict; POST this runId back to /duplicates/merge to complete the run.'),
+            new OA\Property(property: 'rootRunId', type: 'string', pattern: '^[a-f0-9]{32}$', nullable: true),
+            new OA\Property(property: 'statusUrl', type: 'string', nullable: true),
+        ])),
         new OA\Response(response: 500, description: 'Merge failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]

@@ -5,6 +5,16 @@ import { test, expect, loginAs, openAssetPilot } from '../fixtures/pimcore'
 // covers admin dashboard + a11y (rows 8, 10) and View-user tab gating (row 5).
 
 test.describe('Asset Pilot Studio acceptance', () => {
+  test('a rejected login is not treated as authenticated (guards the M-02 false-success wait)', async ({ page }) => {
+    const original = process.env.E2E_VIEW_PASS
+    process.env.E2E_VIEW_PASS = 'definitely-wrong-password'
+    try {
+      await expect(loginAs(page, 'view')).rejects.toThrow()
+    } finally {
+      process.env.E2E_VIEW_PASS = original
+    }
+  })
+
   test('admin opens the dashboard and it has no serious a11y violations (rows 8, 10)', async ({ page }) => {
     await loginAs(page, 'admin')
     await openAssetPilot(page)

@@ -1010,7 +1010,23 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
             // the caller (or a resume) completes the finalization rather than the API returning a 500.
             $this->logger->error('Asset Pilot: duplicate merge run {id} could not be finalized; it completes on a retry.', ['id' => $runId, 'exception' => $e]);
 
-            throw new MergeLeaseLostException('The duplicate merge run could not be finalized; retry to complete it.', 0, $e);
+            throw MergeLeaseLostException::forRun(
+                $runId,
+                $this->rootRunIdOrNull($runId),
+                'The duplicate merge run could not be finalized; retry to complete it.',
+                $e,
+            );
+        }
+    }
+
+    private function rootRunIdOrNull(string $runId): ?string
+    {
+        // rootId() issues its own DB reads; this catch already fires because a run-store write failed
+        // (often a lost connection), so a raw throw here would mask the conflict and degrade the 409 back to 500.
+        try {
+            return $this->runs->rootId($runId);
+        } catch (\Throwable) {
+            return null;
         }
     }
 
