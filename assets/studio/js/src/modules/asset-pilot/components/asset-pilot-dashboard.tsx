@@ -60,7 +60,7 @@ export const AssetPilotDashboard: React.FC = () => {
 
   return (
     <ToastProvider>
-    <div style={{ ...assetPilotThemeVariables(token), height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <div data-testid="asset-pilot-root" style={{ ...assetPilotThemeVariables(token), height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
       <div style={{ padding: '16px 24px 0', borderBottom: '1px solid var(--ap-color-border-secondary)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--ap-color-text)' }}>{t('asset-pilot.nav.title')}</h2>

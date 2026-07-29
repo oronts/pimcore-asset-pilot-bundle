@@ -31,17 +31,13 @@ export async function loginAs(page: Page, role: Role): Promise<void> {
   await expect(page.getByRole('button', { name: /login/i })).toHaveCount(0)
 }
 
-// Opens the Asset Pilot Studio module. The bundle registers a Module Federation remote in the
-// Pimcore Studio shell at /pimcore-studio/ (NOT the classic /admin ExtJS shell), under
-// Experience & E-commerce -> Asset Pilot.
-//
-// SCAFFOLDING: loginAs + the Studio shell boot are live-validated (Pimcore 12.3), but the module launcher is
-// an icon-only widget bar with no accessible name, so these role/name selectors cannot target it yet (it needs
-// a stable data-test attribute or a deep-link). The View-user gating is meanwhile proven at the API layer.
+// Opens the Asset Pilot module; the nav group is clicked (not hovered) so its items stay for a real click.
 export async function openAssetPilot(page: Page): Promise<void> {
   await page.goto('/pimcore-studio/')
-  await page.getByRole('button', { name: /experience & e-commerce/i }).click()
-  await page.getByRole('menuitem', { name: /asset pilot/i }).click()
+  await page.getByTestId('main-nav-trigger').click()
+  await page.getByTestId('nav-button-experienceecommerce').click()
+  await page.getByTestId('nav-button-experienceecommerce-asset-pilot').click()
+  await expect(page.getByRole('tab', { name: 'Dashboard' })).toBeVisible()
 }
 
 export const test = base

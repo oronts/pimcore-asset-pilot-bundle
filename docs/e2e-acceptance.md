@@ -7,18 +7,31 @@ real Pimcore, a real Messenger consumer, a real browser, or multiple users. This
 deployment-level acceptance matrix a release should pass on top of those unit gates, and points at the
 browser specs that help exercise it.
 
-> `.github/workflows/e2e.yml` now runs real steps rather than `TODO(operator)` echo stubs: it installs a
+> `.github/workflows/e2e.yml` runs real steps rather than `TODO(operator)` echo stubs: it installs a
 > Pimcore skeleton with the bundle, registers and installs Studio + Asset Pilot, migrates, seeds the
 > Operate and View users on disjoint asset workspaces (`.github/e2e/SeedAcceptanceUsersCommand.php`, run as
 > `app:asset-pilot:seed-acceptance-users`), builds the Studio remote, starts both Messenger consumers and
-> waits for the health probe to go green, then runs the Playwright + axe suite. It is NOT yet a validated
-> gate: it stays on `workflow_dispatch` until it has passed once on the target runner, because a full
-> skeleton install has environment-specific details (chiefly the Studio security/firewall configuration
-> applied by the Studio bundles' Flex recipes, and the installer secrets) that only a first live run
-> confirms. Promote it to a required gate (add `push`/`pull_request` triggers plus branch protection) after
-> that first green run. One live-validation item remains inside the browser specs: the Pimcore Studio
-> module launcher has no stable accessible name, so `openAssetPilot()` still uses role/name selectors; the
-> role authorization it exercises is already proven at the API layer.
+> waits for the health probe to go green, then runs the Playwright + axe suite.
+>
+> The browser suite is a representative slice, validated 6/6 end to end against a live Pimcore 12.3 (the
+> reference test-project): the login-rejection guard, role gating (a View user cannot see the Admin-only
+> Storage tab), the two-layer authorization matrix (unauthenticated → `401`; a View user stopped at the
+> permission gate; an Operate user stopped at element/workspace authorization), and zero serious axe
+> violations across all twelve central tabs. The a11y test asserts the rendered tab set equals the tab
+> contract, so a new source tab cannot be silently dropped from coverage. `openAssetPilot()` opens the
+> module through the deterministic `data-testid` Pimcore Studio derives from each main-nav item
+> (`main-nav-trigger` → `nav-button-experienceecommerce` → `nav-button-experienceecommerce-asset-pilot`),
+> a real click on the real-user path. The dashboard root carries a `data-testid="asset-pilot-root"` so axe
+> scopes to bundle-owned UI (header, tabs, panel) and excludes the surrounding Pimcore shell.
+>
+> This slice covers matrix rows 5, 6, 7, and 10 at the browser layer, and row 8 only partially: every
+> central tab loads, but the per-flow interactions ("load and act") are exercised by the unit and
+> live-stack evidence, not yet by the browser suite. Real durable mutations, RFC 3339 timestamp
+> localization, and the full run/recovery flows remain browser-unautomated. The workflow stays on
+> `workflow_dispatch` until
+> the full skeleton install has run green once on the target runner (that install has environment-specific
+> details: the Studio security/firewall Flex recipes and the installer secrets). Promote it to a required
+> gate (add `push`/`pull_request` triggers plus branch protection) after that first green run.
 
 ## Acceptance matrix
 

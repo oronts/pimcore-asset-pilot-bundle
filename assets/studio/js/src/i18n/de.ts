@@ -713,6 +713,7 @@ export const de: Record<string, string> = {
   'asset-pilot.rule-preview.confirm-title': 'Geprüftes Regelergebnis anwenden',
   'asset-pilot.rule-preview.confirm-description': 'Diese Regel mit {{count}} geprüften Vorgängen auf Objekt #{{id}} anwenden.',
   'asset-pilot.duplicates.merge-failed': 'Zusammenführen fehlgeschlagen.',
+  'asset-pilot.duplicates.merge-recovery': 'Die Zusammenführung konnte nicht abgeschlossen werden, der Vorgang ist jedoch wiederherstellbar. Setzen Sie ihn unten fort, um ihn abzuschließen.',
   'asset-pilot.duplicates.resume': 'Zusammenführung fortsetzen',
   'asset-pilot.rules.overlap.failed': 'Überschneidungsanalyse fehlgeschlagen: {{message}}',
   'asset-pilot.health.failed': 'Systemstatus konnte nicht geladen werden: {{message}}',

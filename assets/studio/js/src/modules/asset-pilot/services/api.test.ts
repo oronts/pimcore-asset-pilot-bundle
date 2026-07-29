@@ -4,7 +4,7 @@ vi.mock('@pimcore/studio-ui-bundle/api', () => ({
   getPrefix: () => '/pimcore-studio/api',
 }))
 
-import { assetPilotApi } from './api'
+import { ApiError, assetPilotApi, mergeConflictRecovery } from './api'
 import type { MergeResult, OperationRun, OperationRunListResponse } from '../types'
 
 const previewResult: MergeResult = {
@@ -105,6 +105,33 @@ describe('assetPilotApi.mergeDuplicates', () => {
         body: JSON.stringify({ runId: 'a'.repeat(32) }),
       }),
     )
+  })
+})
+
+describe('ApiError structured details', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('preserves the full error body so recovery fields survive a failed request', async () => {
+    const runId = 'c'.repeat(32)
+    const body = { error: 'The duplicate merge run could not be finalized; retry to complete it.', runId, rootRunId: runId, statusUrl: `operations/runs/${runId}` }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => body })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await assetPilotApi.mergeDuplicates('abc123', 7, undefined, false, 'signed-plan').catch(e => e)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(409)
+    expect((error as ApiError).message).toBe(body.error)
+    expect((error as ApiError).details).toEqual(body)
+  })
+
+  it('extracts a recoverable merge conflict only when a runId is present', () => {
+    const runId = 'd'.repeat(32)
+    expect(mergeConflictRecovery({ error: 'x', runId, statusUrl: 'operations/runs/x' })).toEqual({ runId, rootRunId: undefined, statusUrl: 'operations/runs/x' })
+    expect(mergeConflictRecovery({ error: 'stale plan' })).toBeNull()
+    expect(mergeConflictRecovery({ error: 'x', runId: '' })).toBeNull()
+    expect(mergeConflictRecovery(null)).toBeNull()
+    expect(mergeConflictRecovery('nope')).toBeNull()
   })
 })
 

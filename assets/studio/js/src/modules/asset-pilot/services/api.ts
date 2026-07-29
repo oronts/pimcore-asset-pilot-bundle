@@ -57,9 +57,30 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    // Parsed error body, so structured fields survive instead of being flattened to a message.
+    public readonly details?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
+  }
+}
+
+// A recoverable duplicate-merge 409: the run can be resumed by id without a fresh plan.
+export interface MergeConflictRecovery {
+  runId: string
+  rootRunId?: string
+  statusUrl?: string
+}
+
+export function mergeConflictRecovery(details: unknown): MergeConflictRecovery | null {
+  if (typeof details !== 'object' || details === null) return null
+  const body = details as Record<string, unknown>
+  if (typeof body.runId !== 'string' || body.runId === '') return null
+
+  return {
+    runId: body.runId,
+    rootRunId: typeof body.rootRunId === 'string' ? body.rootRunId : undefined,
+    statusUrl: typeof body.statusUrl === 'string' ? body.statusUrl : undefined,
   }
 }
 
@@ -72,7 +93,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new ApiError(body.error ?? `Request failed (${response.status})`, response.status)
+    throw new ApiError(body.error ?? `Request failed (${response.status})`, response.status, body)
   }
 
   return response.json() as Promise<T>

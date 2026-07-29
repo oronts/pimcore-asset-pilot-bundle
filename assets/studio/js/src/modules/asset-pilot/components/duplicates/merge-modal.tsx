@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError, assetPilotApi } from '../../services/api'
+import { ApiError, assetPilotApi, mergeConflictRecovery } from '../../services/api'
 import type { DuplicateGroup, MergeResult, MergeStrategies } from '../../types'
 import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 import { truncate } from '../../utils/format'
@@ -23,6 +23,7 @@ export const MergeModal: React.FC<MergeModalProps> = ({ group, strategies, strat
   const [strategy, setStrategy] = useState<string>('')
   const [result, setResult] = useState<MergeResult | null>(null)
   const [planToken, setPlanToken] = useState<string | null>(null)
+  const [recoveryRunId, setRecoveryRunId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const modalRef = useModalDismiss<HTMLDivElement>(onClose, !loading)
@@ -62,12 +63,22 @@ export const MergeModal: React.FC<MergeModalProps> = ({ group, strategies, strat
       }
     } catch (e) {
       if (!(e instanceof Error && e.name === 'AbortError')) {
-        if (e instanceof ApiError && e.status === 409) {
-          setResult(null)
+        const recovery = e instanceof ApiError && e.status === 409 ? mergeConflictRecovery(e.details) : null
+        if (recovery != null) {
+          // Plan is consumed, but the run is durable: keep its id to resume instead of re-applying.
           setPreviewParams(null)
           setPlanToken(null)
+          setRecoveryRunId(recovery.runId)
+          setError(t('asset-pilot.duplicates.merge-recovery'))
+        } else {
+          if (e instanceof ApiError && e.status === 409) {
+            setResult(null)
+            setPreviewParams(null)
+            setPlanToken(null)
+            setRecoveryRunId(null)
+          }
+          setError(e instanceof Error ? e.message : t('asset-pilot.duplicates.merge-failed'))
         }
-        setError(e instanceof Error ? e.message : t('asset-pilot.duplicates.merge-failed'))
       }
     } finally {
       if (!controller.signal.aborted) setLoading(false)
@@ -75,15 +86,17 @@ export const MergeModal: React.FC<MergeModalProps> = ({ group, strategies, strat
   }
 
   const resume = async (): Promise<void> => {
-    if (result?.runId == null) return
+    const runId = result?.runId ?? recoveryRunId
+    if (runId == null) return
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     setLoading(true)
     setError(null)
     try {
-      const resumed = await assetPilotApi.resumeDuplicateMerge(result.runId, controller.signal)
+      const resumed = await assetPilotApi.resumeDuplicateMerge(runId, controller.signal)
       if (!controller.signal.aborted) {
+        setRecoveryRunId(null)
         setResult(resumed)
         if (resumed.status === 'completed') onMerged()
       }
@@ -101,6 +114,7 @@ export const MergeModal: React.FC<MergeModalProps> = ({ group, strategies, strat
     setResult(null)
     setPreviewParams(null)
     setPlanToken(null)
+    setRecoveryRunId(null)
     setLoading(false)
     setError(null)
   }
@@ -183,9 +197,18 @@ export const MergeModal: React.FC<MergeModalProps> = ({ group, strategies, strat
           </>
         )}
 
+        {recoveryRunId != null && (
+          <div style={{ marginBottom: 16 }}>
+            <OperationRunPanel runId={recoveryRunId} />
+            <button type="button" onClick={() => { void resume() }} disabled={loading} style={previewBtnStyle}>
+              {loading ? t('asset-pilot.common.loading') : t('asset-pilot.duplicates.resume')}
+            </button>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button onClick={onClose} disabled={loading} style={cancelBtnStyle}>{t('asset-pilot.common.cancel')}</button>
-          <button onClick={() => { void run(true) }} disabled={loading || strategies == null || strategiesError != null} style={previewBtnStyle}>
+          <button onClick={() => { void run(true) }} disabled={loading || strategies == null || strategiesError != null || recoveryRunId != null} style={previewBtnStyle}>
             {loading ? t('asset-pilot.common.loading') : t('asset-pilot.duplicates.preview')}
           </button>
           {canApply && (

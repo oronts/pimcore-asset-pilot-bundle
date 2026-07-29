@@ -713,6 +713,7 @@ export const en: Record<string, string> = {
   'asset-pilot.rule-preview.confirm-title': 'Apply reviewed rule result',
   'asset-pilot.rule-preview.confirm-description': 'Apply this rule to object #{{id}} with {{count}} reviewed operation(s).',
   'asset-pilot.duplicates.merge-failed': 'Merge failed.',
+  'asset-pilot.duplicates.merge-recovery': 'The merge could not be finalized, but the run is recoverable. Resume it below to complete it.',
   'asset-pilot.duplicates.resume': 'Resume merge',
   'asset-pilot.rules.overlap.failed': 'Overlap analysis failed: {{message}}',
   'asset-pilot.health.failed': 'Health status could not be loaded: {{message}}',

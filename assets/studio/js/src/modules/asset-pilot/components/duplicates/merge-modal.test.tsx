@@ -149,6 +149,56 @@ describe('MergeModal', () => {
     expect(screen.queryByText('safe')).not.toBeInTheDocument()
   })
 
+  it('retains the run and offers resume when a 409 carries a recoverable runId', async () => {
+    const user = userEvent.setup()
+    const runId = 'b'.repeat(32)
+    vi.spyOn(assetPilotApi, 'mergeDuplicates')
+      .mockResolvedValueOnce(preview)
+      .mockRejectedValueOnce(new ApiError('The duplicate merge run could not be finalized; retry to complete it.', 409, {
+        error: 'The duplicate merge run could not be finalized; retry to complete it.',
+        runId,
+        statusUrl: `/operations/runs/${runId}`,
+      }))
+    const resume = vi.spyOn(assetPilotApi, 'resumeDuplicateMerge').mockResolvedValue({
+      ...preview, dryRun: false, planToken: null, runId, status: 'completed', statusUrl: `/operations/runs/${runId}`,
+    })
+    const { onMerged } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: 'Preview' }))
+    const apply = screen.getByRole('button', { name: 'Merge' })
+    await waitFor(() => expect(apply).toBeEnabled())
+    await user.click(apply)
+
+    expect(await screen.findByTestId('operation-run')).toHaveTextContent(runId)
+    expect(apply).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Resume merge' }))
+
+    await waitFor(() => expect(resume).toHaveBeenCalledWith(runId, expect.any(AbortSignal)))
+    await waitFor(() => expect(onMerged).toHaveBeenCalledOnce())
+  })
+
+  it('changing an input during recovery clears the run and re-enables preview', async () => {
+    const user = userEvent.setup()
+    const runId = 'e'.repeat(32)
+    vi.spyOn(assetPilotApi, 'mergeDuplicates')
+      .mockResolvedValueOnce(preview)
+      .mockRejectedValueOnce(new ApiError('finalization conflict', 409, { error: 'finalization conflict', runId }))
+    renderModal()
+
+    await user.click(screen.getByRole('button', { name: 'Preview' }))
+    const apply = screen.getByRole('button', { name: 'Merge' })
+    await waitFor(() => expect(apply).toBeEnabled())
+    await user.click(apply)
+    expect(await screen.findByTestId('operation-run')).toHaveTextContent(runId)
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Disposition strategy' }), 'delete')
+
+    expect(screen.queryByTestId('operation-run')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resume merge' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeEnabled()
+  })
+
   it('rejects a preview response without a signed plan', async () => {
     vi.spyOn(assetPilotApi, 'mergeDuplicates').mockResolvedValue({ ...preview, planToken: null })
     const user = userEvent.setup()

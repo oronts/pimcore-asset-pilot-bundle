@@ -21,7 +21,7 @@
     },
     "globalName": "oronts_asset_pilot_bundle",
     "pluginVersion": "2.7.0",
-    "publicPath": "/bundles/orontsassetpilot/studio/build/2.0.0-add0da7d-a54a-43a7-93d8-e874834782eb/"
+    "publicPath": "/bundles/orontsassetpilot/studio/build/2.0.0-06546d63-1241-44d1-961f-7bbfbf47c361/"
   },
   "shared": [
     {
@@ -228,7 +228,7 @@
       "assets": {
         "js": {
           "sync": [
-            "static/js/async/__federation_expose_default_export.9fb940f1.js"
+            "static/js/async/__federation_expose_default_export.b0d30189.js"
           ],
           "async": []
         },
