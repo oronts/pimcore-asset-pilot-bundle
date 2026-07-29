@@ -504,9 +504,10 @@ asset.
 Selectors: `--before` and `--after` bound the modification date (either accepts an absolute date or a
 relative expression such as `-90 days`), `--type` and `--extension` take comma-separated lists, and
 `--folder` limits to a subtree. `--batch-size` (default 100) sets the processing batch. A scanned run
-is capped by `--max-assets` (default 1000): a scope larger than the cap fails with an error asking you
-to narrow the selector rather than silently truncating, so raise `--max-assets` or scan in batches for
-a large catalog. `--by-ids` bypasses scanning (each id is still re-verified as unused and
+is capped by `--max-assets` (default 1000, which is also the hard maximum): a scope larger than the cap
+fails with an error asking you to narrow the selector rather than silently truncating, so narrow the
+selector (by folder, date, or type) across successive runs for a large catalog. `--max-assets` cannot be
+raised above 1000. `--by-ids` bypasses scanning (each id is still re-verified as unused and
 permission-checked).
 
 > Note: with `content_scan.enabled` (see [Configuration](configuration.md)), delete and move also

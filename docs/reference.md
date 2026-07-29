@@ -130,7 +130,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:normalize-filenames` | Preview filename sanitization; apply the exact signed selection with `--apply --plan-token=...` (`--by-ids`, `--folder`, `--type`, `--extension`, `--limit`) |
 | `asset-pilot:find-duplicates` | Report byte-identical assets (`--scan` to build the hash index, `--folder`, `--type`, `--extension`, `--limit` to cap indexed assets, `--report-limit` to cap reported groups, or `--asset-id` for one asset's group) |
 | `asset-pilot:merge-duplicates` | Preview a byte-identical merge; apply the exact signed selection with `--apply --plan-token=...` (`--checksum`, `--canonical`, `--strategy`), or resume a persisted run with `--run-id --apply` |
-| `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--limit`) |
+| `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--extension`, `--limit`) |
 | `asset-pilot:heal-assets` | Preview healing/undo; apply the exact signed selection with `--apply --plan-token=...` (`--by-ids`, `--undo`, scan filters, or explicit `--all`) |
 | `asset-pilot:download-zip` | Build a zip of assets to a file for cron/workers (`--asset-ids`/`--folder-id`/`--object-ids`, `--non-recursive`, `--strategy`, `--thumbnail`, `--output`, `--force`) |
 

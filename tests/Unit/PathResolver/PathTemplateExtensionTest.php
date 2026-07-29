@@ -113,6 +113,24 @@ class PathTemplateExtensionTest extends TestCase
         self::assertSame('unknown', $this->render("{{ items|first_of('getWithArg') }}", $items));
     }
 
+    #[Test]
+    public function anUninitializedPublicTypedPropertyFallsBackInsteadOfThrowing(): void
+    {
+        $obj = new class () {
+            public string $name;
+
+            public function getCode(): string
+            {
+                return 'C1';
+            }
+        };
+        $items = ['items' => [$obj]];
+
+        self::assertSame('unknown', $this->render("{{ items|first_of('name') }}", $items));
+        self::assertSame('x', $this->render("{{ items|pluck('name')|first|default('x') }}", $items));
+        self::assertSame('C1', $this->render("{{ items|first_of('code') }}", $items));
+    }
+
     /**
      * @param array<string, mixed> $context
      */

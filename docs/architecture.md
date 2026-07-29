@@ -135,6 +135,7 @@ flowchart TD
 ```
 src/
 ├── Action/                 RuleActionInterface + set-property action beyond moving
+├── Api/                    RFC 3339 UTC serialization (ApiDateFormatter, OperationResponseAssembler)
 ├── Audit/                  Focused writer, query, export, retention contracts + AuditLogger default
 ├── Cache/                  Stampede-safe stats caching
 ├── Command/                CLI: organize, debug-rule, validate-config, status, audit, cleanup-unused, ...
@@ -159,6 +160,8 @@ src/
 ├── Notification/           NotificationDispatcherInterface + typed tagged transports
 ├── Observer/               Durable operation observers and prepared deliveries
 ├── PathResolver/           PathResolverInterface + Twig TemplatePathResolver
+├── Resources/              Service wiring and bundle config (Resources/config/services.yaml)
+├── Security/               ElementAuthorization + actor context (ActorContextProvider/Store)
 ├── Service/                AssetOrganizer, AssetFieldExtractor, AssetSearchService,
 │                           UnusedAssetFinder, QuarantineService, DuplicateMergeService,
 │                           ConfidenceScorer, OperationJournal, OperationRecoveryService, LoopGuard

@@ -171,8 +171,13 @@ class PathTemplateExtension extends AbstractExtension
         if (preg_match('/^(get|is|has)[A-Z0-9]/', $name) && self::isCallablePublicMethod($item, $name, 0)) {
             return $item->$name();
         }
-        if (property_exists($item, $name) && (new \ReflectionProperty($item, $name))->isPublic()) {
-            return $item->$name;
+        if (property_exists($item, $name)) {
+            $property = new \ReflectionProperty($item, $name);
+            // isInitialized guards a public typed property declared but not yet assigned, which would otherwise
+            // throw on read instead of letting the caller fall back.
+            if ($property->isPublic() && $property->isInitialized($item)) {
+                return $item->$name;
+            }
         }
 
         return null;

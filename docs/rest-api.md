@@ -43,7 +43,7 @@ and never signal truncation.
 | `GET` | `/duplicates` | View | Byte-identical asset groups from the content-hash index (`?page`, `?limit`, `?minCopies` (default 2), `?type`). Returns `{items[], total, page, limit, hasMore, truncated}` — `total` is `null` for interactive (non-System) callers, so use `hasMore` to detect further pages and `truncated` to detect a scan-budget cutoff. Read-only — build the index with `asset-pilot:find-duplicates --scan` |
 | `GET` | `/duplicates/strategies` | View | Available merge-disposition strategies + the configured default (`{strategies[], default}`) |
 | `GET` | `/duplicates/export` | View | Stream the full duplicate report as CSV (`?minCopies`, `?type`) |
-| `POST` | `/duplicates/merge` | Admin | Preview/apply a merge with `{checksum, canonicalId?, strategy?, dryRun?, planToken?}`, or resume with `{runId}`. Apply uses a signed plan and returns durable run state. |
+| `POST` | `/duplicates/merge` | Admin | Preview/apply a merge with `{checksum, canonicalId?, strategy?, dryRun?, planToken?}`, or resume with `{runId}`. Apply uses a signed plan and returns durable run state. Errors: `400` (bad checksum/token), `403` (not permitted), `404` (no group / unknown run), `409` (stale plan or a retryable finalization race). |
 | `GET` | `/folders/empty` | View | Empty asset folders (`?folder`, `?page`, `?limit`). Returns `{items[], page, limit, hasMore}` (no total; use `hasMore` for pagination) |
 | `GET` | `/storage/trends` | Admin | Global unused-storage series from the snapshots (`?type`, `?limit` max 365). Returns `{type, items[]}` — build snapshots with `asset-pilot:capture-storage-snapshot` |
 | `POST` | `/folders/empty/delete` | Operate | Preview or delete empty folders through a signed apply plan (`{ids[], dryRun?, planToken?}`, 1..200 ids; each re-verified childless + permission-checked). Preview returns `{deleted: 0, eligible, skipped, failed, errors, dryRun, planToken}`; apply returns `{deleted, skipped, failed, errors, dryRun, planToken: null}` |
@@ -204,6 +204,16 @@ If execution is interrupted, resume the actor-scoped run without a new plan:
 
 The service continues from the persisted phase and does not repeat a committed phase. Copies whose
 references cannot be fully repointed are blocked and remain untouched.
+
+A missing or empty `checksum` returns `400`, and a checksum with no live duplicate group (fewer than
+two live assets) returns `404`. An actor who may not merge the group returns `403`. On apply, a missing
+`planToken` returns `400`, a malformed token returns `400`, and a stale or already-used plan returns
+`409`. Both apply and resume also return `409` with the message
+`The duplicate merge run could not be finalized; retry to complete it.` when the copies were repointed
+and disposed but the run parent could not be finalized (a lost merge lease or finalization race). That
+case is retryable: POST the same `{runId}` to complete the finalization (recover the id from
+`GET /operations/runs` if the failing apply response did not carry it). A resume for an unknown run
+returns `404`.
 
 ### Operations
 
