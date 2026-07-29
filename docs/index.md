@@ -9,6 +9,8 @@ Documentation for the Pimcore 12 Asset Pilot bundle. For a project overview and 
 
 - [Installation](installation.md): install or upgrade the package, configure both workers and Lock,
   verify the prebuilt Studio UI, and uninstall safely.
+- [Operations](operations.md): drop-in systemd, Supervisor, and Kubernetes configs to keep the two
+  consumers and the maintenance scheduler supervised, plus how to verify supervision via the health probe.
 - [Usage](usage.md): how the bundle behaves day to day, previewing, audit and revert, unused-asset
   cleanup, and protecting assets.
 - [Configuration](configuration.md): the full `oronts_asset_pilot` tree, rule reference, and per-rule

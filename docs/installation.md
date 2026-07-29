@@ -118,6 +118,10 @@ bin/console messenger:consume asset_pilot --time-limit=3600 --memory-limit=256M
 bin/console messenger:consume pimcore_maintenance --time-limit=3600 --memory-limit=256M
 ```
 
+[operations.md](operations.md) gives drop-in systemd, Supervisor, and Kubernetes configurations for
+both consumers and the maintenance scheduler, and how to confirm supervision stays green across
+restarts.
+
 Also schedule Pimcore maintenance on a recurring interval. `pimcore:maintenance` is a command that must
 run from cron or a timer, not a daemon. It dispatches one message per maintenance task onto the
 `pimcore_maintenance` transport, so the `pimcore_maintenance` consumer above only executes tasks that

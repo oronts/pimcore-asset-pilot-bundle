@@ -116,6 +116,11 @@ jobs:
         with:
           node-version: '24'
 
+      # Remove the tracked generation the checkout restored so the archive contains ONLY the freshly
+      # built (pruned) generation, matching what release.yml produces in a single workspace.
+      - name: Clear the tracked Studio build before restoring the verified one
+        run: rm -rf public/studio/build
+
       - name: Download verified package frontend
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:

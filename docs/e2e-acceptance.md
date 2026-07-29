@@ -7,11 +7,18 @@ real Pimcore, a real Messenger consumer, a real browser, or multiple users. This
 deployment-level acceptance matrix a release should pass on top of those unit gates, and points at the
 browser specs that help exercise it.
 
-> The browser specs under `assets/studio/e2e/` are a starting point, not a wired gate: they cover a
-> couple of smoke checks today, and running the full matrix needs a host that stands up a real Pimcore,
-> MariaDB, the Messenger consumers, three users on disjoint workspaces, and a headless browser. A
-> manual scaffold workflow exists at `.github/workflows/e2e.yml` (its Pimcore install/migrate/seed/worker
-> steps are stubbed `TODO(operator)`), so it is not a required gate until a host runner is chosen.
+> `.github/workflows/e2e.yml` now runs real steps rather than `TODO(operator)` echo stubs: it installs a
+> Pimcore skeleton with the bundle, registers and installs Studio + Asset Pilot, migrates, seeds the
+> Operate and View users on disjoint asset workspaces (`.github/e2e/SeedAcceptanceUsersCommand.php`, run as
+> `app:asset-pilot:seed-acceptance-users`), builds the Studio remote, starts both Messenger consumers and
+> waits for the health probe to go green, then runs the Playwright + axe suite. It is NOT yet a validated
+> gate: it stays on `workflow_dispatch` until it has passed once on the target runner, because a full
+> skeleton install has environment-specific details (chiefly the Studio security/firewall configuration
+> applied by the Studio bundles' Flex recipes, and the installer secrets) that only a first live run
+> confirms. Promote it to a required gate (add `push`/`pull_request` triggers plus branch protection) after
+> that first green run. One live-validation item remains inside the browser specs: the Pimcore Studio
+> module launcher has no stable accessible name, so `openAssetPilot()` still uses role/name selectors; the
+> role authorization it exercises is already proven at the API layer.
 
 ## Acceptance matrix
 
