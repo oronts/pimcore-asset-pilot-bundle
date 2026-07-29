@@ -342,12 +342,81 @@ class BulkOrganizeHandlerTest extends TestCase
         $runs->expects(self::once())->method('resume')->with('run-1')->willReturn(true);
         $runs->expects(self::never())->method('resumeItem');
         $runs->expects(self::never())->method('completeItem');
-        $runs->expects(self::once())->method('finish')->with('run-1')->willReturn(OperationRunStatus::Running);
+        $runs->expects(self::never())->method('finish');
 
         $this->expectException(RecoverableMessageHandlingException::class);
 
         ($this->handler($organizer, loopGuard: $loopGuard, runs: $runs))(
             new BulkOrganizeMessage([42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function aLockConflictRetriesWithoutFinalizingOrClobberingTheConcurrentlyOwnedItem(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturnCallback(
+            static fn (string $runId, string $itemKey): bool => $itemKey === 'object:41',
+        );
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $after): BulkOrganizeReport {
+                self::assertTrue($before(41));
+                $after(new BulkObjectResult(41, BulkObjectStatus::Succeeded, operationCount: 1));
+                self::assertFalse($before(42));
+
+                return new BulkOrganizeReport([], [new BulkObjectResult(41, BulkObjectStatus::Succeeded, operationCount: 1)]);
+            },
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willReturn(true);
+        $runs->expects(self::once())->method('completeItem')->with(
+            'run-1',
+            'object:41',
+            OperationRunItemStatus::Completed,
+            self::anything(),
+            self::anything(),
+            self::anything(),
+        )->willReturn(true);
+        $runs->expects(self::never())->method('finish');
+
+        $this->expectException(RecoverableMessageHandlingException::class);
+
+        ($this->handler($organizer, loopGuard: $loopGuard, runs: $runs))(
+            new BulkOrganizeMessage([41, 42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
+        );
+    }
+
+    #[Test]
+    public function aThrowAfterAnEarlierLockConflictRetriesInsteadOfClobbering(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturnCallback(
+            static fn (string $runId, string $itemKey): bool => $itemKey !== 'object:41',
+        );
+        $loopGuard->method('beginOperationRunItemLease')->willReturn('token-42');
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, callable $stale, callable $cancel, callable $before): BulkOrganizeReport {
+                self::assertFalse($before(41)); // the first item's lock is held by a concurrent worker
+                $before(42);                    // a later item's resumeItem throws, so organizeBatch throws
+
+                return new BulkOrganizeReport([], []);
+            },
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willThrowException(new \RuntimeException('boom'));
+        $runs->expects(self::never())->method('completeItem');
+        $runs->expects(self::never())->method('finish');
+
+        $this->expectException(RecoverableMessageHandlingException::class);
+
+        ($this->handler($organizer, loopGuard: $loopGuard, runs: $runs))(
+            new BulkOrganizeMessage([41, 42], TriggerType::Api, actorType: ActorType::System, runId: 'run-1'),
         );
     }
 

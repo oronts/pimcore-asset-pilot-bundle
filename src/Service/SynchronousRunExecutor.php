@@ -201,7 +201,7 @@ final class SynchronousRunExecutor
         };
     }
 
-    private function reportsSelfFinalized(OperationRunStatus $status): bool
+    public function reportsSelfFinalized(OperationRunStatus $status): bool
     {
         // Failed/Cancelled or non-terminal means another attempt or a reconciler owns the run, not this one.
         return in_array($status, [OperationRunStatus::Completed, OperationRunStatus::Partial, OperationRunStatus::Blocked], true);

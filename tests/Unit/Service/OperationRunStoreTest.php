@@ -246,6 +246,26 @@ final class OperationRunStoreTest extends TestCase
     }
 
     #[Test]
+    public function aTokenlessCompletionSparesALiveLeaseButReclaimsAnExpiredOne(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+        ]);
+        self::assertTrue($store->start($runId));
+        self::assertTrue($store->startItem($runId, 'object:10', 'worker-one'));
+
+        // A redelivery's tokenless failBatch cleanup must not overwrite an item a live worker still holds.
+        self::assertFalse($store->completeItem($runId, 'object:10', OperationRunItemStatus::Failed, token: null));
+        self::assertSame(OperationRunItemStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$runId]), 'a live lease is spared');
+
+        // Once the lease has expired, the item is provably abandoned and a tokenless cleanup reclaims it.
+        $this->connection->update(Installer::TABLE_OPERATION_RUN_ITEM, ['lease_expires_at' => '2000-01-01 00:00:00'], ['run_id' => $runId]);
+        self::assertTrue($store->completeItem($runId, 'object:10', OperationRunItemStatus::Failed, token: null));
+        self::assertSame(OperationRunItemStatus::Failed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$runId]), 'an expired lease is reclaimed');
+    }
+
+    #[Test]
     public function reconcileUnfinalizedRunsFinalizesARunWhoseItemsAreAllTerminalButWasNeverFinished(): void
     {
         $store = new OperationRunStore($this->connection);

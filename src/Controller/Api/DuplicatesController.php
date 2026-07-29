@@ -10,6 +10,7 @@ use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
+use Oronts\AssetPilotBundle\Exception\MergeLeaseLostException;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Merge\MergeOutcome;
@@ -182,7 +183,7 @@ class DuplicatesController
 
         try {
             return $this->mergeGroup($data, $group, $checksum, $canonicalId, $strategy, $dryRun);
-        } catch (StaleApplyPlanException $e) {
+        } catch (StaleApplyPlanException|MergeLeaseLostException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_CONFLICT);
         } catch (NotPermittedException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
@@ -304,6 +305,8 @@ class DuplicatesController
             $outcome = $this->merge->resume($runId);
 
             return $this->mergeResponse($outcome, false, null, $runId);
+        } catch (MergeLeaseLostException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_CONFLICT);
         } catch (NotPermittedException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
         } catch (\InvalidArgumentException $e) {

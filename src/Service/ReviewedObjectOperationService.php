@@ -341,6 +341,13 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
                 previous: $e,
             );
         }
+        if (!$this->syncRunExecutor->reportsSelfFinalized($status)) {
+            throw new ReviewedSelectionException(
+                ReviewedSelectionError::OwnershipLost,
+                'The reviewed run did not finalize under this attempt; another attempt or a reconciler owns it.',
+                runId: $runId,
+            );
+        }
 
         return new ReviewedSelectionResult(
             false,

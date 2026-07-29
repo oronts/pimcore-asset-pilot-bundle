@@ -290,7 +290,7 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
             ),
         ));
         if ($openItems === []) {
-            $this->runs->finish($runId);
+            $this->finalizeOrConflict($runId);
 
             return $this->outcomeFromRequiredRun($runId);
         }
@@ -311,7 +311,7 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
             if (!$this->runs->resume($runId)) {
                 if ($this->runs->isCancellationRequested($runId)) {
                     $this->cancelAvailableItems($runId, $openItems);
-                    $this->runs->finish($runId);
+                    $this->finalizeOrConflict($runId);
                 }
 
                 return $this->outcomeFromRequiredRun($runId);
@@ -343,7 +343,7 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
             $this->releaseLocks($locks);
         }
 
-        $this->runs->finish($runId);
+        $this->finalizeOrConflict($runId);
 
         return $this->outcomeFromRequiredRun($runId);
     }
@@ -999,6 +999,19 @@ class DuplicateMergeService implements DuplicateMergeServiceInterface
         }
 
         return $this->outcomeFromRun($run);
+    }
+
+    private function finalizeOrConflict(string $runId): void
+    {
+        try {
+            $this->runs->finish($runId);
+        } catch (\Throwable $e) {
+            // The parent-status write failed after the run items were processed; surface a retryable conflict so
+            // the caller (or a resume) completes the finalization rather than the API returning a 500.
+            $this->logger->error('Asset Pilot: duplicate merge run {id} could not be finalized; it completes on a retry.', ['id' => $runId, 'exception' => $e]);
+
+            throw new MergeLeaseLostException('The duplicate merge run could not be finalized; retry to complete it.', 0, $e);
+        }
     }
 
     /**

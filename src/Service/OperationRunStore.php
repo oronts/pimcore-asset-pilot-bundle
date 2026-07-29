@@ -268,6 +268,12 @@ final class OperationRunStore implements OperationRunStoreInterface
             if ($token !== null) {
                 $sql .= ' AND claim_token = ?';
                 $params[] = $token;
+            } else {
+                // A tokenless completion (a cleanup by a worker holding no claim on this item -- a bulk-failure sweep,
+                // a cancellation, or a redelivery) may terminalize an item that is unclaimed or whose lease has expired,
+                // but never one a live worker still holds; otherwise it could overwrite a concurrently owned outcome.
+                $sql .= ' AND (claim_token IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)';
+                $params[] = $now;
             }
             $updated = $this->connection->executeStatement($sql, $params);
             if ($updated === 1) {

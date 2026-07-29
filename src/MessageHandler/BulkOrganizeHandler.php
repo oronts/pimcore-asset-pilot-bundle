@@ -72,11 +72,12 @@ class BulkOrganizeHandler
                 $this->requeueUntrackedDirtyObjects($message, $actor);
             }
             $this->recordReport($report);
+            if ($lockConflict) {
+                // Retry before finalizing: finishing here could throw and route a concurrently-owned item into failBatch.
+                throw new RecoverableMessageHandlingException('An operation run item is already being processed.');
+            }
             if ($message->runId !== null) {
                 $this->runs->finish($message->runId);
-            }
-            if ($lockConflict) {
-                throw new RecoverableMessageHandlingException('An operation run item is already being processed.');
             }
         } catch (\Throwable $e) {
             if ($e instanceof RecoverableMessageHandlingException) {
@@ -87,6 +88,11 @@ class BulkOrganizeHandler
             }
             if (RetryableInfrastructureFailure::matches($e)) {
                 throw $e;
+            }
+            if ($lockConflict) {
+                // A concurrent worker holds at least one item's lock; retry the whole message rather than running
+                // failBatch, whose tokenless cleanup could terminalize the item that worker is about to claim.
+                throw new RecoverableMessageHandlingException('An operation run item is already being processed.', 0, $e);
             }
 
             $this->failBatch($message, $e);
