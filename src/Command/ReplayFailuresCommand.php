@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
+use Oronts\AssetPilotBundle\Command\Support\ValidatesApplyPlanControl;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -28,6 +29,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ReplayFailuresCommand extends Command
 {
+    use ValidatesApplyPlanControl;
     use ValidatesCliBulkIds;
 
     public function __construct(
@@ -81,22 +83,6 @@ class ReplayFailuresCommand extends Command
         }
 
         return $this->report($io, $result, count($objectIds), $async, $apply);
-    }
-
-    private function hasValidPlanControl(SymfonyStyle $io, bool $apply, mixed $planToken): bool
-    {
-        if ($apply && (!is_string($planToken) || trim($planToken) === '')) {
-            $io->error('Applying requires --plan-token from a matching preview.');
-
-            return false;
-        }
-        if (!$apply && is_string($planToken) && trim($planToken) !== '') {
-            $io->error('--plan-token is only valid together with --apply.');
-
-            return false;
-        }
-
-        return true;
     }
 
     /** @return array<string, mixed>|false */

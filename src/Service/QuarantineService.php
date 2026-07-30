@@ -32,6 +32,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  */
 class QuarantineService implements QuarantineServiceInterface
 {
+    use AppliesReviewedPlanLocks;
     private const int PURGE_BATCH = 1000;
 
     public function __construct(
@@ -228,33 +229,6 @@ class QuarantineService implements QuarantineServiceInterface
 
         return [$asset, null];
     }
-
-    /**
-     * @template TResult
-     * @param list<int> $assetIds
-     * @param array<string, string>|null $expectedFingerprints
-     * @param callable(list<int>): TResult $operation
-     * @return TResult
-     */
-    private function withReviewedPlanLocks(array $assetIds, ?array $expectedFingerprints, callable $operation): mixed
-    {
-        if ($expectedFingerprints === null) {
-            return $operation([]);
-        }
-
-        return $this->reviewedLocks->run(
-            $assetIds,
-            static fn (int $assetId): \Throwable => new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the operation again.', $assetId)),
-            function (array $lockedIds) use ($expectedFingerprints, $operation): mixed {
-                foreach ($lockedIds as $assetId) {
-                    $this->mutationFingerprints->assertUnchanged($assetId, $expectedFingerprints);
-                }
-
-                return $operation($lockedIds);
-            },
-        );
-    }
-
     public function restore(int $assetId): bool
     {
         if (!$this->loopGuard->acquireAsset($assetId)) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
+use Oronts\AssetPilotBundle\Command\Support\ValidatesApplyPlanControl;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesCliBulkIds;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -30,6 +31,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class CleanupUnusedCommand extends Command
 {
+    use ValidatesApplyPlanControl;
     use ValidatesCliBulkIds;
 
     public function __construct(
@@ -111,22 +113,6 @@ HELP
         }
 
         return $this->runForSelector($io, $output, $input, $action, $moveTo, $batchSize, $maxAssets, $apply, $planToken);
-    }
-
-    private function hasValidPlanControl(SymfonyStyle $io, bool $apply, mixed $planToken): bool
-    {
-        if ($apply && (!is_string($planToken) || trim($planToken) === '')) {
-            $io->error('Applying requires --plan-token from a matching preview.');
-
-            return false;
-        }
-        if (!$apply && is_string($planToken) && trim($planToken) !== '') {
-            $io->error('--plan-token is only valid together with --apply.');
-
-            return false;
-        }
-
-        return true;
     }
 
     private function validateAction(SymfonyStyle $io, InputInterface $input, string $action, string $moveTo, bool $apply): ?int

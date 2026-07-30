@@ -14,7 +14,6 @@ use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
-use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
@@ -34,6 +33,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class UnusedAssetFinder implements UnusedAssetFinderInterface
 {
+    use AppliesReviewedPlanLocks;
     private const string UNUSED_STATS_CACHE_KEY = 'asset_pilot.unused_stats';
 
     public function __construct(
@@ -537,33 +537,6 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
         $this->logger->info('Asset Pilot: moved unused asset {id} to {path}', ['id' => $assetId, 'path' => $targetFolder]);
     }
-
-    /**
-     * @template TResult
-     * @param list<int> $assetIds
-     * @param array<string, string>|null $expectedFingerprints
-     * @param callable(list<int>): TResult $operation
-     * @return TResult
-     */
-    private function withReviewedPlanLocks(array $assetIds, ?array $expectedFingerprints, callable $operation): mixed
-    {
-        if ($expectedFingerprints === null) {
-            return $operation([]);
-        }
-
-        return $this->reviewedLocks->run(
-            $assetIds,
-            static fn (int $assetId): \Throwable => new StaleApplyPlanException(sprintf('Asset %d is being processed. Preview the operation again.', $assetId)),
-            function (array $lockedIds) use ($expectedFingerprints, $operation): mixed {
-                foreach ($lockedIds as $assetId) {
-                    $this->mutationFingerprints->assertUnchanged($assetId, $expectedFingerprints);
-                }
-
-                return $operation($lockedIds);
-            },
-        );
-    }
-
     /**
      * Restrict a query on the `assets` table (alias `a`) to non-folder assets that no element
      * references. The shared predicate behind findUnused/countUnused/getUnusedStats.

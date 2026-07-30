@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
+use Oronts\AssetPilotBundle\Command\Support\ValidatesApplyPlanControl;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -30,6 +31,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class OrganizeCommand extends Command
 {
+    use ValidatesApplyPlanControl;
     public function __construct(
         protected readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
         protected readonly ReviewedSelectionConsolePresenter $presenter,
@@ -135,22 +137,6 @@ class OrganizeCommand extends Command
             (bool) $input->getOption('async'),
             $planToken,
         );
-    }
-
-    private function hasValidPlanControl(SymfonyStyle $io, bool $apply, mixed $planToken): bool
-    {
-        if ($apply && (!is_string($planToken) || trim($planToken) === '')) {
-            $io->error('Applying requires --plan-token from a matching preview.');
-
-            return false;
-        }
-        if (!$apply && is_string($planToken) && trim($planToken) !== '') {
-            $io->error('--plan-token is only valid together with --apply.');
-
-            return false;
-        }
-
-        return true;
     }
 
     /** @param list<int> $objectIds @param array<string, mixed> $selector */

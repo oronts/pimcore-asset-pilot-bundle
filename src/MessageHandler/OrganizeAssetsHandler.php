@@ -29,6 +29,7 @@ use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
 #[AsMessageHandler]
 class OrganizeAssetsHandler
 {
+    use PulsesRunItemLease;
     public function __construct(
         protected readonly AssetOrganizerInterface $organizer,
         protected readonly OrganizeDispatcherInterface $dispatcher,
@@ -340,17 +341,4 @@ class OrganizeAssetsHandler
      * if either was lost (the item was reclaimed by a redelivery or reconciled as abandoned). Fires often
      * enough — around each asset save — that a legitimately long item never lets its lease expire.
      */
-    private function pulseRunItemLease(string $runId, string $itemKey): void
-    {
-        $this->loopGuard->refreshOperationRunItem($runId, $itemKey);
-        $token = $this->loopGuard->operationRunItemToken($runId, $itemKey);
-        if ($token !== null && !$this->runs->renewItemLease($runId, $itemKey, $token)) {
-            throw new \RuntimeException(sprintf('Lost the durable lease on operation run item "%s"; aborting to prevent a double execution.', $itemKey));
-        }
-    }
-
-    private function itemKey(int $objectId): string
-    {
-        return 'object:' . $objectId;
-    }
 }
