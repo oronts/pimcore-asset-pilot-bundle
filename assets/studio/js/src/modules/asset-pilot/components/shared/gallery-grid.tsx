@@ -74,7 +74,11 @@ export function GalleryGrid<T>({ data, loading, error, onRetry, empty, summary, 
   return (
     <div>
       {error != null && <ErrorRetry error={error} onRetry={onRetry} />}
-      {cards.length === 0 ? <>{empty}</> : <>
+      {cards.length === 0 ? (
+        truncated === true || hasMore === true
+          ? <p role="status" style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+          : <>{empty}</>
+      ) : <>
       {(summary != null || (selection?.toggleAll != null)) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           {selection?.toggleAll != null && (

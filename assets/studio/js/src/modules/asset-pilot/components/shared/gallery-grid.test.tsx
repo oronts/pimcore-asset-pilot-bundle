@@ -39,4 +39,41 @@ describe('GalleryGrid', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalledOnce()
   })
+
+  it('suppresses the definitive empty state when truncated', () => {
+    renderWithI18n(
+      <GalleryGrid
+        data={{ items: [] }}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+        empty={<p>Definitive empty</p>}
+        page={1}
+        pages={null}
+        truncated
+        onPage={vi.fn()}
+        toCard={() => ({ key: 1, type: 'image', fallbackLabel: 'x', title: 'x' })}
+      />,
+    )
+
+    expect(screen.queryByText('Definitive empty')).not.toBeInTheDocument()
+  })
+
+  it('shows the definitive empty state for a genuine non-truncated empty page', () => {
+    renderWithI18n(
+      <GalleryGrid
+        data={{ items: [] }}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+        empty={<p>Definitive empty</p>}
+        page={1}
+        pages={1}
+        onPage={vi.fn()}
+        toCard={() => ({ key: 1, type: 'image', fallbackLabel: 'x', title: 'x' })}
+      />,
+    )
+
+    expect(screen.getByText('Definitive empty')).toBeInTheDocument()
+  })
 })

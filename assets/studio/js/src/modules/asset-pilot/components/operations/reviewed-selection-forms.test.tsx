@@ -25,6 +25,7 @@ const operation = {
 const reorganizePreview = {
   assetsScanned: 3,
   ownerObjects: 2,
+  truncated: false,
   dryRun: true,
   planToken: 'reorganize-plan',
   runId: null,

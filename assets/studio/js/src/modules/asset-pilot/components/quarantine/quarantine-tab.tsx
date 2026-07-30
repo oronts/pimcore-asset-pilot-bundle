@@ -67,6 +67,7 @@ export const QuarantineTab: React.FC = () => {
             page={data?.page ?? 1}
             pages={data?.pages ?? null}
             hasMore={data?.hasMore}
+            truncated={data?.truncated}
             onPage={setPage}
             limit={limit}
             onLimit={n => { setLimit(n); setPage(1) }}
@@ -90,10 +91,13 @@ export const QuarantineTab: React.FC = () => {
         )
         : loading
           ? <TableSkeleton rows={4} columns={4} />
-          : data == null || data.items.length === 0
+          : data == null || (data.items.length === 0 && data.truncated !== true && data.hasMore !== true)
             ? <EmptyState variant="no-data" title={t('asset-pilot.quarantine.empty')} description={t('asset-pilot.quarantine.empty-desc')} />
             : (
             <>
+              {data.items.length === 0
+                ? <p role="status" style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+                : (
               <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                   <thead>
@@ -120,6 +124,7 @@ export const QuarantineTab: React.FC = () => {
                   </tbody>
                 </table>
               </ResponsiveTableWrapper>
+                )}
 
               <Pagination page={data.page} pages={data.pages} hasMore={data.hasMore} truncated={data.truncated} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} />
             </>

@@ -53,6 +53,7 @@ export const DuplicatesTab: React.FC = () => {
             page={data?.page ?? 1}
             pages={pages}
             hasMore={data?.hasMore ?? false}
+            truncated={data?.truncated}
             onPage={setPage}
             limit={limit}
             onLimit={n => { setLimit(n); setPage(1) }}
@@ -79,10 +80,13 @@ export const DuplicatesTab: React.FC = () => {
         )
         : loading
           ? <TableSkeleton rows={4} columns={5} />
-          : data == null || data.items.length === 0
+          : data == null || (data.items.length === 0 && data.truncated !== true && data.hasMore !== true)
             ? <EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />
             : (
             <>
+              {data.items.length === 0
+                ? <p role="status" style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+                : (
               <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
                   <thead>
@@ -115,6 +119,7 @@ export const DuplicatesTab: React.FC = () => {
                   </tbody>
                 </table>
               </ResponsiveTableWrapper>
+                )}
 
               <Pagination page={data.page} pages={pages} hasMore={data.hasMore} truncated={data.truncated} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} pageSizeOptions={[20, 50, 100]} />
             </>

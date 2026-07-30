@@ -86,6 +86,20 @@ describe('DataTable', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 
+  it('suppresses the definitive empty state when the page is truncated', () => {
+    renderWithI18n(
+      <DataTable<Row>
+        columns={columns}
+        data={{ items: [], total: null, page: 1, pages: null, truncated: true }}
+        loading={false}
+        onPage={vi.fn()}
+        tableId="trunc-table"
+        empty={<p>Definitive empty</p>}
+      />,
+    )
+    expect(screen.queryByText('Definitive empty')).not.toBeInTheDocument()
+  })
+
   it('wires sorting, selection, and pagination through accessible controls', async () => {
     const user = userEvent.setup()
     const toggleAll = vi.fn()

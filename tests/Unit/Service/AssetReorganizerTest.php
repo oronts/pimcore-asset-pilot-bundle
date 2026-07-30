@@ -34,9 +34,21 @@ final class AssetReorganizerTest extends TestCase
         $service = $this->selector([1, 2, 3], [1 => [10], 2 => [20], 3 => [30]], defaultLimit: 2);
 
         self::assertSame(
-            ['assetCount' => 2, 'objectIds' => [10, 20]],
+            ['assetCount' => 2, 'objectIds' => [10, 20], 'truncated' => false],
             $service->selectFolder('/Staging'),
         );
+    }
+
+    #[Test]
+    public function folderScanStopsAtTheCandidateBudgetAndReportsTruncated(): void
+    {
+        // A workspace-restricted user sees none of a large folder; the scan stops at the budget.
+        $service = $this->selector(range(1, 100), [], visibleAssetIds: [], maxCandidates: 10);
+
+        $selection = $service->selectFolder('/Staging', 50);
+
+        self::assertSame(0, $selection['assetCount']);
+        self::assertTrue($selection['truncated']);
     }
 
     #[Test]
@@ -64,6 +76,7 @@ final class AssetReorganizerTest extends TestCase
         array $ownersByAsset,
         ?array $visibleAssetIds = null,
         int $defaultLimit = 100,
+        int $maxCandidates = 5000,
     ): AssetReorganizer {
         $resolver = $this->createMock(AssetDependencyResolver::class);
         $resolver->method('dependentObjectIds')->willReturnCallback(
@@ -76,6 +89,7 @@ final class AssetReorganizerTest extends TestCase
             $folderAssetIds,
             $visibleAssetIds,
             $defaultLimit,
+            $maxCandidates,
         ) extends AssetReorganizer {
             /** @param list<int> $folderAssetIds @param list<int>|null $visibleAssetIds */
             public function __construct(
@@ -84,13 +98,14 @@ final class AssetReorganizerTest extends TestCase
                 private readonly array $folderAssetIds,
                 private readonly ?array $visibleAssetIds,
                 int $defaultLimit,
+                int $maxCandidates,
             ) {
-                parent::__construct($resolver, $authorization, $defaultLimit);
+                parent::__construct($resolver, $authorization, $defaultLimit, $maxCandidates);
             }
 
-            protected function listAssetIdsInFolder(string $folderPath, int $limit): array
+            protected function rawAssetIdsInFolder(string $folderPath, int $offset, int $limit): array
             {
-                return array_slice($this->folderAssetIds, 0, $limit);
+                return array_slice($this->folderAssetIds, $offset, $limit);
             }
 
             protected function isAssetVisible(int $assetId): bool

@@ -345,6 +345,7 @@ final class OperationsControllerPlanTest extends TestCase
         $reorganizer->method('selectFolder')->with('/Staging', 25)->willReturn([
             'assetCount' => 3,
             'objectIds' => [42],
+            'truncated' => false,
         ]);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
         $dispatcher->expects(self::once())->method('createRun')->with(

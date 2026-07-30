@@ -86,7 +86,7 @@ export const IntegrityTab: React.FC = () => {
       <ViewToggle mode={viewMode} onChange={setViewMode} />
 
       {data.items.length === 0
-        ? <p style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t(filtersActive ? 'asset-pilot.integrity.no-filter-results' : 'asset-pilot.common.none-on-page')}</p>
+        ? <p style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t(filtersActive && !hasNext ? 'asset-pilot.integrity.no-filter-results' : 'asset-pilot.common.none-on-page')}</p>
         : viewMode === 'gallery'
         ? (
           <GalleryCards

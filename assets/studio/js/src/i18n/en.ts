@@ -659,6 +659,7 @@ export const en: Record<string, string> = {
   'asset-pilot.drift.none': 'No drift',
   'asset-pilot.drift.none-desc': 'All {{count}} scanned object(s) have their assets in the expected location.',
   'asset-pilot.drift.scanned': '{{count}} object(s) scanned',
+  'asset-pilot.drift.truncated': 'The authorized scan stopped at its candidate budget, so results may be incomplete. Narrow the class or page through it.',
   'asset-pilot.drift.current': 'Current location',
   'asset-pilot.drift.expected': 'Expected location',
   'asset-pilot.drift.eligibility': 'Move eligibility',
@@ -733,6 +734,7 @@ export const en: Record<string, string> = {
   'asset-pilot.reorganize.confirm-title': 'Reorganize existing assets',
   'asset-pilot.reorganize.confirm-description': 'Apply the reviewed plan for {{assets}} asset(s), {{objects}} referring object(s), and {{operations}} planned operation(s) below {{folder}}.',
   'asset-pilot.reorganize.result': 'Scanned {{scanned}}, organized {{organized}}, queued {{dispatched}}, failed {{failed}}.',
+  'asset-pilot.reorganize.truncated': 'The folder scan stopped at its candidate budget; more assets may exist beyond this selection. Re-run after this batch to continue.',
   'asset-pilot.rules.expand-row': 'Expand rule {{name}}',
   'asset-pilot.rules.collapse-row': 'Collapse rule {{name}}',
 }

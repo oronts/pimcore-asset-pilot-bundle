@@ -190,7 +190,7 @@ oronts_asset_pilot:
 | `duplicates.merge_strategy` | `string` | `quarantine` | Default disposition for a duplicate merge: a registered strategy name (`quarantine`, `delete`, `isolate`, or a custom tagged one). See [Extending](extending.md#duplicate-merge-strategies) |
 | `duplicates.group_scan_budget` | `int` | `5000` | Maximum duplicate groups a list page scans past natively-hidden groups before it reports `truncated: true` (min 1) |
 | `duplicates.export_group_scan_budget` | `int` | `500000` | Maximum duplicate groups a CSV export scans before it stops and appends a truncation marker row (min 1) |
-| `listing.scan_budget` | `int` | `5000` | Maximum raw candidate rows an authorized list page (asset search, unused, quarantine, integrity history) scans past native-permission denials before it reports `truncated: true` (min 1) |
+| `listing.scan_budget` | `int` | `5000` | Maximum raw candidate rows an authorized scan-and-fill walks past native-permission denials before it reports `truncated: true` (min 1). Covers asset search, unused, quarantine, integrity history, and the object/folder selectors for location drift and folder reorganization |
 | `listing.batch_size` | `int` | `100` | Raw rows fetched per window while an authorized list page scans and fills (min 1) |
 | `listing.export_max_rows` | `int` | `200000` | Maximum rows an authorized CSV export streams before it stops and appends a truncation marker row (min 1) |
 | `cache.stats_ttl` | `int` | `60` | TTL (seconds) for the audit-stats cache (dashboard/metrics). `0` disables (always live) |

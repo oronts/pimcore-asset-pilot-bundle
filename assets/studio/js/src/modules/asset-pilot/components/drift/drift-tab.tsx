@@ -65,8 +65,12 @@ export const DriftTab: React.FC = () => {
         <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
       )}
 
+      {selectedClass !== '' && !loading && error == null && data?.truncated === true && (
+        <p role="status" style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-warning-text-active)', marginBottom: 8 }}>{t('asset-pilot.drift.truncated')}</p>
+      )}
+
       {selectedClass !== '' && !loading && error == null && data != null && (
-        data.items.length === 0 && !hasNext
+        data.items.length === 0 && !hasNext && data.truncated !== true
           ? <EmptyState variant="no-results" title={t('asset-pilot.drift.none')} description={t('asset-pilot.drift.none-desc', { count: data.objectsScanned })} />
           : (
             <>

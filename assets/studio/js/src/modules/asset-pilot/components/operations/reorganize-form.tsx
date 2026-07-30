@@ -16,6 +16,7 @@ interface ReviewedReorganization {
   assetsScanned: number
   objectCount: number
   operations: MoveOperation[]
+  truncated: boolean
 }
 
 export const ReorganizeForm: React.FC = () => {
@@ -43,6 +44,7 @@ export const ReorganizeForm: React.FC = () => {
         assetsScanned: result.assetsScanned,
         objectCount: result.objectCount,
         operations: result.operations ?? [],
+        truncated: result.truncated,
       }),
     )
   }
@@ -73,6 +75,9 @@ export const ReorganizeForm: React.FC = () => {
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--ap-font-size)' }}><input type="checkbox" checked={queueAsync} disabled={op.running} onChange={event => { setQueueAsync(event.target.checked); op.clear() }} />{t('asset-pilot.operations.async')}</label>
         <button onClick={() => { void review() }} disabled={op.running || folder.trim() === ''} style={buttonStyle}>{op.running ? t('asset-pilot.operations.previewing') : t('asset-pilot.reorganize.review-button')}</button>
       </div>
+      {op.reviewedPlan?.truncated === true && (
+        <p role="status" style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-warning-text-active)', marginTop: 8 }}>{t('asset-pilot.reorganize.truncated')}</p>
+      )}
       {op.runId != null && <OperationRunPanel runId={op.runId} onRunIdChange={op.setRunId} />}
       {op.confirming && (
         <ConfirmDialog

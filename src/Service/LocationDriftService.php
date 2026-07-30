@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Oronts\AssetPilotBundle\Model\DriftItem;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\Query\BoundedScan;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Listing;
 
@@ -15,6 +16,7 @@ class LocationDriftService implements LocationDriftServiceInterface
         protected readonly AssetOrganizerInterface $organizer,
         protected readonly ElementAuthorizationInterface $authorization,
         protected readonly int $defaultLimit = 50,
+        protected readonly int $maxCandidates = 5000,
     ) {}
 
     /**
@@ -30,7 +32,7 @@ class LocationDriftService implements LocationDriftServiceInterface
     }
 
     /**
-     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int}
+     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int, truncated: bool}
      */
     public function driftForClass(string $className, int $page = 1, ?int $limit = null): array
     {
@@ -39,20 +41,20 @@ class LocationDriftService implements LocationDriftServiceInterface
         $offset = ($page - 1) * $limit;
 
         $items = [];
-        $objects = $this->visibleObjects($className, $offset, $limit);
+        ['objects' => $objects, 'truncated' => $truncated] = $this->visibleObjects($className, $offset, $limit);
         foreach ($objects as $object) {
             foreach ($this->driftForObject($object) as $driftItem) {
                 $items[] = $driftItem;
             }
         }
 
-        return ['items' => $items, 'objectsScanned' => count($objects), 'page' => $page, 'limit' => $limit];
+        return ['items' => $items, 'objectsScanned' => count($objects), 'page' => $page, 'limit' => $limit, 'truncated' => $truncated];
     }
 
     /**
      * Drift for a single object, in the same shape as driftForClass so callers render it identically.
      *
-     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int}|null null when the object does not exist
+     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int, truncated: bool}|null null when the object does not exist
      */
     public function driftForObjectId(int $objectId): ?array
     {
@@ -61,7 +63,7 @@ class LocationDriftService implements LocationDriftServiceInterface
             return null;
         }
 
-        return ['items' => $this->driftForObject($object), 'objectsScanned' => 1, 'page' => 1, 'limit' => 1];
+        return ['items' => $this->driftForObject($object), 'objectsScanned' => 1, 'page' => 1, 'limit' => 1, 'truncated' => false];
     }
 
     /**
@@ -88,32 +90,31 @@ class LocationDriftService implements LocationDriftServiceInterface
         return $this->authorization->isAllowed($object, 'view');
     }
 
-    /** @return list<AbstractObject> */
-    private function visibleObjects(string $className, int $visibleOffset, int $limit): array
+    /**
+     * A workspace-restricted user can hide most of a class, so the raw scan is bounded by
+     * {@see $maxCandidates}; a page that cannot be resolved within that budget reports truncated.
+     *
+     * @return array{objects: list<AbstractObject>, truncated: bool}
+     */
+    protected function visibleObjects(string $className, int $visibleOffset, int $limit): array
     {
         $objects = [];
         $visibleSeen = 0;
-        $rawOffset = 0;
-        $batchSize = min(500, max(50, $limit));
 
-        do {
-            $ids = $this->listObjectIds($className, $rawOffset, $batchSize);
-            foreach ($ids as $id) {
+        $truncated = BoundedScan::run(
+            fn (int $offset, int $batch): array => $this->listObjectIds($className, $offset, $batch),
+            function (int $id) use (&$objects, &$visibleSeen, $visibleOffset, $limit): bool {
                 $object = $this->loadObject($id);
-                if ($object === null || !$this->isVisible($object)) {
-                    continue;
+                if ($object !== null && $this->isVisible($object) && $visibleSeen++ >= $visibleOffset) {
+                    $objects[] = $object;
                 }
-                if ($visibleSeen++ < $visibleOffset) {
-                    continue;
-                }
-                $objects[] = $object;
-                if (count($objects) >= $limit) {
-                    break 2;
-                }
-            }
-            $rawOffset += $batchSize;
-        } while (count($ids) === $batchSize);
 
-        return $objects;
+                return count($objects) >= $limit;
+            },
+            $this->maxCandidates,
+            min(500, max(50, $limit)),
+        );
+
+        return ['objects' => $objects, 'truncated' => $truncated];
     }
 }

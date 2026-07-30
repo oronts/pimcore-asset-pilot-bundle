@@ -199,7 +199,7 @@ class OpenApiHealthAndUnusedSpecification
         new OA\Parameter(ref: '#/components/parameters/Limit'),
     ],
     responses: [
-        new OA\Response(response: 200, description: 'Location drift', content: new OA\JsonContent(type: 'object', required: ['items', 'objectsScanned', 'page', 'limit'], properties: [
+        new OA\Response(response: 200, description: 'Location drift', content: new OA\JsonContent(type: 'object', required: ['items', 'objectsScanned', 'page', 'limit', 'truncated'], properties: [
             new OA\Property(property: 'items', type: 'array', items: new OA\Items(type: 'object', required: ['assetId', 'currentPath', 'expectedPath', 'ruleName', 'eligibility'], properties: [
                 new OA\Property(property: 'assetId', ref: '#/components/schemas/PositiveId'),
                 new OA\Property(property: 'currentPath', type: 'string'),
@@ -211,6 +211,7 @@ class OpenApiHealthAndUnusedSpecification
             new OA\Property(property: 'objectsScanned', type: 'integer', minimum: 0),
             new OA\Property(property: 'page', type: 'integer', minimum: 1),
             new OA\Property(property: 'limit', type: 'integer', minimum: 1),
+            new OA\Property(property: 'truncated', type: 'boolean', description: 'True when the authorized scan hit its candidate budget before filling the page.'),
         ])),
         new OA\Response(response: 400, description: 'Missing class', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 500, description: 'Drift analysis failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
@@ -684,16 +685,18 @@ class OpenApiAssetManagementSpecification
     responses: [
         new OA\Response(response: 200, description: 'Reviewed preview or synchronous reorganization', content: new OA\JsonContent(allOf: [
             new OA\Schema(ref: '#/components/schemas/ReviewedSelectionResult'),
-            new OA\Schema(type: 'object', required: ['assetsScanned', 'ownerObjects'], properties: [
+            new OA\Schema(type: 'object', required: ['assetsScanned', 'ownerObjects', 'truncated'], properties: [
                 new OA\Property(property: 'assetsScanned', type: 'integer', minimum: 0),
                 new OA\Property(property: 'ownerObjects', type: 'integer', minimum: 0),
+                new OA\Property(property: 'truncated', type: 'boolean', description: 'True when the authorized folder scan hit its candidate budget.'),
             ]),
         ])),
         new OA\Response(response: 202, description: 'Reviewed reorganization queued as one operation run', content: new OA\JsonContent(allOf: [
             new OA\Schema(ref: '#/components/schemas/ReviewedSelectionResult'),
-            new OA\Schema(type: 'object', required: ['assetsScanned', 'ownerObjects'], properties: [
+            new OA\Schema(type: 'object', required: ['assetsScanned', 'ownerObjects', 'truncated'], properties: [
                 new OA\Property(property: 'assetsScanned', type: 'integer', minimum: 0),
                 new OA\Property(property: 'ownerObjects', type: 'integer', minimum: 0),
+                new OA\Property(property: 'truncated', type: 'boolean', description: 'True when the authorized folder scan hit its candidate budget.'),
             ]),
         ])),
         new OA\Response(response: 400, description: 'Invalid folder, JSON, option type, selection size, or plan token', content: new OA\JsonContent(ref: '#/components/schemas/Error')),

@@ -97,7 +97,9 @@ bin/console asset-pilot:reorganize-assets --folder=/Staging --limit=200 --apply 
 
 Asset-centric counterpart to `organize` (which is object-first): for assets in `--folder` (or the
 explicit `--by-ids` set), it resolves the owning DataObjects (reverse dependencies) and re-organizes
-each, relocating the assets to their rule-derived paths. The scan is bounded by `--limit` and each
+each, relocating the assets to their rule-derived paths. The scan is bounded both by `--limit` (the
+result cap) and by the `listing.scan_budget` raw-candidate ceiling; if the budget is hit before the
+limit is filled the command warns that the selection is truncated and more assets may remain. Each
 owner is organized once. Preview is side-effect free and prints a signed `plan token`. Applying
 requires `--apply --plan-token=...` with the exact same selector, including the folder and limit or
 the sorted asset IDs. The token binds the System actor used by the trusted CLI, resolved owner IDs,

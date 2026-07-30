@@ -548,6 +548,14 @@ services:
             $batchSize: '%oronts_asset_pilot.listing.batch_size%'
             $exportMaxRows: '%oronts_asset_pilot.listing.export_max_rows%'
 
+    Oronts\AssetPilotBundle\Service\LocationDriftService:
+        arguments:
+            $maxCandidates: '%oronts_asset_pilot.listing.scan_budget%'
+
+    Oronts\AssetPilotBundle\Service\AssetReorganizer:
+        arguments:
+            $maxCandidates: '%oronts_asset_pilot.listing.scan_budget%'
+
     Oronts\AssetPilotBundle\Service\DuplicateDetectionService:
         arguments:
             $groupScanBudget: '%oronts_asset_pilot.duplicates.group_scan_budget%'

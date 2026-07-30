@@ -124,7 +124,7 @@ class OperationsController
                 $data['planToken'] ?? null,
                 $this->authorization->currentActor(),
             ),
-            ['assetsScanned' => $selection['assetCount'], 'ownerObjects' => count($selection['objectIds'])],
+            ['assetsScanned' => $selection['assetCount'], 'ownerObjects' => count($selection['objectIds']), 'truncated' => $selection['truncated'] ?? false],
         );
     }
 

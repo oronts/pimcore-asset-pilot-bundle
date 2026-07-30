@@ -72,6 +72,10 @@ class VerifyLocationsCommand extends Command
             return Command::INVALID;
         }
 
+        if ($result['truncated'] ?? false) {
+            $io->warning(sprintf('The authorized scan stopped at the candidate budget; results are limited to the %d object(s) scanned.', $result['objectsScanned']));
+        }
+
         if ($result['items'] === []) {
             $io->success(sprintf('No drift across %d scanned object(s).', $result['objectsScanned']));
 

@@ -659,6 +659,7 @@ export const de: Record<string, string> = {
   'asset-pilot.drift.none': 'Keine Abweichung',
   'asset-pilot.drift.none-desc': 'Alle {{count}} geprüften Objekte haben ihre Assets am erwarteten Ort.',
   'asset-pilot.drift.scanned': '{{count}} Objekt(e) geprüft',
+  'asset-pilot.drift.truncated': 'Der autorisierte Scan wurde am Kandidatenbudget gestoppt, daher können die Ergebnisse unvollständig sein. Grenzen Sie die Klasse ein oder blättern Sie durch.',
   'asset-pilot.drift.current': 'Aktueller Ort',
   'asset-pilot.drift.expected': 'Erwarteter Ort',
   'asset-pilot.drift.eligibility': 'Verschiebbarkeit',
@@ -733,6 +734,7 @@ export const de: Record<string, string> = {
   'asset-pilot.reorganize.confirm-title': 'Vorhandene Assets neu organisieren',
   'asset-pilot.reorganize.confirm-description': 'Den geprüften Plan für {{assets}} Asset(s), {{objects}} referenzierende Objekt(e) und {{operations}} geplante Operation(en) unterhalb von {{folder}} anwenden.',
   'asset-pilot.reorganize.result': '{{scanned}} geprüft, {{organized}} organisiert, {{dispatched}} eingereiht, {{failed}} fehlgeschlagen.',
+  'asset-pilot.reorganize.truncated': 'Der Ordner-Scan wurde am Kandidatenbudget gestoppt; jenseits dieser Auswahl können weitere Assets existieren. Führen Sie nach diesem Durchlauf erneut aus.',
   'asset-pilot.rules.expand-row': 'Regel {{name}} aufklappen',
   'asset-pilot.rules.collapse-row': 'Regel {{name}} einklappen',
 }

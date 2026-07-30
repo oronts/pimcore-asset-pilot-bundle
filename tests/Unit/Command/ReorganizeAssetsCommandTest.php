@@ -34,6 +34,7 @@ final class ReorganizeAssetsCommandTest extends TestCase
         $selector->expects(self::once())->method('selectFolder')->with('/Staging', 100)->willReturn([
             'assetCount' => 2,
             'objectIds' => [11],
+            'truncated' => false,
         ]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
@@ -89,6 +90,7 @@ final class ReorganizeAssetsCommandTest extends TestCase
         $selector->expects(self::once())->method('selectAssets')->with([5, 6])->willReturn([
             'assetCount' => 2,
             'objectIds' => [10, 12],
+            'truncated' => false,
         ]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->expects(self::once())->method('execute')->with(
@@ -130,7 +132,7 @@ final class ReorganizeAssetsCommandTest extends TestCase
     public function stalePlanReturnsFailure(): void
     {
         $selector = $this->createMock(AssetReorganizer::class);
-        $selector->method('selectFolder')->willReturn(['assetCount' => 1, 'objectIds' => [11]]);
+        $selector->method('selectFolder')->willReturn(['assetCount' => 1, 'objectIds' => [11], 'truncated' => false]);
         $reviewed = $this->createMock(ReviewedObjectOperationServiceInterface::class);
         $reviewed->method('execute')->willThrowException(new ReviewedSelectionException(
             ReviewedSelectionError::StalePlan,

@@ -505,6 +505,7 @@ export type ReorganizeRequest = ReorganizePreviewRequest | ReorganizeApplyReques
 export interface ReorganizeResponse extends ReviewedSelectionResponse {
   assetsScanned: number
   ownerObjects: number
+  truncated: boolean
 }
 
 // Shared asset summary (filename/path/size) used to enrich id-only listings.
@@ -717,4 +718,5 @@ export interface DriftResponse {
   objectsScanned: number
   page: number
   limit: number
+  truncated: boolean
 }

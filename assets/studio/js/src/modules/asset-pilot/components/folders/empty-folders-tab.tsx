@@ -53,7 +53,7 @@ export const EmptyFoldersTab: React.FC = () => {
   )
 
   if (data == null) return null
-  if (data.items.length === 0 && page === 1) {
+  if (data.items.length === 0 && page === 1 && data.hasMore !== true) {
     return <EmptyState variant="no-data" title={t('asset-pilot.folders.empty')} description={t('asset-pilot.folders.empty-desc')} />
   }
 

@@ -95,6 +95,39 @@ class LocationDriftServiceTest extends TestCase
     }
 
     #[Test]
+    public function classScanStopsAtTheCandidateBudgetAndReportsTruncated(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $service = new class ($organizer, $this->createMock(ElementAuthorization::class), $this->createMock(AbstractObject::class)) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer, ElementAuthorization $authorization, private readonly AbstractObject $object)
+            {
+                parent::__construct($organizer, $authorization, 50, 10);
+            }
+
+            protected function listObjectIds(string $className, int $offset, int $limit): array
+            {
+                return array_slice(range(1, 100), $offset, $limit);
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->object;
+            }
+
+            protected function isVisible(AbstractObject $object): bool
+            {
+                return false;
+            }
+        };
+
+        $result = $service->driftForClass('Product');
+
+        self::assertSame([], $result['items']);
+        self::assertSame(0, $result['objectsScanned']);
+        self::assertTrue($result['truncated']);
+    }
+
+    #[Test]
     public function driftForObjectIdReturnsNullWhenTheObjectIsMissing(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);

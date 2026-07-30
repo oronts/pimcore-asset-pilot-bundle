@@ -12,9 +12,9 @@ interface LocationDriftServiceInterface
     /** @return list<DriftItem> */
     public function driftForObject(AbstractObject $object): array;
 
-    /** @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int} */
+    /** @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int, truncated?: bool} */
     public function driftForClass(string $className, int $page = 1, ?int $limit = null): array;
 
-    /** @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int}|null */
+    /** @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int, truncated?: bool}|null */
     public function driftForObjectId(int $objectId): ?array;
 }

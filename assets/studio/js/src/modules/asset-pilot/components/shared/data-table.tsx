@@ -77,7 +77,11 @@ export function DataTable<T extends { id: number }>({
         <>
           {summary}
 
-          {data.items.length === 0 ? empty : (
+          {data.items.length === 0 ? (
+            data.truncated === true || data.hasMore === true
+              ? <p role="status" style={{ fontSize: token.fontSize, color: token.colorTextSecondary, padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+              : empty
+          ) : (
             <ResponsiveTableWrapper stickyFirstColumn tableId={tableId} label={t('asset-pilot.common.table-scroll-region')}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: token.fontSize, minWidth }}>
                 <thead>

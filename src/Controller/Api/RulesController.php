@@ -73,6 +73,7 @@ class RulesController
                 'objectsScanned' => $result['objectsScanned'],
                 'page' => $result['page'],
                 'limit' => $result['limit'],
+                'truncated' => $result['truncated'] ?? false,
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to compute location drift.', ['exception' => $e]);

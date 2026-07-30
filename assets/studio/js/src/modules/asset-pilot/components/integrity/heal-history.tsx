@@ -53,10 +53,13 @@ export const HealHistory: React.FC = () => {
               <button onClick={refetch} style={secondaryBtnStyle}>{t('asset-pilot.common.retry')}</button>
             </div>
           )
-          : data == null || data.items.length === 0
+          : data == null || (data.items.length === 0 && data.truncated !== true && data.hasMore !== true)
             ? <EmptyState variant="no-data" title={t('asset-pilot.integrity.history.empty')} description={t('asset-pilot.integrity.history.empty-desc')} />
             : (
               <>
+                {data.items.length === 0
+                  ? <p role="status" style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+                  : (
                 <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 960 }}>
                     <thead>
@@ -95,6 +98,7 @@ export const HealHistory: React.FC = () => {
                     </tbody>
                   </table>
                 </ResponsiveTableWrapper>
+                  )}
 
                 <Pagination
                   page={data.page}

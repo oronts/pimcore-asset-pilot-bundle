@@ -65,6 +65,10 @@ class ReorganizeAssetsCommand extends Command
             return $selection;
         }
 
+        if ($selection['assets']['truncated'] ?? false) {
+            $io->warning('The folder scan stopped at the candidate budget; more assets may exist beyond this selection. Re-run after this batch to continue.');
+        }
+
         $result = $this->runReviewedSelection($io, $selection, $async, $apply, $planToken);
         if (is_int($result)) {
             return $result;
@@ -98,7 +102,7 @@ class ReorganizeAssetsCommand extends Command
 
     /**
      * @return array{
-     *     assets: array{assetCount: int, objectIds: list<int>},
+     *     assets: array{assetCount: int, objectIds: list<int>, truncated: bool},
      *     selector: array<string, mixed>
      * }|int
      */
@@ -146,7 +150,7 @@ class ReorganizeAssetsCommand extends Command
 
     /**
      * @param array{
-     *     assets: array{assetCount: int, objectIds: list<int>},
+     *     assets: array{assetCount: int, objectIds: list<int>, truncated: bool},
      *     selector: array<string, mixed>
      * } $selection
      */
