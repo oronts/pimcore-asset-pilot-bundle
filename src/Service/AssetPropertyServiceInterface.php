@@ -19,12 +19,6 @@ interface AssetPropertyServiceInterface
     public function setPropertyOnLockedAsset(Asset $asset, string $name, string $type, string $data): void;
 
     /**
-     * @param int[] $assetIds
-     * @return array{updated: int, failed: int, errors: array<int|string, string>, observerWarnings: list<string>}
-     */
-    public function bulkSetProperty(array $assetIds, string $name, string $type, string|bool $value): array;
-
-    /**
      * @param list<Asset> $assets
      * @return array{updated: int, failed: int, errors: array<int|string, string>, observerWarnings: list<string>}
      */

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetMetadataFingerprintService;
@@ -38,6 +40,8 @@ final class AssetMetadataMutationServiceTest extends TestCase
             $this->createMock(ElementAuthorization::class),
             $this->createMock(AssetPropertyService::class),
             $fingerprints,
+            new NullLogger(),
+            new EventDispatcher(),
             AssetProtection::DEFAULT_LOCK_PROPERTY,
         ) extends AssetMetadataMutationService {
             protected function loadTag(int $tagId, bool $force = false): ?Tag
@@ -92,7 +96,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly Asset $asset,
             ) {
-                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, new NullLogger(), new EventDispatcher(), AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -135,7 +139,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly Asset $asset,
             ) {
-                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, new NullLogger(), new EventDispatcher(), AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -169,6 +173,8 @@ final class AssetMetadataMutationServiceTest extends TestCase
             $this->createMock(ElementAuthorization::class),
             $this->createMock(AssetPropertyService::class),
             $fingerprints,
+            new NullLogger(),
+            new EventDispatcher(),
             AssetProtection::DEFAULT_LOCK_PROPERTY,
         ) extends AssetMetadataMutationService {
             protected function loadTag(int $tagId, bool $force = false): ?Tag
@@ -241,7 +247,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly array $assets,
             ) {
-                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, new NullLogger(), new EventDispatcher(), AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -299,7 +305,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 AssetMetadataFingerprintService $fingerprints,
                 private readonly Asset $asset,
             ) {
-                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, new NullLogger(), new EventDispatcher(), AssetProtection::DEFAULT_LOCK_PROPERTY);
             }
 
             protected function loadAsset(int $assetId): ?Asset
@@ -350,7 +356,7 @@ final class AssetMetadataMutationServiceTest extends TestCase
                     private readonly string $scenario,
                     private readonly Asset $asset,
                 ) {
-                    parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, AssetProtection::DEFAULT_LOCK_PROPERTY);
+                    parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, new NullLogger(), new EventDispatcher(), AssetProtection::DEFAULT_LOCK_PROPERTY);
                 }
 
                 protected function loadAsset(int $assetId): ?Asset
@@ -376,5 +382,81 @@ final class AssetMetadataMutationServiceTest extends TestCase
                 self::assertFalse($service->assigned, $scenario);
             }
         }
+    }
+
+    #[Test]
+    public function applyTagsDispatchesTheTaggedEventAtTheServiceBoundary(): void
+    {
+        $captured = [];
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::ASSETS_TAGGED, static function (AssetMutationEvent $event) use (&$captured): void {
+            $captured[] = $event;
+        });
+
+        $result = $this->taggingService($dispatcher)->applyTags([5], [9, 7], true, ['asset:5' => 'fingerprint']);
+
+        self::assertCount(1, $captured);
+        self::assertSame('tag', $captured[0]->mutation);
+        self::assertSame([5], $captured[0]->assetIds);
+        self::assertSame(['tagIds' => [7, 9], 'replace' => true], $captured[0]->context);
+        self::assertSame(1, $result['tagged']);
+        self::assertSame(0, $result['failed']);
+        self::assertSame([], $result['observerWarnings']);
+    }
+
+    #[Test]
+    public function applyTagsSurfacesAnObserverFailureAsAWarningWithoutFailingTheCommit(): void
+    {
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::ASSETS_TAGGED, static function (): never {
+            throw new \RuntimeException('observer down');
+        });
+
+        $result = $this->taggingService($dispatcher)->applyTags([5], [7], false, ['asset:5' => 'fingerprint']);
+
+        self::assertSame(1, $result['tagged']);
+        self::assertSame(['Asset-tag observer delivery failed.'], $result['observerWarnings']);
+    }
+
+    private function taggingService(EventDispatcher $dispatcher): AssetMetadataMutationService
+    {
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getId')->willReturn(5);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
+
+        return new class (
+            $loopGuard,
+            $authorization,
+            $this->createMock(AssetPropertyService::class),
+            $this->createMock(AssetMetadataFingerprintService::class),
+            $dispatcher,
+            $asset,
+        ) extends AssetMetadataMutationService {
+            public function __construct(
+                LoopGuard $loopGuard,
+                ElementAuthorization $authorization,
+                AssetPropertyService $properties,
+                AssetMetadataFingerprintService $fingerprints,
+                EventDispatcher $dispatcher,
+                private readonly Asset $asset,
+            ) {
+                parent::__construct($loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $authorization, $properties, $fingerprints, new NullLogger(), $dispatcher, AssetProtection::DEFAULT_LOCK_PROPERTY);
+            }
+
+            protected function loadAsset(int $assetId): ?Asset
+            {
+                return $this->asset;
+            }
+
+            protected function loadTag(int $tagId, bool $force = false): ?Tag
+            {
+                return (new Tag())->setId($tagId);
+            }
+
+            protected function assignTags(array $assetIds, array $tagIds, bool $replace): void {}
+        };
     }
 }

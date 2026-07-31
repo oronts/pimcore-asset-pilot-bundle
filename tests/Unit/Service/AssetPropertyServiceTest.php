@@ -153,7 +153,7 @@ class AssetPropertyServiceTest extends TestCase
         $asset->expects(self::once())->method('setProperty')->with('source', 'text', 'catalog')->willReturnSelf();
         $asset->expects(self::once())->method('save');
         $result = $this->service($asset, $loopGuard, $authorization, $dispatcher)
-            ->bulkSetProperty([5], 'source', 'text', 'catalog');
+            ->bulkSetPropertyOnLockedAssets([$asset], 'source', 'text', 'catalog');
         self::assertSame(1, $result['updated']);
         self::assertSame(0, $result['failed']);
         self::assertSame(['Asset-property observer delivery failed.'], $result['observerWarnings']);

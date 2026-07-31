@@ -7,7 +7,6 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
-use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Support\PropertyValue;
 use Pimcore\Model\Asset;
@@ -16,6 +15,8 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AssetPropertyService implements AssetPropertyServiceInterface
 {
+    use MapsObserverDeliveryWarnings;
+
     public function __construct(
         private readonly LoopGuard $loopGuard,
         private readonly ElementAuthorizationInterface $authorization,
@@ -69,46 +70,6 @@ class AssetPropertyService implements AssetPropertyServiceInterface
         [$propertyType, $value] = $this->validatedProperty($name, $type, $data);
         $asset->setProperty($name, $propertyType->value, $value);
         $this->saveAsset($asset);
-    }
-
-    /**
-     * @param int[] $assetIds
-     * @return array{updated: int, failed: int, errors: array<int|string, string>, observerWarnings: list<string>}
-     */
-    public function bulkSetProperty(array $assetIds, string $name, string $type, string|bool $value): array
-    {
-        $updatedIds = [];
-        $failed = 0;
-        $errors = [];
-
-        if ($type === PropertyType::Bool->value) {
-            $value = PropertyValue::normalize(PropertyType::Bool, $value);
-        }
-
-        foreach ($assetIds as $id) {
-            try {
-                $asset = $this->loadAsset($id);
-                if ($asset === null) {
-                    $errors[$id] = 'Asset not found';
-                    $failed++;
-                    continue;
-                }
-
-                $propertyValue = $type === PropertyType::Bool->value ? ($value ? '1' : '0') : (string) $value;
-                $this->setProperty($id, $name, $type, $propertyValue);
-                $updatedIds[] = $id;
-            } catch (\Throwable $e) {
-                $errors[$id] = 'Failed to update the asset property.';
-                $failed++;
-                $this->logger->error('Asset Pilot: failed to set property on asset {id}', [
-                    'id' => $id,
-                    'name' => $name,
-                    'exception' => $e,
-                ]);
-            }
-        }
-
-        return $this->bulkPropertyResult($assetIds, $updatedIds, $failed, $errors, $name, $type);
     }
 
     /**
@@ -244,18 +205,6 @@ class AssetPropertyService implements AssetPropertyServiceInterface
         $asset->removeProperty($name);
 
         return $asset;
-    }
-
-    /** @return list<string> */
-    private function observerWarnings(AssetMutationEvent $event, string $eventName, string $warning, array $context): array
-    {
-        return NonFatalEventDispatcher::dispatch(
-            $this->eventDispatcher,
-            $event,
-            $eventName,
-            $this->logger,
-            $context,
-        ) === [] ? [] : [$warning];
     }
 
     private function isValidPropertyName(string $name): bool

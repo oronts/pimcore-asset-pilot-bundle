@@ -10,9 +10,6 @@ use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\PropertyType;
-use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
-use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
-use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
@@ -37,7 +34,6 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
-use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AssetManagementController
 {
@@ -51,7 +47,6 @@ class AssetManagementController
         private readonly AssetSearchServiceInterface $searchService,
         private readonly AssetPropertyServiceInterface $propertyService,
         private readonly LoggerInterface $logger,
-        private readonly EventDispatcherInterface $eventDispatcher,
         private readonly AssetZipServiceInterface $zipService,
         private readonly ElementAuthorizationInterface $authorization,
         private readonly ZipDownloadTokenStoreInterface $zipDownloads,
@@ -368,7 +363,7 @@ class AssetManagementController
      */
     private function applyTagMutation(array $input, array $expectedFingerprints): array
     {
-        $this->metadataMutations->applyTags(
+        $result = $this->metadataMutations->applyTags(
             $input['assetIds'],
             $input['tagIds'],
             $input['replace'],
@@ -381,25 +376,11 @@ class AssetManagementController
         ]);
 
         return [
-            'tagged' => count($input['assetIds']),
-            'failed' => 0,
-            'errors' => (object) [],
-            'observerWarnings' => $this->tagObserverWarnings($input),
+            'tagged' => $result['tagged'],
+            'failed' => $result['failed'],
+            'errors' => empty($result['errors']) ? (object) [] : $result['errors'],
+            'observerWarnings' => $result['observerWarnings'],
         ];
-    }
-
-    /** @param array{assetIds: list<int>, tagIds: list<int>, replace: bool} $input @return list<string> */
-    private function tagObserverWarnings(array $input): array
-    {
-        $warnings = NonFatalEventDispatcher::dispatch(
-            $this->eventDispatcher,
-            new AssetMutationEvent($input['assetIds'], 'tag', ['tagIds' => $input['tagIds'], 'replace' => $input['replace']]),
-            AssetPilotEvents::ASSETS_TAGGED,
-            $this->logger,
-            ['asset_ids' => $input['assetIds'], 'tag_ids' => $input['tagIds']],
-        );
-
-        return $warnings === [] ? [] : ['Asset-tag observer delivery failed.'];
     }
 
     #[Route('/assets/bulk-property', name: 'oronts_asset_pilot_bulk_property', methods: ['POST'])]

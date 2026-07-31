@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
@@ -11,15 +13,21 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Tag;
 use Pimcore\Model\Exception\NotFoundException;
+use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class AssetMetadataMutationService implements AssetMetadataMutationServiceInterface
 {
+    use MapsObserverDeliveryWarnings;
+
     public function __construct(
         private readonly LoopGuard $loopGuard,
         private readonly ReviewedAssetLockCoordinator $reviewedLocks,
         private readonly ElementAuthorizationInterface $authorization,
         private readonly AssetPropertyServiceInterface $propertyService,
         private readonly AssetMetadataFingerprintService $fingerprints,
+        private readonly LoggerInterface $logger,
+        private readonly EventDispatcherInterface $eventDispatcher,
         private readonly string $lockProperty,
     ) {}
 
@@ -58,18 +66,36 @@ class AssetMetadataMutationService implements AssetMetadataMutationServiceInterf
         );
     }
 
-    /** @param list<int> $assetIds @param list<int> $tagIds @param array<string, string> $expectedFingerprints */
-    public function applyTags(array $assetIds, array $tagIds, bool $replace, array $expectedFingerprints): void
+    /**
+     * @param list<int> $assetIds
+     * @param list<int> $tagIds
+     * @param array<string, string> $expectedFingerprints
+     *
+     * @return array{tagged: int, failed: int, errors: array<int|string, string>, observerWarnings: list<string>}
+     */
+    public function applyTags(array $assetIds, array $tagIds, bool $replace, array $expectedFingerprints): array
     {
-        $this->withLockedAssets(
+        return $this->withLockedAssets(
             $assetIds,
             true,
             fn (Asset $asset) => $this->fingerprints->assertTagsUnchanged($asset, $expectedFingerprints),
-            function (array $lockedIds, array $lockedAssets) use ($tagIds, $replace): void {
+            function (array $lockedIds, array $lockedAssets) use ($tagIds, $replace): array {
                 unset($lockedAssets);
                 sort($tagIds, SORT_NUMERIC);
                 $this->assertRequestedTagsExist($tagIds, true);
                 $this->assignTags($lockedIds, $tagIds, $replace);
+
+                return [
+                    'tagged' => count($lockedIds),
+                    'failed' => 0,
+                    'errors' => [],
+                    'observerWarnings' => $this->observerWarnings(
+                        new AssetMutationEvent($lockedIds, 'tag', ['tagIds' => $tagIds, 'replace' => $replace]),
+                        AssetPilotEvents::ASSETS_TAGGED,
+                        'Asset-tag observer delivery failed.',
+                        ['asset_ids' => $lockedIds, 'tag_ids' => $tagIds],
+                    ),
+                ];
             },
         );
     }

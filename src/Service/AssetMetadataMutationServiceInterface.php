@@ -15,8 +15,14 @@ interface AssetMetadataMutationServiceInterface
     /** @param list<int> $assetIds */
     public function propertyPlan(ActorContext $actor, array $assetIds, string $name, string $type, string|bool $value): ApplyPlan;
 
-    /** @param list<int> $assetIds @param list<int> $tagIds @param array<string, string> $expectedFingerprints */
-    public function applyTags(array $assetIds, array $tagIds, bool $replace, array $expectedFingerprints): void;
+    /**
+     * @param list<int> $assetIds
+     * @param list<int> $tagIds
+     * @param array<string, string> $expectedFingerprints
+     *
+     * @return array{tagged: int, failed: int, errors: array<int|string, string>, observerWarnings: list<string>}
+     */
+    public function applyTags(array $assetIds, array $tagIds, bool $replace, array $expectedFingerprints): array;
 
     /**
      * @param list<int> $assetIds

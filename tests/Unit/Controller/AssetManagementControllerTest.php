@@ -6,7 +6,6 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
 use Oronts\AssetPilotBundle\Controller\Api\AssetManagementController;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
-use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
@@ -25,7 +24,6 @@ use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\NullLogger;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
-use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Lock\LockFactory;
@@ -108,18 +106,17 @@ final class AssetManagementControllerTest extends TestCase
     #[Test]
     public function bulkPropertyRejectsStructuredDataBeforeMutation(): void
     {
-        $properties = $this->createMock(AssetPropertyService::class);
-        $properties->expects(self::never())->method('bulkSetProperty');
+        $metadata = $this->createMock(AssetMetadataMutationService::class);
+        $metadata->expects(self::never())->method('applyProperty');
         $controller = new AssetManagementController(
             $this->createMock(AssetSearchServiceInterface::class),
-            $properties,
+            $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            new EventDispatcher(),
             $this->createMock(AssetZipServiceInterface::class),
             $this->createMock(ElementAuthorization::class),
             new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
             $this->createMock(ApplyPlanServiceInterface::class),
-            $this->createMock(AssetMetadataMutationService::class),
+            $metadata,
         );
         $request = Request::create('/', 'POST', [], [], [], [], json_encode([
             'assetIds' => [1],
@@ -167,18 +164,18 @@ final class AssetManagementControllerTest extends TestCase
                 [7],
                 true,
                 ['asset:1' => 'tag-fingerprint-1', 'asset:2' => 'tag-fingerprint-2'],
-            );
-
-        $dispatcher = new EventDispatcher();
-        $dispatcher->addListener(AssetPilotEvents::ASSETS_TAGGED, static function (): never {
-            throw new \RuntimeException('tag observer failed');
-        });
+            )
+            ->willReturn([
+                'tagged' => 2,
+                'failed' => 0,
+                'errors' => [],
+                'observerWarnings' => ['Asset-tag observer delivery failed.'],
+            ]);
 
         $controller = new class (
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            $dispatcher,
             $this->createMock(AssetZipServiceInterface::class),
             $authorization,
             new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
@@ -342,7 +339,6 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            new EventDispatcher(),
             $zip,
             $authorization,
             new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
@@ -370,7 +366,6 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            new EventDispatcher(),
             $zip,
             $authorization,
             new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
@@ -403,7 +398,6 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            new EventDispatcher(),
             $this->createMock(AssetZipServiceInterface::class),
             $authorization,
             $tokens,
@@ -436,7 +430,6 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            new EventDispatcher(),
             $this->createMock(AssetZipServiceInterface::class),
             $this->createMock(ElementAuthorization::class),
             new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
@@ -462,7 +455,6 @@ final class AssetManagementControllerTest extends TestCase
             $this->createMock(AssetSearchServiceInterface::class),
             $this->createMock(AssetPropertyService::class),
             new NullLogger(),
-            new EventDispatcher(),
             $this->createMock(AssetZipServiceInterface::class),
             $authorization,
             new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
@@ -483,7 +475,6 @@ final class AssetManagementControllerTest extends TestCase
                 $this->createMock(AssetSearchServiceInterface::class),
                 $this->createMock(AssetPropertyService::class),
                 new NullLogger(),
-                new EventDispatcher(),
                 $this->createMock(AssetZipServiceInterface::class),
                 $this->createMock(ElementAuthorization::class),
                 new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
