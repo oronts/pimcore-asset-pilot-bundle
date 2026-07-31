@@ -176,6 +176,45 @@ class OperationsControllerResolveTest extends TestCase
         self::assertTrue($payload['hasMore']);
     }
 
+    #[Test]
+    public function organizeBulkRejectsADenialHeavyClassBeyondTheScanBudget(): void
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+        $ids = range(1, 100);
+        $controller = $this->objectPreviewController($authorization, $this->objectMocks($ids), $ids, 10);
+
+        $response = $controller->organizeBulk($this->post('{"className":"Product","async":true}'));
+        $payload = json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertStringContainsString('could not be resolved within the scan budget', $payload['error']);
+    }
+
+    #[Test]
+    public function bulkPreviewRejectsAnEmptyClassName(): void
+    {
+        $controller = $this->objectPreviewController($this->createMock(ElementAuthorization::class), [], []);
+
+        $response = $controller->bulkPreview($this->post('{"className":"  ","page":1,"limit":2}'));
+        $payload = json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertStringContainsString('className is required', $payload['error']);
+    }
+
+    #[Test]
+    public function organizeBulkRejectsAWhitespaceClassNameWithoutObjectIds(): void
+    {
+        $controller = $this->objectPreviewController($this->createMock(ElementAuthorization::class), [], []);
+
+        $response = $controller->organizeBulk($this->post('{"className":"   ","async":true}'));
+        $payload = json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertStringContainsString('className or objectIds required', $payload['error']);
+    }
+
     /**
      * @param list<int> $ids
      *

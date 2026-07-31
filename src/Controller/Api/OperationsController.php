@@ -44,7 +44,6 @@ use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Oronts\AssetPilotBundle\Service\RunItemLease;
 use Oronts\AssetPilotBundle\Service\SynchronousRunExecutor;
 use Oronts\AssetPilotBundle\Support\BulkIds;
-use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\LoggerInterface;
@@ -152,10 +151,18 @@ class OperationsController
                 return new JsonResponse(['error' => 'The "since" value is not a valid date.'], Response::HTTP_BAD_REQUEST);
             }
         }
+        $rule = $this->requestOptionalString($data, 'rule');
+        if ($rule instanceof JsonResponse) {
+            return $rule;
+        }
+        $class = $this->requestOptionalString($data, 'class');
+        if ($class instanceof JsonResponse) {
+            return $class;
+        }
         $filters = array_filter([
             'since' => $since,
-            'rule_name' => $data['rule'] ?? null,
-            'object_class' => $data['class'] ?? null,
+            'rule_name' => $rule,
+            'object_class' => $class,
         ], static fn ($value): bool => $value !== null);
 
         $options = $this->plannedExecutionOptions($data);
@@ -349,6 +356,9 @@ class OperationsController
         if ($className instanceof JsonResponse) {
             return $className;
         }
+        if ($className !== null && trim($className) === '') {
+            $className = null;
+        }
         $rawObjectIds = $data['objectIds'] ?? [];
         $async = $this->requestBool($data, 'async', true);
         if ($async instanceof JsonResponse) {
@@ -381,24 +391,24 @@ class OperationsController
             }
         }
 
-        // Resolve object IDs from class name if not provided directly. Cap the listing at the same
-        // per-request limit the objectIds path enforces, so a whole-catalog className cannot queue or
-        // run an unbounded batch through the move pipeline. Over the cap is a 400, not a silent
-        // truncation: the caller narrows the selection or paginates via bulk-preview.
+        // Resolve object IDs from a class name under a bounded authorized scan: a whole-catalog
+        // className must never load and ACL-check the entire class, nor silently organize a partial
+        // selection. Both "more objects than the cap" and "the class could not be resolved within the
+        // raw candidate budget" are a 400 asking for explicit objectIds; a signed plan is only issued
+        // for a fully-resolved selection within the cap.
         if (empty($objectIds) && $className !== null) {
-            foreach ($this->objectsForClass((string) $className) as $object) {
-                if (!$this->authorization->isAllowed($object, 'view')) {
-                    continue;
-                }
-                $objectIds[] = (int) $object->getId();
-                if (count($objectIds) > BulkIds::MAX) {
-                    break;
-                }
-            }
+            $resolved = $this->resolveVisibleClassObjectIds((string) $className);
+            $objectIds = $resolved['ids'];
 
             if (count($objectIds) > BulkIds::MAX) {
                 return new JsonResponse(
                     ['error' => sprintf('Class "%s" resolves to more than %d objects; narrow the selection or pass objectIds.', $className, BulkIds::MAX)],
+                    Response::HTTP_BAD_REQUEST,
+                );
+            }
+            if ($resolved['truncated']) {
+                return new JsonResponse(
+                    ['error' => sprintf('Class "%s" could not be resolved within the scan budget; pass explicit objectIds or narrow the selection.', $className)],
                     Response::HTTP_BAD_REQUEST,
                 );
             }
@@ -504,7 +514,7 @@ class OperationsController
         if ($className instanceof JsonResponse) {
             return $className;
         }
-        if ($className === null) {
+        if ($className === null || trim($className) === '') {
             return new JsonResponse(['error' => 'className is required'], Response::HTTP_BAD_REQUEST);
         }
 
@@ -575,6 +585,34 @@ class OperationsController
     protected function listObjectIds(string $className, int $offset, int $limit): array
     {
         return ObjectClassWindow::ids($className, $offset, $limit);
+    }
+
+    /**
+     * Bounded authorized resolution of a whole class to its view-visible object ids for a mutation
+     * selection: raw candidates are capped at {@see $objectScanBudget} and collection stops one past
+     * BulkIds::MAX. A mutation must never silently organize a partial class, so the caller rejects a
+     * truncated (budget-hit) or over-limit result rather than issuing a plan for it.
+     *
+     * @return array{ids: list<int>, truncated: bool}
+     */
+    private function resolveVisibleClassObjectIds(string $className): array
+    {
+        $ids = [];
+        $truncated = BoundedScan::run(
+            fn (int $offset, int $batch): array => $this->listObjectIds($className, $offset, $batch),
+            function (int $id) use (&$ids): bool {
+                $object = $this->loadObject($id);
+                if ($object !== null && $this->authorization->isAllowed($object, 'view')) {
+                    $ids[] = (int) $object->getId();
+                }
+
+                return count($ids) > BulkIds::MAX;
+            },
+            $this->objectScanBudget,
+            500,
+        );
+
+        return ['ids' => $ids, 'truncated' => $truncated];
     }
 
     #[Route('/operations/status', name: 'oronts_asset_pilot_operations_status', methods: ['GET'])]
@@ -707,27 +745,6 @@ class OperationsController
     protected function loadObject(int $id): ?AbstractObject
     {
         return AbstractObject::getById($id);
-    }
-
-    /** @return \Generator<int, AbstractObject> */
-    protected function objectsForClass(string $className): \Generator
-    {
-        $offset = 0;
-        $batchSize = 500;
-        do {
-            $listing = new DataObject\Listing();
-            $listing->setObjectTypes([AbstractObject::OBJECT_TYPE_OBJECT, AbstractObject::OBJECT_TYPE_VARIANT]);
-            $listing->setCondition('className = ?', [$className]);
-            $listing->setOrderKey('id');
-            $listing->setOrder('asc');
-            $listing->setOffset($offset);
-            $listing->setLimit($batchSize);
-            $objects = $listing->load();
-            foreach ($objects as $object) {
-                yield $object;
-            }
-            $offset += $batchSize;
-        } while (count($objects) === $batchSize);
     }
 
     /**

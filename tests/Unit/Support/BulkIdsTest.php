@@ -64,6 +64,12 @@ class BulkIdsTest extends TestCase
     }
 
     #[Test]
+    public function rejectsLeadingZeroStringsToMatchTheCanonicalIdPattern(): void
+    {
+        self::assertSame([1, 2], BulkIds::clean(['1', '01', '007', '0', '2']));
+    }
+
+    #[Test]
     public function stopsCollectingJustAboveTheCapSoTheCallerCanReject(): void
     {
         $raw = range(1, BulkIds::MAX + 500);

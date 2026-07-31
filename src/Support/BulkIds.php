@@ -17,8 +17,9 @@ class BulkIds
     public const int MAX = 1000;
 
     /**
-     * Normalize a client-supplied id array: keep only positive integers (ints or plain digit
-     * strings — never booleans, arrays, floats, or signed/spaced strings), drop non-positive ids,
+     * Normalize a client-supplied id array: keep only positive integers (ints or canonical positive
+     * digit strings, no leading zeros — never booleans, arrays, floats, signed/spaced/`0`-prefixed
+     * strings, matching the OpenAPI IdList item pattern), drop non-positive ids,
      * and de-duplicate preserving first-seen order. Stops one past self::MAX so a caller can reject
      * an oversized request without this doing unbounded work first. Returns a clean list (empty when
      * the input is not a usable array). Callers reject `[]` and `count > self::MAX` with 400.
@@ -36,7 +37,7 @@ class BulkIds
         foreach ($raw as $value) {
             if (is_int($value)) {
                 $id = $value;
-            } elseif (is_string($value) && ctype_digit($value)) {
+            } elseif (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1) {
                 $id = (int) $value;
             } else {
                 continue;

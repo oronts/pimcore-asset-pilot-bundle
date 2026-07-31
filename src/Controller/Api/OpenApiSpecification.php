@@ -27,7 +27,7 @@ class OpenApiPositiveIdSchema
     private function __construct() {}
 }
 
-#[OA\Schema(schema: 'IdList', type: 'array', minItems: 1, maxItems: 1000, uniqueItems: true, items: new OA\Items(ref: '#/components/schemas/PositiveId'))]
+#[OA\Schema(schema: 'IdList', type: 'array', description: 'A list of ids, each a positive integer or a positive numeric string. Input handling is lenient: invalid, non-positive, and duplicate members are dropped, then the remaining unique ids are acted on. An empty result after cleaning, or more than 1000 ids after cleaning, is rejected with HTTP 400.', items: new OA\Items(oneOf: [new OA\Schema(type: 'integer', minimum: 1), new OA\Schema(type: 'string', pattern: '^[1-9][0-9]*$')]))]
 class OpenApiIdListSchema
 {
     private function __construct() {}

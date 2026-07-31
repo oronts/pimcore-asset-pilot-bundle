@@ -165,8 +165,11 @@ class DuplicatesController
             return $data;
         }
 
-        $runId = is_string($data['runId'] ?? null) ? $data['runId'] : '';
-        if ($runId !== '') {
+        $runId = $this->requestOptionalString($data, 'runId');
+        if ($runId instanceof JsonResponse) {
+            return $runId;
+        }
+        if ($runId !== null && $runId !== '') {
             return $this->resumeMerge($runId);
         }
 
@@ -178,7 +181,10 @@ class DuplicatesController
         if ($canonicalId instanceof JsonResponse) {
             return $canonicalId;
         }
-        $strategy = is_string($data['strategy'] ?? null) ? $data['strategy'] : null;
+        $strategy = $this->requestOptionalString($data, 'strategy');
+        if ($strategy instanceof JsonResponse) {
+            return $strategy;
+        }
         $dryRun = $this->requestBool($data, 'dryRun', false);
         if ($dryRun instanceof JsonResponse) {
             return $dryRun;
