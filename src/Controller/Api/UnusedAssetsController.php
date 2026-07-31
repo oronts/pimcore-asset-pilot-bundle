@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\AppliesPlanControlEnvelope;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
@@ -30,6 +31,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class UnusedAssetsController
 {
+    use AppliesPlanControlEnvelope;
     use DecodesJsonObject;
     use HandlesBulkIds;
     use StreamsCsv;
@@ -353,19 +355,6 @@ class UnusedAssetsController
         }
 
         return ['failed' => count($errors), 'errors' => $errors];
-    }
-
-    /** @param array<string, mixed> $result @return array<string, mixed> */
-    private function withPlanControl(array $result, bool $dryRun, ?string $planToken, int $requested): array
-    {
-        $result['observerWarnings'] ??= [];
-
-        return [
-            ...$result,
-            'dryRun' => $dryRun,
-            'planToken' => $planToken,
-            'eligible' => max(0, $requested - (int) ($result['failed'] ?? 0)),
-        ];
     }
 
     /** @return array<string, mixed> */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\AppliesPlanControlEnvelope;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
@@ -37,6 +38,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class AssetManagementController
 {
+    use AppliesPlanControlEnvelope;
     use DecodesJsonObject;
     use HandlesBulkIds;
     use ReadsRequestScalars;
@@ -623,19 +625,6 @@ class AssetManagementController
             ['error' => 'Failed to mutate asset metadata.', 'reference' => $reference],
             Response::HTTP_INTERNAL_SERVER_ERROR,
         );
-    }
-
-    /** @param array<string, mixed> $result @return array<string, mixed> */
-    private function withPlanControl(array $result, bool $dryRun, ?string $planToken, int $requested): array
-    {
-        $result['observerWarnings'] ??= [];
-
-        return [
-            ...$result,
-            'dryRun' => $dryRun,
-            'planToken' => $planToken,
-            'eligible' => max(0, $requested - (int) ($result['failed'] ?? 0)),
-        ];
     }
 
     private function errorReference(): string
