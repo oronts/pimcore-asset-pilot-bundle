@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 use Oronts\AssetPilotBundle\Controller\Api\Support\AppliesPlanControlEnvelope;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsPlanControlRequest;
 use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
 use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
@@ -40,9 +41,10 @@ class AssetManagementController
 {
     use AppliesPlanControlEnvelope;
     use DecodesJsonObject;
-    use RejectsClaimedPlan;
     use HandlesBulkIds;
+    use ReadsPlanControlRequest;
     use ReadsRequestScalars;
+    use RejectsClaimedPlan;
 
     private const int MAX_TAG_LIMIT = 200;
 
@@ -520,7 +522,7 @@ class AssetManagementController
         callable $plan,
         callable $apply,
     ): JsonResponse {
-        $control = $this->metadataPlanControl($data);
+        $control = $this->readPlanControl($data);
         if ($control instanceof JsonResponse) {
             return $control;
         }
@@ -544,22 +546,6 @@ class AssetManagementController
         } catch (\Throwable $e) {
             return $this->metadataMutationFailure($e);
         }
-    }
-
-    /** @param array<string, mixed> $data @return array{dryRun: bool, token: string}|JsonResponse */
-    private function metadataPlanControl(array $data): array|JsonResponse
-    {
-        $dryRun = $data['dryRun'] ?? false;
-        if (!is_bool($dryRun)) {
-            return new JsonResponse(['error' => 'dryRun must be a boolean.'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $token = is_string($data['planToken'] ?? null) ? $data['planToken'] : '';
-        if (!$dryRun && $token === '') {
-            return new JsonResponse(['error' => 'A planToken from a fresh dry-run preview is required.'], Response::HTTP_BAD_REQUEST);
-        }
-
-        return ['dryRun' => $dryRun, 'token' => $token];
     }
 
     /**

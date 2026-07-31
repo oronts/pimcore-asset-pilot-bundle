@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 use Oronts\AssetPilotBundle\Controller\Api\Support\AppliesPlanControlEnvelope;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsPlanControlRequest;
 use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\ActorType;
@@ -34,6 +35,7 @@ class UnusedAssetsController
     use AppliesPlanControlEnvelope;
     use DecodesJsonObject;
     use HandlesBulkIds;
+    use ReadsPlanControlRequest;
     use RejectsClaimedPlan;
     use StreamsCsv;
 
@@ -229,7 +231,7 @@ class UnusedAssetsController
         callable $preview,
         callable $apply,
     ): JsonResponse {
-        $control = $this->mutationControl($data);
+        $control = $this->readPlanControl($data);
         if ($control instanceof JsonResponse) {
             return $control;
         }
@@ -248,22 +250,6 @@ class UnusedAssetsController
 
             return new JsonResponse(['error' => 'Failed to execute the unused-asset mutation.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-    }
-
-    /** @param array<string, mixed> $data @return array{dryRun: bool, token: string}|JsonResponse */
-    private function mutationControl(array $data): array|JsonResponse
-    {
-        $dryRun = $data['dryRun'] ?? false;
-        if (!is_bool($dryRun)) {
-            return new JsonResponse(['error' => 'dryRun must be a boolean.'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $token = is_string($data['planToken'] ?? null) ? $data['planToken'] : '';
-        if (!$dryRun && $token === '') {
-            return new JsonResponse(['error' => 'A planToken from a fresh dry-run preview is required.'], Response::HTTP_BAD_REQUEST);
-        }
-
-        return ['dryRun' => $dryRun, 'token' => $token];
     }
 
     /**
