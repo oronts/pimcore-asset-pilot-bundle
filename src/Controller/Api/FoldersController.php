@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
@@ -21,6 +21,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class FoldersController
 {
     use DecodesJsonObject;
+    use RejectsClaimedPlan;
 
     private const int MAX_DELETE = 200;
 
@@ -117,7 +118,7 @@ class FoldersController
     private function applyDelete(array $folderIds, string $planToken): JsonResponse
     {
         $plan = $this->sweep->createDeletePlan($folderIds);
-        $rejection = $this->claimRejection($this->applyPlans->claim($planToken, $plan));
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($planToken, $plan));
         if ($rejection !== null) {
             return $rejection;
         }
@@ -127,17 +128,6 @@ class FoldersController
             'dryRun' => false,
             'planToken' => null,
         ]);
-    }
-
-    private function claimRejection(ApplyPlanStatus $status): ?JsonResponse
-    {
-        if ($status === ApplyPlanStatus::Malformed) {
-            return new JsonResponse(['error' => 'The apply plan token is malformed.'], JsonResponse::HTTP_BAD_REQUEST);
-        }
-
-        return $status === ApplyPlanStatus::Claimed
-            ? null
-            : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], JsonResponse::HTTP_CONFLICT);
     }
 
 }

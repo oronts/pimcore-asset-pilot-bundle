@@ -6,9 +6,9 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\ActorType;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Exception\MergeLeaseLostException;
@@ -35,6 +35,7 @@ class DuplicatesController
 {
     use DecodesJsonObject;
     use ReadsRequestScalars;
+    use RejectsClaimedPlan;
     use StreamsCsv;
 
     private const int MAX_LIMIT = 100;
@@ -264,23 +265,12 @@ class DuplicatesController
             return new JsonResponse(['error' => 'A planToken from a fresh preview is required.'], JsonResponse::HTTP_BAD_REQUEST);
         }
 
-        $rejection = $this->mergeClaimRejection($this->applyPlans->claim($token, $plan));
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($token, $plan));
         if ($rejection !== null) {
             return $rejection;
         }
 
         return ['planToken' => null, 'fingerprints' => $plan->fingerprintMap()];
-    }
-
-    private function mergeClaimRejection(ApplyPlanStatus $status): ?JsonResponse
-    {
-        if ($status === ApplyPlanStatus::Malformed) {
-            return new JsonResponse(['error' => 'The apply plan token is malformed.'], JsonResponse::HTTP_BAD_REQUEST);
-        }
-
-        return $status === ApplyPlanStatus::Claimed
-            ? null
-            : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], JsonResponse::HTTP_CONFLICT);
     }
 
     private function mergeResponse(MergeOutcome $outcome, bool $dryRun, ?string $planToken, ?string $statusRunId): JsonResponse

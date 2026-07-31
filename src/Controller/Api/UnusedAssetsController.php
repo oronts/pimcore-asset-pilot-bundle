@@ -7,9 +7,9 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 use Oronts\AssetPilotBundle\Controller\Api\Support\AppliesPlanControlEnvelope;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
 use Oronts\AssetPilotBundle\Enum\ActorType;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
@@ -34,6 +34,7 @@ class UnusedAssetsController
     use AppliesPlanControlEnvelope;
     use DecodesJsonObject;
     use HandlesBulkIds;
+    use RejectsClaimedPlan;
     use StreamsCsv;
 
 
@@ -309,7 +310,7 @@ class UnusedAssetsController
         callable $apply,
     ): JsonResponse {
         $plan = $this->mutationPlan($kind, $assetIds, $requestData);
-        $rejection = $this->mutationClaimRejection($this->applyPlans->claim($token, $plan));
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($token, $plan));
         if ($rejection !== null) {
             return $rejection;
         }
@@ -318,17 +319,6 @@ class UnusedAssetsController
         $result = $apply($plan->fingerprintMap());
 
         return new JsonResponse($this->withPlanControl($result, false, null, count($assetIds)));
-    }
-
-    private function mutationClaimRejection(ApplyPlanStatus $status): ?JsonResponse
-    {
-        if ($status === ApplyPlanStatus::Malformed) {
-            return new JsonResponse(['error' => 'The apply plan token is malformed.'], Response::HTTP_BAD_REQUEST);
-        }
-
-        return $status === ApplyPlanStatus::Claimed
-            ? null
-            : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], Response::HTTP_CONFLICT);
     }
 
     /** @param list<int> $assetIds @param array<string, mixed> $requestData */

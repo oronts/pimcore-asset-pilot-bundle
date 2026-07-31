@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
@@ -29,8 +29,9 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class IntegrityController
 {
     use DecodesJsonObject;
-    use ReadsRequestScalars;
     use PreviewsHealPlan;
+    use ReadsRequestScalars;
+    use RejectsClaimedPlan;
 
     /**
      * Each checked/healed asset is loaded and render-tested (and a heal probes its versions), so the
@@ -156,7 +157,7 @@ class IntegrityController
             ]);
         }
 
-        $rejection = $this->healPlanRejection($this->applyPlans->claim($planToken, $plan));
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($planToken, $plan));
         if ($rejection !== null) {
             return $rejection;
         }
@@ -168,19 +169,6 @@ class IntegrityController
             'planToken' => null,
             'results' => $this->serializeResults($assetIds, $results),
         ]);
-    }
-
-    private function healPlanRejection(ApplyPlanStatus $status): ?JsonResponse
-    {
-        if ($status === ApplyPlanStatus::Malformed) {
-            return new JsonResponse(['error' => 'The apply plan token is malformed.'], JsonResponse::HTTP_BAD_REQUEST);
-        }
-
-        return $status === ApplyPlanStatus::Claimed
-            ? null
-            : new JsonResponse([
-                'error' => 'The apply plan is stale or was already used. Preview again.',
-            ], JsonResponse::HTTP_CONFLICT);
     }
 
     /**

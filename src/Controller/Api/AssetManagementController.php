@@ -8,7 +8,7 @@ use Oronts\AssetPilotBundle\Controller\Api\Support\AppliesPlanControlEnvelope;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Controller\Api\Support\HandlesBulkIds;
 use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\PropertyType;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
@@ -40,6 +40,7 @@ class AssetManagementController
 {
     use AppliesPlanControlEnvelope;
     use DecodesJsonObject;
+    use RejectsClaimedPlan;
     use HandlesBulkIds;
     use ReadsRequestScalars;
 
@@ -578,7 +579,7 @@ class AssetManagementController
             return $this->metadataPreviewResponse($currentPlan, $counter, $requested);
         }
 
-        $rejection = $this->metadataClaimRejection($this->applyPlans->claim($token, $currentPlan));
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($token, $currentPlan));
         if ($rejection !== null) {
             return $rejection;
         }
@@ -599,17 +600,6 @@ class AssetManagementController
             'errors' => (object) [],
             'observerWarnings' => [],
         ], true, $this->applyPlans->issue($plan), $requested));
-    }
-
-    private function metadataClaimRejection(ApplyPlanStatus $status): ?JsonResponse
-    {
-        if ($status === ApplyPlanStatus::Malformed) {
-            return new JsonResponse(['error' => 'The apply plan token is malformed.'], Response::HTTP_BAD_REQUEST);
-        }
-
-        return $status === ApplyPlanStatus::Claimed
-            ? null
-            : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], Response::HTTP_CONFLICT);
     }
 
 

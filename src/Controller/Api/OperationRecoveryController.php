@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesReviewedPlanRequest;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\OperationRecoveryPlanException;
 use Oronts\AssetPilotBundle\Model\OperationRecoveryResult;
@@ -21,6 +21,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 final class OperationRecoveryController
 {
     use DecodesReviewedPlanRequest;
+    use RejectsClaimedPlan;
 
     public function __construct(
         private readonly OperationRecoveryCoordinatorInterface $recovery,
@@ -44,12 +45,7 @@ final class OperationRecoveryController
 
             return new JsonResponse($this->serialize($result));
         } catch (OperationRecoveryPlanException $e) {
-            return new JsonResponse(
-                ['error' => $e->getMessage()],
-                $e->status === ApplyPlanStatus::Malformed
-                    ? JsonResponse::HTTP_BAD_REQUEST
-                    : JsonResponse::HTTP_CONFLICT,
-            );
+            return new JsonResponse(['error' => $e->getMessage()], $this->planStatusHttpStatus($e->status));
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: operation recovery failed.', ['exception' => $e]);
 

@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
 use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesReviewedPlanRequest;
-use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\DeliveryRetryPlanException;
 use Oronts\AssetPilotBundle\Model\DeadOperationDelivery;
@@ -22,6 +22,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 final class OperationDeliveryRetryController
 {
     use DecodesReviewedPlanRequest;
+    use RejectsClaimedPlan;
 
     public function __construct(
         private readonly OperationDeliveryRetryCoordinatorInterface $retries,
@@ -47,12 +48,7 @@ final class OperationDeliveryRetryController
 
             return new JsonResponse($this->serialize($review));
         } catch (DeliveryRetryPlanException $e) {
-            return new JsonResponse(
-                ['error' => $e->getMessage()],
-                $e->status === ApplyPlanStatus::Malformed
-                    ? JsonResponse::HTTP_BAD_REQUEST
-                    : JsonResponse::HTTP_CONFLICT,
-            );
+            return new JsonResponse(['error' => $e->getMessage()], $this->planStatusHttpStatus($e->status));
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: dead operation delivery retry failed.', ['exception' => $e]);
 
