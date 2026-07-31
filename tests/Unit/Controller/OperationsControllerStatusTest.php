@@ -19,6 +19,7 @@ use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\OrganizeRunDispatchCoordinator;
+use Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelectorInterface;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Oronts\AssetPilotBundle\Service\RunItemLease;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -67,6 +68,7 @@ final class OperationsControllerStatusTest extends TestCase
             $this->createMock(RunItemLease::class),
             new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
             new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcherInterface::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
+            $this->createMock(VisibleObjectSelectorInterface::class),
         );
     }
 }

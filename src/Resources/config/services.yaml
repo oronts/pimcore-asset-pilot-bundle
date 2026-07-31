@@ -537,7 +537,12 @@ services:
     Oronts\AssetPilotBundle\Controller\Api\OperationsController:
         arguments:
             $planConfiguration: '%oronts_asset_pilot.config%'
+
+    Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelector:
+        arguments:
             $objectScanBudget: '%oronts_asset_pilot.listing.scan_budget%'
+
+    Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelectorInterface: '@Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelector'
 
     Oronts\AssetPilotBundle\Service\AssetSearchService:
         arguments:

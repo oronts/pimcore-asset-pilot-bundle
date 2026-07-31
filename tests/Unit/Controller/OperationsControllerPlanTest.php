@@ -28,6 +28,7 @@ use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\OrganizeRunDispatchCoordinator;
+use Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelectorInterface;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationService;
 use Oronts\AssetPilotBundle\Service\RunItemLease;
 use Oronts\AssetPilotBundle\Tests\Support\InMemoryApplyPlanClaimStore;
@@ -540,6 +541,7 @@ final class OperationsControllerPlanTest extends TestCase
             $this->createMock(RunItemLease::class),
             new OperationResponseAssembler($urls),
             $runCoordinator,
+            $this->createMock(VisibleObjectSelectorInterface::class),
             $objects,
         ) extends OperationsController {
             /** @param array<int, AbstractObject> $objects */
@@ -560,10 +562,11 @@ final class OperationsControllerPlanTest extends TestCase
                 RunItemLease $runItemLease,
                 OperationResponseAssembler $responses,
                 OrganizeRunDispatchCoordinator $runCoordinator,
+                VisibleObjectSelectorInterface $objectSelector,
                 private readonly array $objects,
             ) {
                 parent::__construct(
-                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator,
+                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator, $objectSelector,
                 );
             }
 

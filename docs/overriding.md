@@ -63,6 +63,7 @@ element lookup, a render helper), never a safety decision.
 | `FailureReplayServiceInterface` | `FailureReplayService` |
 | `IntegrityHealHistoryServiceInterface` | `IntegrityHealHistoryService` |
 | `LocationDriftServiceInterface` | `LocationDriftService` |
+| `VisibleObjectSelectorInterface` | `VisibleObjectSelector` |
 | `MetricsServiceInterface` | `MetricsService` |
 | `NormalizeFilenamesServiceInterface` | `NormalizeFilenamesService` |
 | `OperationReverterInterface` | `OperationReverter` |
