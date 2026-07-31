@@ -10,12 +10,12 @@ use Doctrine\DBAL\Query\QueryBuilder;
 use Oronts\AssetPilotBundle\Cache\StatsCache;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
-use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
 use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
 use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Event\NonFatalEventDispatcher;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\Query\AssetDependencyCount;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
@@ -34,6 +34,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 class UnusedAssetFinder implements UnusedAssetFinderInterface
 {
     use AppliesReviewedPlanLocks;
+    use GuardsDependencyUsage;
     private const string UNUSED_STATS_CACHE_KEY = 'asset_pilot.unused_stats';
 
     public function __construct(
@@ -608,12 +609,9 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
             return [null, 'Content-reference verification is not configured'];
         }
 
-        $dependencyVerdict = $this->dependencyVerifier->verdict($asset);
-        if ($dependencyVerdict === DependencyUsageVerdict::Referenced) {
-            return [null, 'Asset is referenced by a live Pimcore element dependency'];
-        }
-        if ($dependencyVerdict === DependencyUsageVerdict::Unknown) {
-            return [null, 'Dependency projection is not ready or contains dirty sources'];
+        $verdictReason = $this->dependencyVerdictReason($asset);
+        if ($verdictReason !== null) {
+            return [null, $verdictReason];
         }
 
         if ($this->isReferencedInContent($asset)) {
@@ -642,17 +640,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
 
     public function isReferenced(int $assetId): bool
     {
-        $count = (int) $this->connection->createQueryBuilder()
-            ->select('COUNT(*)')
-            ->from(PimcoreSchema::TABLE_DEPENDENCIES)
-            ->where('targetid = :id')
-            ->andWhere('targettype = :type')
-            ->setParameter('id', $assetId)
-            ->setParameter('type', PimcoreSchema::ELEMENT_TYPE_ASSET)
-            ->executeQuery()
-            ->fetchOne();
-
-        return $count > 0;
+        return AssetDependencyCount::isTargetReferenced($this->connection, $assetId);
     }
 
     // Reject loudly: with no size column, post-filtering would under-count the delete path (data loss).

@@ -33,6 +33,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 class QuarantineService implements QuarantineServiceInterface
 {
     use AppliesReviewedPlanLocks;
+    use GuardsDependencyUsage;
     private const int PURGE_BATCH = 1000;
 
     public function __construct(
@@ -216,12 +217,9 @@ class QuarantineService implements QuarantineServiceInterface
         if ($this->isReferencedInContent($asset)) {
             return [null, 'Asset is referenced in object content (text/WYSIWYG)'];
         }
-        $dependencyVerdict = $this->dependencyVerifier->verdict($asset);
-        if ($dependencyVerdict === DependencyUsageVerdict::Referenced) {
-            return [null, 'Asset is referenced by a live Pimcore element dependency'];
-        }
-        if ($dependencyVerdict === DependencyUsageVerdict::Unknown) {
-            return [null, 'Dependency projection is not ready or contains dirty sources'];
+        $verdictReason = $this->dependencyVerdictReason($asset);
+        if ($verdictReason !== null) {
+            return [null, $verdictReason];
         }
         if (!$this->isAllowed($asset, 'publish')) {
             return [null, 'Not permitted to move this asset'];

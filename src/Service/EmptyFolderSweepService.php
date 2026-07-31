@@ -11,6 +11,7 @@ use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\Query\AssetDependencyCount;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
@@ -304,17 +305,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
 
     protected function isReferenced(int $folderId): bool
     {
-        $count = (int) $this->connection->createQueryBuilder()
-            ->select('COUNT(*)')
-            ->from(PimcoreSchema::TABLE_DEPENDENCIES)
-            ->where('targetid = :id')
-            ->andWhere('targettype = :type')
-            ->setParameter('id', $folderId)
-            ->setParameter('type', PimcoreSchema::ELEMENT_TYPE_ASSET)
-            ->executeQuery()
-            ->fetchOne();
-
-        return $count > 0;
+        return AssetDependencyCount::isTargetReferenced($this->connection, $folderId);
     }
 
     protected function deleteFolder(Asset\Folder $folder): void
