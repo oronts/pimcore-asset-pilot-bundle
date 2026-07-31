@@ -215,6 +215,26 @@ class OperationsControllerResolveTest extends TestCase
         self::assertStringContainsString('className or objectIds required', $payload['error']);
     }
 
+    #[Test]
+    public function replayRejectsANonStringRuleFilterAtTheEndpoint(): void
+    {
+        $response = $this->objectPreviewController($this->createMock(ElementAuthorization::class), [], [])
+            ->replay($this->post('{"rule":["x"],"dryRun":true}'));
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertSame('rule must be a string.', json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR)['error']);
+    }
+
+    #[Test]
+    public function replayRejectsANonStringClassFilterAtTheEndpoint(): void
+    {
+        $response = $this->objectPreviewController($this->createMock(ElementAuthorization::class), [], [])
+            ->replay($this->post('{"class":{"x":1},"dryRun":true}'));
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertSame('class must be a string.', json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR)['error']);
+    }
+
     /**
      * @param list<int> $ids
      *

@@ -570,7 +570,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
      * not referenced in object content) so a single source keeps them from drifting. Returns the
      * loaded asset when it is safe to act on, or an error string to record against the id.
      *
-     * @param 'delete'|'publish' $aclPermission Pimcore workspace ACL checked for the current user
+     * @param 'delete'|'publish' $aclPermission Pimcore workspace ACL checked against the current ambient actor (an interactive user actor is resolved and checked; the System actor used for a CLI/no-request context is trusted; an anonymous actor fails closed)
      * @param 'delete'|'move'    $verb          used only for the human-readable error messages
      *
      * @return array{0: ?Asset, 1: ?string} [asset, null] when permitted, [null, error] otherwise

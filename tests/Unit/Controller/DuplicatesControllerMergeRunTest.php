@@ -45,6 +45,20 @@ final class DuplicatesControllerMergeRunTest extends TestCase
     }
 
     #[Test]
+    public function mergeRejectsNonStringRunIdAndStrategyAtTheEndpoint(): void
+    {
+        $controller = $this->controller($this->createMock(DuplicateMergeService::class));
+
+        $runId = $controller->merge($this->jsonRequest(['runId' => ['x']]));
+        self::assertSame(Response::HTTP_BAD_REQUEST, $runId->getStatusCode());
+        self::assertSame('runId must be a string.', json_decode((string) $runId->getContent(), true, 512, JSON_THROW_ON_ERROR)['error']);
+
+        $strategy = $controller->merge($this->jsonRequest(['checksum' => 'abc', 'strategy' => ['x']]));
+        self::assertSame(Response::HTTP_BAD_REQUEST, $strategy->getStatusCode());
+        self::assertSame('strategy must be a string.', json_decode((string) $strategy->getContent(), true, 512, JSON_THROW_ON_ERROR)['error']);
+    }
+
+    #[Test]
     public function dryRunIssuesTheExactPlanAndPreviewsWithoutFingerprints(): void
     {
         $group = new DuplicateGroup('abc', 128, 2, [9, 3]);

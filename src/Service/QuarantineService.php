@@ -777,8 +777,11 @@ class QuarantineService implements QuarantineServiceInterface
     }
 
     /**
-     * Whether the current user may create under $path (checked on the nearest existing ancestor,
-     * since the move/restore may have to recreate folders). True on CLI where there is no user.
+     * Whether the current ambient actor may create under $path (checked on the nearest existing
+     * ancestor, since the move/restore may have to recreate folders). An interactive user actor is
+     * validated against its resolved Pimcore user; the System actor (which the bundle uses for a
+     * CLI/no-request context, rather than Pimcore's permissive no-user fallback) is trusted; an
+     * anonymous/unresolved actor fails closed.
      */
     protected function targetAllowsCreate(string $path): bool
     {
