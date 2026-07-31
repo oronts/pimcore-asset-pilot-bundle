@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\EventListener;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
@@ -19,6 +20,7 @@ class DataObjectSaveListener
         protected readonly OrganizeDispatcherInterface $dispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
+        protected readonly Connection $connection,
         protected readonly bool $enabled = true,
         protected readonly array $allowedClasses = [],
         protected readonly bool $asyncEnabled = true,
@@ -120,7 +122,10 @@ class DataObjectSaveListener
 
             return;
         }
-        $this->loopGuard->markObjectDispatched($objectId);
+        // Mark dispatched only once the run has committed (nesting 0); a rolled-back save must leave no stale dedup marker.
+        if ($this->connection->getTransactionNestingLevel() === 0) {
+            $this->loopGuard->markObjectDispatched($objectId);
+        }
         $this->logger->debug('DataObjectSaveListener: recorded pending async organize intent for {class}:{id}', [
             'class' => $className,
             'id' => $objectId,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\EventListener\DataObjectSaveListener;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
@@ -35,12 +36,17 @@ class DataObjectSaveListenerTest extends TestCase
         bool $enabled = true,
         array $allowedClasses = [],
         bool $asyncEnabled = true,
+        int $transactionNesting = 0,
     ): DataObjectSaveListener {
+        $connection = $this->createMock(Connection::class);
+        $connection->method('getTransactionNestingLevel')->willReturn($transactionNesting);
+
         return new DataObjectSaveListener(
             organizer: $this->organizer,
             dispatcher: $this->dispatcher,
             loopGuard: $this->loopGuard,
             logger: new NullLogger(),
+            connection: $connection,
             enabled: $enabled,
             allowedClasses: $allowedClasses,
             asyncEnabled: $asyncEnabled,
@@ -148,6 +154,22 @@ class DataObjectSaveListenerTest extends TestCase
         $this->dispatcher->expects(self::once())
             ->method('deferObject')
             ->with(42, TriggerType::ObjectSave);
+        $this->loopGuard->expects(self::once())->method('markObjectDispatched')->with(42);
+
+        $listener->onPostUpdate($this->createEvent($object));
+    }
+
+    #[Test]
+    public function doesNotMarkDispatchedWhileInsideAConsumerTransaction(): void
+    {
+        $listener = $this->createListener(asyncEnabled: true, transactionNesting: 1);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getId')->willReturn(42);
+
+        $this->loopGuard->method('isProcessingObject')->willReturn(false);
+        $this->dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave);
+        $this->loopGuard->expects(self::never())->method('markObjectDispatched');
 
         $listener->onPostUpdate($this->createEvent($object));
     }

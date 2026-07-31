@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\EventListener\AssetUploadListener;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
@@ -25,6 +26,7 @@ class AssetUploadListenerPagingTest extends TestCase
             $this->createMock(OrganizeDispatcher::class),
             $this->createMock(LoopGuard::class),
             new NullLogger(),
+            $this->createMock(Connection::class),
             true,
             true,
             $pages,
@@ -33,9 +35,9 @@ class AssetUploadListenerPagingTest extends TestCase
             public int $processedCount = 0;
 
             /** @param list<list<array<string, mixed>>> $pages */
-            public function __construct($organizer, $bus, $guard, $logger, bool $enabled, bool $async, private array $pages)
+            public function __construct($organizer, $bus, $guard, $logger, Connection $connection, bool $enabled, bool $async, private array $pages)
             {
-                parent::__construct($organizer, $bus, $guard, $logger, $enabled, $async);
+                parent::__construct($organizer, $bus, $guard, $logger, $connection, $enabled, $async);
             }
 
             protected function fetchDependents(Dependency $dependency, int $offset, int $limit): array
@@ -123,7 +125,7 @@ class AssetUploadListenerPagingTest extends TestCase
 
     private function dependentListener(LoopGuard $guard, OrganizeDispatcher $dispatcher): object
     {
-        return new class ($this->createMock(AssetOrganizer::class), $dispatcher, $guard, new NullLogger()) extends AssetUploadListener {
+        return new class ($this->createMock(AssetOrganizer::class), $dispatcher, $guard, new NullLogger(), $this->createMock(Connection::class)) extends AssetUploadListener {
             public function runDependent(array $dependency): void
             {
                 $this->processDependent($dependency);
