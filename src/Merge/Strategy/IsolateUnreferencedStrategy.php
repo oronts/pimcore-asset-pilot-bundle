@@ -19,6 +19,8 @@ use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
  */
 class IsolateUnreferencedStrategy implements ResumableDuplicateMergeStrategyInterface
 {
+    use QuarantinesCopy;
+
     public function __construct(
         protected readonly AssetDependencyResolverInterface $dependencies,
         protected readonly QuarantineServiceInterface $quarantine,
@@ -34,13 +36,6 @@ class IsolateUnreferencedStrategy implements ResumableDuplicateMergeStrategyInte
         return false;
     }
 
-    public function recoverDisposition(int $copyId, RepointReport $report): ?CopyDisposition
-    {
-        return $this->quarantine->recoverQuarantine($copyId)
-            ? new CopyDisposition($copyId, DispositionOutcome::Quarantined)
-            : null;
-    }
-
     public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
     {
         $copyId = $context->copyId();
@@ -48,11 +43,6 @@ class IsolateUnreferencedStrategy implements ResumableDuplicateMergeStrategyInte
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, 'still referenced by at least one object');
         }
 
-        $result = $this->quarantine->quarantine([$copyId]);
-        if (($result['quarantined'] ?? 0) > 0) {
-            return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
-        }
-
-        return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'quarantine did not move the copy');
+        return $this->quarantineCopy($copyId);
     }
 }

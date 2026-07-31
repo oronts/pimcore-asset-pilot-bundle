@@ -18,6 +18,8 @@ use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
  */
 class RepointAndQuarantineStrategy implements ResumableDuplicateMergeStrategyInterface
 {
+    use QuarantinesCopy;
+
     public function __construct(
         protected readonly QuarantineServiceInterface $quarantine,
     ) {}
@@ -39,19 +41,7 @@ class RepointAndQuarantineStrategy implements ResumableDuplicateMergeStrategyInt
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, $this->blockedReason($report));
         }
 
-        $result = $this->quarantine->quarantine([$copyId]);
-        if (($result['quarantined'] ?? 0) > 0) {
-            return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
-        }
-
-        return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'quarantine did not move the copy');
-    }
-
-    public function recoverDisposition(int $copyId, RepointReport $report): ?CopyDisposition
-    {
-        return $this->quarantine->recoverQuarantine($copyId)
-            ? new CopyDisposition($copyId, DispositionOutcome::Quarantined)
-            : null;
+        return $this->quarantineCopy($copyId);
     }
 
     private function blockedReason(RepointReport $report): string
