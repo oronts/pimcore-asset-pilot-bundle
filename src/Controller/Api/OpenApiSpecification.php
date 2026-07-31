@@ -27,7 +27,7 @@ class OpenApiPositiveIdSchema
     private function __construct() {}
 }
 
-#[OA\Schema(schema: 'IdList', type: 'array', description: 'A list of ids, each a positive integer or a positive numeric string within the platform integer range. Input handling is lenient: invalid, non-positive, out-of-range, and duplicate members are dropped, then the remaining unique ids are acted on. An empty result after cleaning, or more than 1000 ids after cleaning, is rejected with HTTP 400.', items: new OA\Items(oneOf: [new OA\Schema(type: 'integer', minimum: 1), new OA\Schema(type: 'string', pattern: '^[1-9][0-9]*$')]))]
+#[OA\Schema(schema: 'IdList', type: 'array', description: 'A list of ids, each a positive integer or a positive numeric string. The string form is bounded to the 64-bit platform integer range at runtime: the digit pattern and maxLength are a coarse client-side guard, and the server applies an exact ceiling stricter than the pattern (a still-in-range 19-digit string above the maximum is dropped). Input handling is lenient: invalid, non-positive, out-of-range, and duplicate members are dropped, then the remaining unique ids are acted on. An empty result after cleaning, or more than 1000 ids after cleaning, is rejected with HTTP 400.', items: new OA\Items(oneOf: [new OA\Schema(type: 'integer', minimum: 1), new OA\Schema(type: 'string', pattern: '^[1-9][0-9]*$', maxLength: 19)]))]
 class OpenApiIdListSchema
 {
     private function __construct() {}

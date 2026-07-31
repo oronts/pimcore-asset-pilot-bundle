@@ -19,9 +19,10 @@ class BulkIds
     /**
      * Normalize a client-supplied id array: keep only positive integers (ints or canonical positive
      * digit strings, no leading zeros — never booleans, arrays, floats, signed/spaced/`0`-prefixed
-     * strings, nor digit strings above the platform integer range, matching the OpenAPI IdList item
-     * pattern), drop non-positive ids,
-     * and de-duplicate preserving first-seen order. Stops one past self::MAX so a caller can reject
+     * strings, nor digit strings above the platform integer range), drop non-positive ids,
+     * and de-duplicate preserving first-seen order. The over-range round-trip check is deliberately
+     * stricter than the OpenAPI IdList digit pattern, which cannot express a 64-bit ceiling in a regex.
+     * Stops one past self::MAX so a caller can reject
      * an oversized request without this doing unbounded work first. Returns a clean list (empty when
      * the input is not a usable array). Callers reject `[]` and `count > self::MAX` with 400.
      *
