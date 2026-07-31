@@ -560,6 +560,10 @@ oronts_asset_pilot:
                 - { type: set_property, name: product_code, from: productCode }   # $object->getProductCode()
 ```
 
+For `property_type: bool`, `value` accepts a native boolean, `1`/`0`, or the textual forms
+`true`/`false`/`yes`/`no`/`on`/`off` (blank or unknown is rejected); this is the same canonical boolean
+contract the REST `bulk-property` endpoint documents (see [REST API](rest-api.md)).
+
 Add your own action (e.g. assign a tag, derive any metadata, call an external system) by
 implementing `RuleActionInterface`; it is auto-tagged and selected by `getType()`:
 

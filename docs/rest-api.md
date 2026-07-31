@@ -597,6 +597,12 @@ Apply the same body with `dryRun: false` plus the returned `planToken`:
 
 Supported types: `text`, `bool`, `select`.
 
+For `bool`, `data` accepts a native JSON boolean, a native JSON number (`1` or `0`), or one of the textual
+forms `true`, `false`, `1`, `0`, `yes`, `no`, `on`, `off` (case-insensitive); a blank or unrecognized
+value is rejected with `400`. Prefer a native JSON boolean in HTTP calls. The value is normalized once at
+the preview boundary, so the signed plan binds the canonical form and apply mutates exactly that value.
+The same accepted forms apply to the `set_property` rule action's `value` (see [Extending](extending.md)).
+
 ### Unused Assets
 
 | Method | Endpoint | Permission | Description |

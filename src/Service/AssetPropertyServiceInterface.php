@@ -6,6 +6,20 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Pimcore\Model\Asset;
 
+/**
+ * Trusted in-process asset-property mutation seam. The mutation shapes carry different preconditions:
+ *
+ * - `lockAsset()` / `unlockAsset()` toggle the business protection property and dispatch events;
+ *   `lockAsset()` sets it via `setProperty()`, `unlockAsset()` removes it directly.
+ * - `setProperty(int $assetId, ...)` is self-contained: it acquires the distributed asset lock itself.
+ *   In this tree only `lockAsset()` calls it.
+ * - `setPropertyOnLockedAsset()` / `bulkSetPropertyOnLockedAssets()` assume the CALLER already holds the
+ *   distributed mutation lock for the asset(s). Here "locked" means "distributed mutation lock held", not
+ *   "asset protection property enabled" - do not confuse the two. Their callers are the reviewed metadata
+ *   service ({@see AssetMetadataMutationServiceInterface}, which owns the signed plan, reviewed
+ *   fingerprints, lock coordination, and observer warnings) and the durable `SetPropertyAction` rule
+ *   action; the supported interactive metadata workflow goes through the metadata service.
+ */
 interface AssetPropertyServiceInterface
 {
     /** @return list<string> */

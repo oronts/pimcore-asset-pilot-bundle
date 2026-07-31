@@ -14,7 +14,10 @@ browser specs that help exercise it.
 > waits for the health probe to go green, then runs the Playwright + axe suite.
 >
 > The browser suite is a representative slice, validated 6/6 end to end against a live Pimcore 12.3 (the
-> reference test-project): the login-rejection guard, role gating (a View user cannot see the Admin-only
+> reference test-project) on 2026-07-29 against generation `2.0.0-be64696b-97b8-475b-aca8-22575d5d3b72`
+> (the reviewed state at that time). That is a historical baseline, not the current release candidate:
+> re-run the suite against the exact current generation and record its full build ID and date before
+> describing this commit as browser-accepted. The slice covers the login-rejection guard, role gating (a View user cannot see the Admin-only
 > Storage tab), the two-layer authorization matrix (unauthenticated → `401`; a View user stopped at the
 > permission gate; an Operate user stopped at element/workspace authorization), and zero serious axe
 > violations across all twelve central tabs. The a11y test asserts the rendered tab set equals the tab

@@ -158,8 +158,9 @@ Messenger and use the configured retry strategy. Permission denials, rule reject
 and other domain outcomes are recorded as explicit skipped or failed results and are acknowledged.
 If the receiver names differ, set `async.transport` and `async.failure_transport` to the exact
 Messenger transport names. All readiness checks, including the worker-heartbeat liveness proof, then use
-the configured receiver: consume it with `messenger:consume <your-transport> pimcore_maintenance` (the
-default is `asset_pilot`), and the `asset-pilot:health` `async_transport` check goes green for that name.
+the configured receiver: consume it with two independently supervised workers,
+`messenger:consume <your-transport>` and `messenger:consume pimcore_maintenance` (the default Asset Pilot
+receiver is `asset_pilot`), and the `asset-pilot:health` `async_transport` check goes green for that name.
 
 After installing or upgrading, bootstrap the dependency projection in bounded invocations before
 enabling destructive cleanup. The cursor is durable, so the same command resumes after deploys or
