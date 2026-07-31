@@ -236,6 +236,7 @@ class OrganizeAssetsHandler
             if ($owned) {
                 $this->runs->fail($message->runId, 'Async organization failed.');
             }
+            $this->loopGuard->clearObjectDispatched($message->objectId);
 
             return;
         }
@@ -255,10 +256,17 @@ class OrganizeAssetsHandler
 
     private function requeueWhenObjectChanged(OrganizeAssetsMessage $message, ActorContext $actor, ?int $processedModificationDate): void
     {
+        // A null modification date means a non-Concrete object, and an expected fingerprint means an immutable
+        // API/CLI plan; neither is ever produced by the save listeners, so neither carries a coalescing marker and
+        // skipping the drain here cannot orphan a coalesced save (a listener run is always a Concrete object).
         if ($processedModificationDate === null || $message->expectedFingerprint !== null) {
             return;
         }
 
+        // Release the coalescing marker before draining the dirty flag: a save that coalesced while this run was
+        // in-flight marked dirty before re-reading the marker it still saw, so it is guaranteed to be observed by
+        // the isObjectDirty read below; a save landing after this point sees no marker and records its own run.
+        $this->loopGuard->clearObjectDispatched($message->objectId);
         $current = $this->reloadObject($message->objectId);
         $wasSavedDuringProcessing = $this->loopGuard->isObjectDirty($message->objectId);
         if (!$wasSavedDuringProcessing && (!$current instanceof Concrete || $current->getModificationDate() <= $processedModificationDate)) {
@@ -334,6 +342,7 @@ class OrganizeAssetsHandler
             throw LostRunItemOwnershipException::forItem($message->runId, $itemKey);
         }
         $this->runs->finish($message->runId);
+        $this->loopGuard->clearObjectDispatched($message->objectId);
     }
 
     /**

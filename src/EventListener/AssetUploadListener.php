@@ -139,10 +139,8 @@ class AssetUploadListener
         }
 
         if ($this->asyncEnabled) {
-            // Dispatch deduplication: skip if a message was recently dispatched for this object
-            if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
-                $this->loopGuard->markObjectDirty($objectId);
-                $this->logger->debug('AssetUploadListener: message recently dispatched for object {id}, skipping duplicate', [
+            if ($this->loopGuard->tryCoalesceIntoInFlightRun($objectId)) {
+                $this->logger->debug('AssetUploadListener: object {id} coalesced into the in-flight run', [
                     'id' => $objectId,
                 ]);
                 return;

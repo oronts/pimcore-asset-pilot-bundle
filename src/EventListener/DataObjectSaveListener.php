@@ -102,8 +102,11 @@ class DataObjectSaveListener
 
     private function dispatchAsync(int $objectId, string $className, TriggerType $triggerType): void
     {
-        if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
-            $this->deferObject($objectId, $className, 'message was recently dispatched');
+        if ($this->loopGuard->tryCoalesceIntoInFlightRun($objectId)) {
+            $this->logger->debug('DataObjectSaveListener: {class}:{id} coalesced into the in-flight run', [
+                'class' => $className,
+                'id' => $objectId,
+            ]);
 
             return;
         }

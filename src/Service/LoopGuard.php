@@ -314,6 +314,32 @@ class LoopGuard
         $this->cache->save($item);
     }
 
+    /**
+     * Clear the recently-dispatched marker once the run it stood for reaches a terminal state, so a later save
+     * is no longer coalesced into a run that is already gone (it would otherwise be dropped until the TTL lapses).
+     */
+    public function clearObjectDispatched(int $objectId): void
+    {
+        $this->cache->deleteItem($this->dispatchedKey($objectId));
+    }
+
+    /**
+     * Try to fold a fresh save into the run already in flight for this object, returning true when it was
+     * absorbed (the caller must not record its own run). It marks the object dirty, then re-reads the marker:
+     * the run finalizer clears the marker (clearObjectDispatched) BEFORE it drains the dirty flag, so a mark that
+     * still sees the marker is ordered before that drain and is guaranteed to be picked up. If the marker vanished
+     * between the two reads the run has finalized with no drain left, so the caller must record its own run.
+     */
+    public function tryCoalesceIntoInFlightRun(int $objectId): bool
+    {
+        if (!$this->wasObjectRecentlyDispatched($objectId)) {
+            return false;
+        }
+        $this->markObjectDirty($objectId);
+
+        return $this->wasObjectRecentlyDispatched($objectId);
+    }
+
     private function recentlyMovedKey(int $id): string
     {
         return 'asset_pilot.recently_moved.' . $id;

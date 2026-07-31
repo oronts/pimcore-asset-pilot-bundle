@@ -176,6 +176,7 @@ class OrganizeAssetsHandlerTest extends TestCase
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('isAllowed')->willReturn(true);
         $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
         $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
@@ -205,8 +206,11 @@ class OrganizeAssetsHandlerTest extends TestCase
             null,
         )->willReturn(true);
         $runs->expects(self::once())->method('finish')->with('run-1')->willReturn(OperationRunStatus::Completed);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
 
-        ($this->handler($object, $organizer, $this->createMock(OrganizeDispatcher::class), $authorization, runs: $runs))(
+        ($this->handler($object, $organizer, $this->createMock(OrganizeDispatcher::class), $authorization, runs: $runs, loopGuard: $loopGuard))(
             new OrganizeAssetsMessage(42, TriggerType::Api, actorType: ActorType::User, actorUserId: 7, runId: 'run-1'),
         );
     }

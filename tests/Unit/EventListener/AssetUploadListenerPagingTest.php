@@ -110,12 +110,11 @@ class AssetUploadListenerPagingTest extends TestCase
     }
 
     #[Test]
-    public function recentDispatchMarksObjectDirtyInsteadOfLosingTheUpload(): void
+    public function recentDispatchCoalescesInsteadOfLosingTheUpload(): void
     {
         $guard = $this->createMock(LoopGuard::class);
         $guard->method('isProcessingObject')->with(42)->willReturn(false);
-        $guard->method('wasObjectRecentlyDispatched')->with(42)->willReturn(true);
-        $guard->expects(self::once())->method('markObjectDirty')->with(42);
+        $guard->method('tryCoalesceIntoInFlightRun')->with(42)->willReturn(true);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
         $dispatcher->expects(self::never())->method('dispatchObject');
 

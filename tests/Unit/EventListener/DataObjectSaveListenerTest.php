@@ -175,7 +175,7 @@ class DataObjectSaveListenerTest extends TestCase
     }
 
     #[Test]
-    public function marksObjectDirtyWhenARecentDispatchSuppressesAnotherSave(): void
+    public function coalescesIntoTheInFlightRunWhenOneIsActive(): void
     {
         $listener = $this->createListener(asyncEnabled: true);
         $object = $this->createMock(Concrete::class);
@@ -183,9 +183,24 @@ class DataObjectSaveListenerTest extends TestCase
         $object->method('getId')->willReturn(42);
 
         $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(false);
-        $this->loopGuard->method('wasObjectRecentlyDispatched')->with(42)->willReturn(true);
-        $this->loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
+        $this->loopGuard->method('tryCoalesceIntoInFlightRun')->with(42)->willReturn(true);
         $this->dispatcher->expects(self::never())->method('deferObject');
+
+        $listener->onPostUpdate($this->createEvent($object));
+    }
+
+    #[Test]
+    public function recordsItsOwnRunWhenThereIsNoInFlightRunToCoalesceInto(): void
+    {
+        $listener = $this->createListener(asyncEnabled: true);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getId')->willReturn(42);
+
+        $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(false);
+        $this->loopGuard->method('tryCoalesceIntoInFlightRun')->with(42)->willReturn(false);
+        $this->dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave);
+        $this->loopGuard->expects(self::once())->method('markObjectDispatched')->with(42);
 
         $listener->onPostUpdate($this->createEvent($object));
     }
