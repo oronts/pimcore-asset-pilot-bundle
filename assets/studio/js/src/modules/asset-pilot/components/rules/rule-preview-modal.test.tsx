@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithI18n } from '../../../../../test/render'
 import { ApiError, assetPilotApi } from '../../services/api'
+import type { OrganizeResponse } from '../../types'
 import { RulePreviewModal } from './rule-preview-modal'
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
@@ -39,7 +40,7 @@ describe('RulePreviewModal', () => {
     await previewAndOpenConfirmation()
     await userEvent.click(screen.getByRole('button', { name: 'Apply Now' }))
 
-    await waitFor(() => expect(apply).toHaveBeenCalledWith('product-assets', 42, 'actor-bound-preview-token'))
+    await waitFor(() => expect(apply).toHaveBeenCalledWith('product-assets', 42, 'actor-bound-preview-token', expect.any(AbortSignal)))
     expect(toast.success).toHaveBeenCalledWith('Organization completed successfully')
     expect(onClose).toHaveBeenCalledOnce()
   })
@@ -67,5 +68,34 @@ describe('RulePreviewModal', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The server did not return a usable signed preview.')
     expect(screen.queryByRole('button', { name: 'Apply Now' })).not.toBeInTheDocument()
+  })
+
+  it('aborts the apply request and suppresses late effects when unmounted mid-apply', async () => {
+    vi.spyOn(assetPilotApi, 'previewRule').mockResolvedValue(previewResponse)
+    let rejectApply: (reason: unknown) => void = () => {}
+    const apply = vi.spyOn(assetPilotApi, 'applyRule')
+      .mockImplementation(() => new Promise<OrganizeResponse>((_resolve, reject) => { rejectApply = reject }))
+    const onClose = vi.fn()
+
+    const view = renderWithI18n(<RulePreviewModal ruleName="product-assets" onClose={onClose} />)
+    await previewAndOpenConfirmation()
+    await userEvent.click(screen.getByRole('button', { name: 'Apply Now' }))
+
+    await waitFor(() => expect(apply).toHaveBeenCalled())
+    const applySignal = apply.mock.calls[0]?.[3]
+    if (applySignal == null) throw new Error('Expected an apply request signal.')
+    expect(applySignal.aborted).toBe(false)
+
+    view.unmount()
+    expect(applySignal.aborted).toBe(true)
+
+    // The in-flight request settles with a real (non-abort) error AFTER unmount: the aborted guard must
+    // suppress the 409 reset, the error toast, and onClose for the component that no longer owns it.
+    rejectApply(new ApiError('Preview plan is stale.', 409))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

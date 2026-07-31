@@ -1,0 +1,26 @@
+{
+  "entrypoints": {
+    "main": {
+      "js": [
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/static/js/async/701.0d49eb74.js",
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/static/js/710.de53b0d2.js",
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/static/js/main.3ba440ed.js"
+      ],
+      "css": []
+    },
+    "oronts_asset_pilot_bundle": {
+      "js": [
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/static/js/async/701.0d49eb74.js",
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/static/js/async/__federation_expose_default_export.4f08c4d5.js",
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/static/js/remoteEntry.js"
+      ],
+      "css": []
+    },
+    "exposeRemote": {
+      "js": [
+        "/bundles/orontsassetpilot/studio/build/2.0.0-2c6f7612-1848-444c-9fc0-654eebd392db/exposeRemote.js"
+      ],
+      "css": []
+    }
+  }
+}

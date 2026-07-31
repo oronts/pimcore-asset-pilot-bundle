@@ -136,10 +136,11 @@ export const assetPilotApi = {
   },
   previewRule: (name: string, objectId: number, signal?: AbortSignal) =>
     request<RulePreviewResponse>(`/rules/${encodeURIComponent(name)}/preview?objectId=${objectId}`, { signal }),
-  applyRule: (name: string, objectId: number, planToken: string) =>
+  applyRule: (name: string, objectId: number, planToken: string, signal?: AbortSignal) =>
     request<OrganizeResponse>(`/rules/${encodeURIComponent(name)}/apply`, {
       method: 'POST',
       body: JSON.stringify({ objectId, planToken }),
+      signal,
     }),
 
   // Operations

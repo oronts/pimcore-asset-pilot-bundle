@@ -60,17 +60,24 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
 
   const applyNow = async (): Promise<void> => {
     if (preview == null) return
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
     setApplying(true)
     try {
-      await assetPilotApi.applyRule(ruleName, preview.objectId, preview.planToken)
+      await assetPilotApi.applyRule(ruleName, preview.objectId, preview.planToken, controller.signal)
+      if (controller.signal.aborted) return
       toast.success(t('asset-pilot.rule-preview.apply-success'))
       onClose()
     } catch (e) {
+      if (controller.signal.aborted || (e instanceof Error && e.name === 'AbortError')) return
       if (e instanceof ApiError && e.status === 409) setPreview(null)
       toast.error(e instanceof Error ? e.message : t('asset-pilot.common.unknown-error'))
     } finally {
-      setApplying(false)
-      setConfirming(false)
+      if (!controller.signal.aborted) {
+        setApplying(false)
+        setConfirming(false)
+      }
     }
   }
 
