@@ -16,6 +16,7 @@ use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface;
 use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
 use Oronts\AssetPilotBundle\Service\IntegrityHealHistoryServiceInterface;
+use Oronts\AssetPilotBundle\Service\PreviewsHealPlan;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealerInterface;
 use Oronts\AssetPilotBundle\Support\BulkIds;
@@ -29,6 +30,7 @@ class IntegrityController
 {
     use DecodesJsonObject;
     use ReadsRequestScalars;
+    use PreviewsHealPlan;
 
     /**
      * Each checked/healed asset is loaded and render-tested (and a heal probes its versions), so the
@@ -187,14 +189,8 @@ class IntegrityController
      */
     private function previewPlan(array $assetIds): array
     {
-        $before = $this->healFingerprints->fingerprintMap($assetIds);
-        $results = [];
-        foreach ($assetIds as $assetId) {
-            $results[$assetId] = $this->healer->previewById($assetId);
-        }
-        $after = $this->healFingerprints->fingerprintMap($assetIds);
-
-        if ($before !== $after) {
+        [$results, $after] = $this->previewHealPlan($assetIds);
+        if ($after === null) {
             return [null, $results];
         }
 

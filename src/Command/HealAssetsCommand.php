@@ -18,6 +18,7 @@ use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface;
 use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
 use Oronts\AssetPilotBundle\Service\IntegrityHealLog;
+use Oronts\AssetPilotBundle\Service\PreviewsHealPlan;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -34,6 +35,7 @@ class HealAssetsCommand extends Command
 {
     use ValidatesCliBulkIds;
     use UsesReviewedApplyPlan;
+    use PreviewsHealPlan;
 
     public function __construct(
         private readonly AssetIntegrityServiceInterface $integrity,
@@ -393,13 +395,8 @@ class HealAssetsCommand extends Command
      */
     private function healReview(array $assetIds, array $request): ?array
     {
-        $before = $this->healFingerprints->fingerprintMap($assetIds);
-        $results = [];
-        foreach ($assetIds as $assetId) {
-            $results[$assetId] = $this->healer->previewById($assetId);
-        }
-        $after = $this->healFingerprints->fingerprintMap($assetIds);
-        if ($before !== $after) {
+        [$results, $after] = $this->previewHealPlan($assetIds);
+        if ($after === null) {
             return null;
         }
 
