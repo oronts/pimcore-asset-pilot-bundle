@@ -19,6 +19,7 @@ use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
@@ -348,16 +349,7 @@ class QuarantineService implements QuarantineServiceInterface
                 window: $this->quarantineWindow($filters),
                 assetIdOf: static fn (array $row): ?int => isset($row['asset_id']) ? (int) $row['asset_id'] : null,
             );
-            $total = $result['total'];
-
-            return [
-                'items' => $result['items'],
-                'total' => $total,
-                'page' => max(1, $page),
-                'pages' => $total === null ? null : (int) ceil($total / max(1, $limit)),
-                'hasMore' => $result['hasMore'],
-                'truncated' => $result['truncated'],
-            ];
+            return Pagination::envelope($result, $page, $limit);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to list quarantined assets: {error}', [
                 'error' => $e->getMessage(),

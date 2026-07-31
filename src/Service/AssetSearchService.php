@@ -7,11 +7,13 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Service\Query\AssetRow;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
 use Oronts\AssetPilotBundle\Service\Query\IndexedAssetSize;
 use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Psr\Log\LoggerInterface;
@@ -177,17 +179,7 @@ class AssetSearchService implements AssetSearchServiceInterface
 
     private function hydrateItems(array $items): array
     {
-        foreach ($items as &$item) {
-            $item['file_size'] = IndexedAssetSize::bytes($item);
-            $item['size_known'] = $item['file_size'] !== null;
-            $item['created_at'] = $item['created_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['created_at']) : null;
-            $item['modified_at'] = $item['modified_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['modified_at']) : null;
-            $item['full_path'] = rtrim($item['path'] ?? '', '/') . '/' . ($item['filename'] ?? '');
-            $item['locked'] = (bool) ($item['locked'] ?? false);
-            unset($item['indexed_file_size'], $item['indexed_size_known'], $item['size_indexed_at']);
-        }
-
-        return $items;
+        return array_map(AssetRow::normalize(...), $items);
     }
 
     /**
@@ -196,16 +188,7 @@ class AssetSearchService implements AssetSearchServiceInterface
      */
     private function paginatedResponse(array $result, int $page, int $limit): array
     {
-        $total = $result['total'];
-
-        return [
-            'items' => $result['items'],
-            'total' => $total,
-            'page' => $page,
-            'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / $limit) : 0),
-            'hasMore' => $result['hasMore'],
-            'truncated' => $result['truncated'] ?? false,
-        ];
+        return Pagination::envelope($result, $page, $limit);
     }
 
 }

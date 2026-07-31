@@ -9,6 +9,7 @@ use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Psr\Log\LoggerInterface;
 
@@ -210,16 +211,7 @@ class IntegrityHealLog
             },
             assetIdOf: static fn (array $row): ?int => isset($row['asset_id']) ? (int) $row['asset_id'] : null,
         );
-        $total = $result['total'];
-
-        return [
-            'items' => $result['items'],
-            'total' => $total,
-            'page' => max(1, $page),
-            'pages' => $total === null ? null : (int) ceil($total / max(1, $limit)),
-            'hasMore' => $result['hasMore'],
-            'truncated' => $result['truncated'],
-        ];
+        return Pagination::envelope($result, $page, $limit);
     }
 
     /**

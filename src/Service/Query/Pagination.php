@@ -23,4 +23,26 @@ class Pagination
 
         return [$page, $limit];
     }
+
+    /**
+     * Wrap a paginator result in the shared list envelope: page is floored at 1 and pages is derived from the
+     * total (null when the total is unknown, 0 when the page size is non-positive), so every listing endpoint
+     * reports pagination identically.
+     *
+     * @param array{items: mixed, total: ?int, hasMore: bool, truncated?: bool} $result
+     * @return array{items: mixed, total: ?int, page: int, pages: ?int, hasMore: bool, truncated: bool}
+     */
+    public static function envelope(array $result, int $page, int $limit): array
+    {
+        $total = $result['total'];
+
+        return [
+            'items' => $result['items'],
+            'total' => $total,
+            'page' => max(1, $page),
+            'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / $limit) : 0),
+            'hasMore' => $result['hasMore'],
+            'truncated' => $result['truncated'] ?? false,
+        ];
+    }
 }

@@ -17,6 +17,7 @@ use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetDependencyCount;
 use Oronts\AssetPilotBundle\Service\Query\AssetFolders;
+use Oronts\AssetPilotBundle\Service\Query\AssetRow;
 use Oronts\AssetPilotBundle\Service\Query\AssetSortColumns;
 use Oronts\AssetPilotBundle\Service\Query\AssetWorkspaceQueryScope;
 use Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage;
@@ -25,6 +26,7 @@ use Oronts\AssetPilotBundle\Service\Query\ConfidenceFilter;
 use Oronts\AssetPilotBundle\Service\Query\DateFilters;
 use Oronts\AssetPilotBundle\Service\Query\IndexedAssetSize;
 use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Oronts\AssetPilotBundle\Service\Query\SortWhitelist;
 use Pimcore\Model\Asset;
@@ -94,16 +96,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
                 window: $this->unusedWindow($filters, $sortColumn, $sortDir),
                 assetIdOf: static fn (array $row): ?int => isset($row['id']) ? (int) $row['id'] : null,
             );
-            $total = $result['total'];
-
-            return [
-                'items' => $result['items'],
-                'total' => $total,
-                'page' => max(1, $page),
-                'pages' => $total === null ? null : ($limit > 0 ? (int) ceil($total / max(1, $limit)) : 0),
-                'hasMore' => $result['hasMore'],
-                'truncated' => $result['truncated'],
-            ];
+            return Pagination::envelope($result, $page, $limit);
         } catch (\Throwable $e) {
             $this->logger->error('Asset Pilot: failed to find unused assets: {error}', [
                 'error' => $e->getMessage(),
@@ -169,17 +162,7 @@ class UnusedAssetFinder implements UnusedAssetFinderInterface
     /** @param list<array<string, mixed>> $items @return list<array<string, mixed>> */
     private function hydrateRows(array $items): array
     {
-        foreach ($items as &$item) {
-            $item['file_size'] = IndexedAssetSize::bytes($item);
-            $item['size_known'] = $item['file_size'] !== null;
-            $item['created_at'] = $item['created_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['created_at']) : null;
-            $item['modified_at'] = $item['modified_at'] ? gmdate(\DateTimeInterface::ATOM, (int) $item['modified_at']) : null;
-            $item['full_path'] = rtrim((string) ($item['path'] ?? ''), '/') . '/' . ($item['filename'] ?? '');
-            $item['locked'] = (bool) ($item['locked'] ?? false);
-            unset($item['indexed_file_size'], $item['indexed_size_known'], $item['size_indexed_at']);
-        }
-
-        return $this->scorer->score($items);
+        return $this->scorer->score(array_map(AssetRow::normalize(...), $items));
     }
 
     public function countUnused(array $filters = []): int
