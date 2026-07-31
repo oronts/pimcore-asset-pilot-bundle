@@ -130,6 +130,8 @@ use Oronts\AssetPilotBundle\Service\PrometheusFormatter;
 use Oronts\AssetPilotBundle\Service\PrometheusFormatterInterface;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
 use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
+use Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelector;
+use Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelectorInterface;
 use Oronts\AssetPilotBundle\Service\ReviewedAssetLockCoordinator;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationService;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
@@ -408,6 +410,7 @@ final class ExtensionContractTest extends TestCase
             FailureReplayServiceInterface::class => FailureReplayService::class,
             IntegrityHealHistoryServiceInterface::class => IntegrityHealHistoryService::class,
             LocationDriftServiceInterface::class => LocationDriftService::class,
+            VisibleObjectSelectorInterface::class => VisibleObjectSelector::class,
             MetricsServiceInterface::class => MetricsService::class,
             NormalizeFilenamesServiceInterface::class => NormalizeFilenamesService::class,
             OperationReverterInterface::class => OperationReverter::class,
