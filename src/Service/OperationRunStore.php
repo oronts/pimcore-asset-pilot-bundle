@@ -303,17 +303,37 @@ final class OperationRunStore implements OperationRunStoreInterface
 
         // A pending run has no worker to finalize a CancelRequested, so cancel it terminally; queued/running go
         // to CancelRequested for the worker. A cancelled pending run is no longer pending_dispatch, so never relayed.
-        return $this->connection->executeStatement(
-            'UPDATE ' . Installer::TABLE_OPERATION_RUN
-            . ' SET status = CASE WHEN status = ? THEN ? ELSE ? END, updated_at = ?'
-            . ' WHERE id = ? AND status IN (?, ?, ?) AND ' . $where,
-            [
-                OperationRunStatus::PendingDispatch->value, OperationRunStatus::Cancelled->value, OperationRunStatus::CancelRequested->value,
-                $this->now(), $runId,
-                OperationRunStatus::PendingDispatch->value, OperationRunStatus::Queued->value, OperationRunStatus::Running->value,
-                ...$params,
-            ],
-        ) === 1;
+        return (bool) $this->connection->transactional(function () use ($runId, $where, $params): bool {
+            $affected = $this->connection->executeStatement(
+                'UPDATE ' . Installer::TABLE_OPERATION_RUN
+                . ' SET status = CASE WHEN status = ? THEN ? ELSE ? END, updated_at = ?'
+                . ' WHERE id = ? AND status IN (?, ?, ?) AND ' . $where,
+                [
+                    OperationRunStatus::PendingDispatch->value, OperationRunStatus::Cancelled->value, OperationRunStatus::CancelRequested->value,
+                    $this->now(), $runId,
+                    OperationRunStatus::PendingDispatch->value, OperationRunStatus::Queued->value, OperationRunStatus::Running->value,
+                    ...$params,
+                ],
+            );
+            if ($affected !== 1) {
+                return false;
+            }
+
+            // A terminally-cancelled pending run has no worker or finish() sweep to terminalize its queued item, so
+            // do it here (the EXISTS no-ops for the queued/running -> CancelRequested case) to keep the run's items
+            // all-terminal and the run retryable.
+            $now = $this->now();
+            $swept = $this->connection->executeStatement(
+                'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET status = ?, updated_at = ?, completed_at = ?'
+                . ' WHERE run_id = ? AND status = ? AND EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ? AND status = ?)',
+                [OperationRunItemStatus::Cancelled->value, $now, $now, $runId, OperationRunItemStatus::Queued->value, $runId, OperationRunStatus::Cancelled->value],
+            );
+            if ($swept > 0) {
+                $this->refreshCounts($runId);
+            }
+
+            return true;
+        });
     }
 
     public function isCancellationRequested(string $runId): bool

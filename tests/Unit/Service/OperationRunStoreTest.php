@@ -97,6 +97,8 @@ final class OperationRunStoreTest extends TestCase
         self::assertTrue($this->store->requestCancellation($run, $actor));
         self::assertSame(OperationRunStatus::Cancelled, $this->store->finish($run));
         self::assertSame([], $this->store->dueForDispatch(50), 'a cancelled pending run is no longer due for dispatch');
+        self::assertSame(OperationRunItemStatus::Cancelled->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ?', [$run]), 'the queued item is terminalized, not left non-terminal');
+        self::assertNotNull($this->store->retry($run, $actor), 'a cancelled pending run stays retryable because its item is terminal');
     }
 
     #[Test]
