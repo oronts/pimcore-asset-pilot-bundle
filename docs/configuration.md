@@ -66,6 +66,7 @@ oronts_asset_pilot:
         retention_batch_size: 500
         lease_seconds: 300
         stale_queued_warning_seconds: 86400
+        abandoned_run_failover_seconds: 86400
 
     audit:
         retention_days: 90
@@ -162,6 +163,7 @@ oronts_asset_pilot:
 | `operation_runs.retention_batch_size` | `int` | `500` | Maximum expired terminal runs pruned by one Pimcore maintenance pass; 1..1000 |
 | `operation_runs.lease_seconds` | `int` | `300` | Durable liveness lease (seconds) for an in-flight operation-run item; a worker renews it each heartbeat and maintenance fails an item whose lease expired. Keep it above the Symfony lock TTL and the longest single-asset save; min 1 |
 | `operation_runs.stale_queued_warning_seconds` | `int` | `86400` | A run left awaiting dispatch (unscheduled maintenance relay) or queued (lost broker message) longer than this is surfaced as a health warning; it is never auto-failed, an operator cancels/retries it. min 60 |
+| `operation_runs.abandoned_run_failover_seconds` | `int` | `86400` | Last-resort failover for a Running run whose in-flight item lease has expired (crashed worker, or a synchronous run whose process died) and that has stalled longer than this; a run still heartbeating a live lease, and a queued backlog, are never failed. Separate from the warning threshold. min 60 |
 | `audit.retention_days` | `int` | `90` | Days to retain audit entries |
 | `protection.exclude_folders` | `string[]` | `[]` | Folders excluded from organization (e.g., `["/Protected/"]`) |
 | `protection.lock_property` | `string` | `asset_pilot_locked` | Custom property name used to lock assets |

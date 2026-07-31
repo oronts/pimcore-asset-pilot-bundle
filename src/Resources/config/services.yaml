@@ -430,7 +430,7 @@ services:
             - { name: 'pimcore.maintenance.task', type: 'assetPilotOperationDelivery' }
     Oronts\AssetPilotBundle\Maintenance\OperationRunRetentionTask:
         arguments:
-            $staleRunSeconds: '%oronts_asset_pilot.operation_runs.stale_queued_warning_seconds%'
+            $staleRunSeconds: '%oronts_asset_pilot.operation_runs.abandoned_run_failover_seconds%'
         tags:
             - { name: 'pimcore.maintenance.task', type: 'assetPilotOperationRunRetention' }
     Oronts\AssetPilotBundle\Maintenance\OrganizeDispatchRelayTask:

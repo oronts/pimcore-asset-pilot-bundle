@@ -138,6 +138,7 @@ oronts_asset_pilot:
     operation_runs:
         lease_seconds: 300
         stale_queued_warning_seconds: 86400
+        abandoned_run_failover_seconds: 86400
 ```
 
 Keep `operation_runs.lease_seconds` above the longest single asset operation (same rule as
@@ -145,7 +146,10 @@ Keep `operation_runs.lease_seconds` above the longest single asset operation (sa
 item only when its claim-token-fenced lease expires. A run left awaiting dispatch (an unscheduled
 `pimcore:maintenance` relay) or queued (a lost broker message) longer than
 `stale_queued_warning_seconds` surfaces as an `operation_run_backlog` health warning and is never
-auto-failed; an operator cancels and retries it.
+auto-failed; an operator cancels and retries it. Separately, a Running run whose in-flight item lease
+has expired (a crashed worker, or a synchronous run whose process died) and that stalls past
+`abandoned_run_failover_seconds` is failed as a last resort; a run still heartbeating a live lease, and
+a queued backlog, are never failed.
 
 After migration, preview any stale unfinished entries and apply only the signed reviewed result:
 

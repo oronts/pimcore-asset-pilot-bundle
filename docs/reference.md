@@ -47,6 +47,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `operation_runs.retention_batch_size` | int | `500` | Maximum expired runs pruned in one maintenance pass (1..1000) |
 | `operation_runs.lease_seconds` | int | `300` | Durable liveness lease for an in-flight operation-run item; renewed each heartbeat, expired items are failed by maintenance (min 1) |
 | `operation_runs.stale_queued_warning_seconds` | int | `86400` | Awaiting-dispatch or queued run age that raises a health warning (unscheduled maintenance relay or lost broker message); never auto-failed (min 60) |
+| `operation_runs.abandoned_run_failover_seconds` | int | `86400` | Last-resort failover for a Running run whose in-flight item lease has expired (crashed worker, or a synchronous run whose process died) and that stalled longer than this; a run still heartbeating a live lease, and a queued backlog, are never failed. Separate from the warning threshold (min 60) |
 | `audit.retention_days` | int | `90` | Age at which `--cleanup` prunes rows |
 | `protection.exclude_folders` | list | `[]` | Folder trees never organized |
 | `protection.lock_property` | string | `asset_pilot_locked` | Property that locks an asset |

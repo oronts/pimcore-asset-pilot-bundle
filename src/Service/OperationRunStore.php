@@ -189,22 +189,35 @@ final class OperationRunStore implements OperationRunStoreInterface
 
     public function startItem(string $runId, string $itemKey, ?string $token = null): bool
     {
-        $now = $this->now();
+        return (bool) $this->connection->transactional(function () use ($runId, $itemKey, $token): bool {
+            // Claim under the run row lock so a claim and reconcileAbandonedRunningRuns' fail serialize on the
+            // same row: a reclaimed item can never be terminalized under a live worker, and once a run is failed
+            // no further item can be claimed. Missing run -> no lock, claim declined (not an error).
+            if (!$this->tryLockRun($runId)) {
+                return false;
+            }
+            $now = $this->now();
 
-        return $this->connection->executeStatement(
-            'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET status = ?, attempts = attempts + 1, claim_token = ?, lease_expires_at = ?, updated_at = ? WHERE run_id = ? AND item_key = ? AND status = ? AND EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ? AND status = ?)',
-            [OperationRunItemStatus::Running->value, $token, $this->leaseExpiry($token, $now), $now, $runId, $itemKey, OperationRunItemStatus::Queued->value, $runId, OperationRunStatus::Running->value],
-        ) === 1;
+            return $this->connection->executeStatement(
+                'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET status = ?, attempts = attempts + 1, claim_token = ?, lease_expires_at = ?, updated_at = ? WHERE run_id = ? AND item_key = ? AND status = ? AND EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ? AND status = ?)',
+                [OperationRunItemStatus::Running->value, $token, $this->leaseExpiry($token, $now), $now, $runId, $itemKey, OperationRunItemStatus::Queued->value, $runId, OperationRunStatus::Running->value],
+            ) === 1;
+        });
     }
 
     public function resumeItem(string $runId, string $itemKey, ?string $token = null): bool
     {
-        $now = $this->now();
+        return (bool) $this->connection->transactional(function () use ($runId, $itemKey, $token): bool {
+            if (!$this->tryLockRun($runId)) {
+                return false;
+            }
+            $now = $this->now();
 
-        return $this->connection->executeStatement(
-            'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET status = ?, attempts = attempts + 1, claim_token = ?, lease_expires_at = ?, updated_at = ? WHERE run_id = ? AND item_key = ? AND status IN (?, ?) AND EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ? AND status = ?)',
-            [OperationRunItemStatus::Running->value, $token, $this->leaseExpiry($token, $now), $now, $runId, $itemKey, OperationRunItemStatus::Queued->value, OperationRunItemStatus::Running->value, $runId, OperationRunStatus::Running->value],
-        ) === 1;
+            return $this->connection->executeStatement(
+                'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET status = ?, attempts = attempts + 1, claim_token = ?, lease_expires_at = ?, updated_at = ? WHERE run_id = ? AND item_key = ? AND status IN (?, ?) AND EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ? AND status = ?)',
+                [OperationRunItemStatus::Running->value, $token, $this->leaseExpiry($token, $now), $now, $runId, $itemKey, OperationRunItemStatus::Queued->value, OperationRunItemStatus::Running->value, $runId, OperationRunStatus::Running->value],
+            ) === 1;
+        });
     }
 
     /**
@@ -502,39 +515,93 @@ final class OperationRunStore implements OperationRunStoreInterface
             throw new \InvalidArgumentException('Abandoned-run reconciliation requires a positive stale interval.');
         }
 
-        $reference = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $this->now(), new \DateTimeZone('UTC'));
+        $now = $this->now();
+        $reference = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $now, new \DateTimeZone('UTC'));
         if ($reference === false) {
             throw new \RuntimeException('Unable to derive the abandoned-run cutoff.');
         }
         $cutoff = $reference->modify(sprintf('-%d seconds', $staleSeconds))->format('Y-m-d H:i:s');
 
-        // A Running run stale past the (long) backlog window that still holds a queued item has no live worker:
-        // its expired lease was already reaped by reconcileExpiredItemLeases, and a synchronous run (duplicate
-        // merge, sync bulk organize) has no message to redeliver. Fail it so it stops being an invisible,
-        // unprunable strand. Queued/pending_dispatch runs are excluded: that backlog is still the worker/relay's.
-        $candidates = $this->connection->createQueryBuilder()
+        $error = 'The operation run stopped progressing past the backlog threshold with no live worker and was reconciled as failed.';
+        $reconciled = 0;
+        foreach ($this->abandonedRunCandidates($batch, $cutoff, $now) as $runId) {
+            if ($this->failAbandonedRun((string) $runId, $cutoff, $now, $error)) {
+                ++$reconciled;
+            }
+        }
+
+        return $reconciled;
+    }
+
+    /**
+     * Runs that look abandoned: Running, stale past the failover cutoff, with a queued item and no in-flight
+     * item still holding a live lease. A live worker heartbeats its item's lease forward, so a run whose
+     * in-flight item's lease is still in the future is being actively drained one item at a time and is spared
+     * (run.updated_at alone is not proof of abandonment). Once every in-flight lease has expired (a crash, or a
+     * synchronous run whose process died with no message to redeliver) the run is a strand. This is only a
+     * batch pre-filter — {@see failAbandonedRun} re-validates the same predicate transactionally before it
+     * terminalizes, so a run that regains a worker between this scan and the fail is spared.
+     *
+     * @return list<mixed>
+     */
+    private function abandonedRunCandidates(int $batch, string $cutoff, string $now): array
+    {
+        return $this->connection->createQueryBuilder()
             ->select('r.id')
             ->from(Installer::TABLE_OPERATION_RUN, 'r')
             ->where('r.status = :running')
             ->andWhere('r.updated_at < :cutoff')
             ->andWhere('EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' i WHERE i.run_id = r.id AND i.status = :queued)')
+            ->andWhere('NOT EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' i2 WHERE i2.run_id = r.id AND i2.status = :runningItem AND i2.lease_expires_at >= :now)')
             ->setParameter('running', OperationRunStatus::Running->value)
             ->setParameter('cutoff', $cutoff)
             ->setParameter('queued', OperationRunItemStatus::Queued->value)
+            ->setParameter('runningItem', OperationRunItemStatus::Running->value)
+            ->setParameter('now', $now)
             ->orderBy('r.updated_at', 'ASC')
             ->addOrderBy('r.id', 'ASC')
             ->setMaxResults($batch)
             ->executeQuery()
             ->fetchFirstColumn();
+    }
 
-        $error = 'The operation run stopped progressing past the backlog threshold with no live worker and was reconciled as failed.';
-        $reconciled = 0;
-        foreach ($candidates as $runId) {
-            $this->fail((string) $runId, $error);
-            ++$reconciled;
-        }
+    /**
+     * Fail one abandoned run under its row lock, re-validating the abandonment predicate (Running, stale past
+     * $cutoff, a queued item, and no in-flight item whose lease is live at $now) inside the transaction: a run
+     * that regained a live worker (a reclaimed item under a fresh lease) between the batch scan and here fails
+     * the re-check and is spared. Returns whether the run was terminalized. Public as the atomic fail primitive
+     * behind {@see reconcileAbandonedRunningRuns}.
+     */
+    public function failAbandonedRun(string $runId, string $cutoff, string $now, string $error): bool
+    {
+        return (bool) $this->connection->transactional(function () use ($runId, $cutoff, $now, $error): bool {
+            $this->lockRun($runId);
 
-        return $reconciled;
+            $stillAbandoned = (int) $this->connection->fetchOne(
+                'SELECT COUNT(*) FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ? AND status = ? AND updated_at < ?'
+                . ' AND EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ? AND status = ?)'
+                . ' AND NOT EXISTS (SELECT 1 FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ? AND status = ? AND lease_expires_at >= ?)',
+                [$runId, OperationRunStatus::Running->value, $cutoff, $runId, OperationRunItemStatus::Queued->value, $runId, OperationRunItemStatus::Running->value, $now],
+            );
+            if ($stillAbandoned !== 1) {
+                return false;
+            }
+
+            $stamp = $this->now();
+            $this->connection->executeStatement(
+                'UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET status = ?, error_message = COALESCE(error_message, ?), updated_at = ?, completed_at = ? WHERE run_id = ? AND status IN (?, ?)',
+                [OperationRunItemStatus::Failed->value, $error, $stamp, $stamp, $runId, OperationRunItemStatus::Queued->value, OperationRunItemStatus::Running->value],
+            );
+            $this->refreshCounts($runId);
+            $this->connection->update(Installer::TABLE_OPERATION_RUN, [
+                'status' => OperationRunStatus::Failed->value,
+                'error_message' => $error,
+                'updated_at' => $stamp,
+                'completed_at' => $stamp,
+            ], ['id' => $runId]);
+
+            return true;
+        });
     }
 
     /** @param array<string, true> $affectedRuns */

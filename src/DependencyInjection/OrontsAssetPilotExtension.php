@@ -104,6 +104,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         $container->setParameter('oronts_asset_pilot.operation_runs.retention_batch_size', $config['operation_runs']['retention_batch_size']);
         $container->setParameter('oronts_asset_pilot.operation_runs.lease_seconds', $config['operation_runs']['lease_seconds']);
         $container->setParameter('oronts_asset_pilot.operation_runs.stale_queued_warning_seconds', $config['operation_runs']['stale_queued_warning_seconds']);
+        $container->setParameter('oronts_asset_pilot.operation_runs.abandoned_run_failover_seconds', $config['operation_runs']['abandoned_run_failover_seconds']);
 
         // Audit parameters
         $container->setParameter('oronts_asset_pilot.audit.retention_days', $config['audit']['retention_days']);

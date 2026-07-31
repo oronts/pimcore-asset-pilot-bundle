@@ -437,6 +437,11 @@ class Configuration implements ConfigurationInterface
                             ->min(60)
                             ->info('A run left awaiting dispatch (an unscheduled pimcore:maintenance relay) or queued (a lost broker message) longer than this is surfaced as a health warning. It is never auto-failed, since that would kill a legitimate backlog; an operator checks the scheduler/consumer and cancels/retries it.')
                         ->end()
+                        ->integerNode('abandoned_run_failover_seconds')
+                            ->defaultValue(86400)
+                            ->min(60)
+                            ->info('Last-resort failover for a Running run whose in-flight item lease has expired (a crashed worker, or a synchronous run whose process died with no message to redeliver) and that has stalled longer than this. Only a run with no live-leased worker is failed; a run whose item is still heartbeating, and a queued backlog, are never failed. Kept separate from stale_queued_warning_seconds so lowering the warning threshold cannot change failover timing.')
+                        ->end()
                     ->end()
                 ->end()
             ->end();

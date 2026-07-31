@@ -222,6 +222,93 @@ final class OperationRunStoreTest extends TestCase
     }
 
     #[Test]
+    public function reconcileAbandonedRunningRunsSparesARunWhoseInFlightItemStillHoldsALiveLease(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+
+        // A bulk run drains objects one at a time: object:10 is Running under a live, heartbeating lease while
+        // object:11 is still Queued. run.updated_at is frozen at the previous item's completion so it looks
+        // stale, but a live worker still owns the in-flight item and the run must not be failed under it.
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+            ['key' => 'object:11', 'type' => 'data_object', 'id' => 11],
+        ]);
+        self::assertTrue($store->start($runId));
+        self::assertTrue($store->startItem($runId, 'object:10', 'live-worker'));
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET updated_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $runId]);
+
+        self::assertSame(0, $store->reconcileAbandonedRunningRuns(100, 3600), 'a run with a live-leased in-flight item is not abandoned');
+
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$runId]));
+        self::assertSame(OperationRunItemStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ? AND item_key = ?', [$runId, 'object:10']), 'the live in-flight item is untouched');
+        self::assertSame(OperationRunItemStatus::Queued->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ? AND item_key = ?', [$runId, 'object:11']), 'the queued sibling is untouched');
+    }
+
+    #[Test]
+    public function reconcileAbandonedRunningRunsFailsARunWhoseInFlightLeaseHasExpired(): void
+    {
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+
+        // The worker died: object:10's lease expired with no heartbeat and object:11 never drained. Its
+        // in-flight item is provably dead, so the run is genuinely abandoned and must be reconciled.
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+            ['key' => 'object:11', 'type' => 'data_object', 'id' => 11],
+        ]);
+        self::assertTrue($store->start($runId));
+        self::assertTrue($store->startItem($runId, 'object:10', 'dead-worker'));
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET lease_expires_at = ? WHERE run_id = ? AND item_key = ?', ['2000-01-01 00:00:00', $runId, 'object:10']);
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET updated_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $runId]);
+
+        self::assertSame(1, $store->reconcileAbandonedRunningRuns(100, 3600), 'a run whose in-flight lease has expired with a queued sibling is abandoned');
+        self::assertSame(OperationRunStatus::Failed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$runId]));
+    }
+
+    #[Test]
+    public function failAbandonedRunRevalidatesTheLeaseSoAReclaimedRunIsSparedButAnExpiredOneIsFailed(): void
+    {
+        // The batch scan lists a run, then a worker reclaims its item under a fresh lease before the fail (the
+        // interleaving race). failAbandonedRun re-validates the abandonment predicate transactionally: a live
+        // in-flight lease spares the run; only once it has expired is the run terminalized.
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+            ['key' => 'object:11', 'type' => 'data_object', 'id' => 11],
+        ]);
+        self::assertTrue($store->start($runId));
+        self::assertTrue($store->startItem($runId, 'object:10', 'live-worker'));
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN . ' SET updated_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $runId]);
+
+        self::assertFalse($store->failAbandonedRun($runId, '2025-01-01 00:00:00', '2020-01-01 00:00:00', 'err'), 'a live in-flight lease spares the run');
+        self::assertSame(OperationRunStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$runId]));
+        self::assertSame(OperationRunItemStatus::Running->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN_ITEM . ' WHERE run_id = ? AND item_key = ?', [$runId, 'object:10']));
+
+        $this->connection->executeStatement('UPDATE ' . Installer::TABLE_OPERATION_RUN_ITEM . ' SET lease_expires_at = ? WHERE run_id = ? AND item_key = ?', ['2000-01-01 00:00:00', $runId, 'object:10']);
+
+        self::assertTrue($store->failAbandonedRun($runId, '2025-01-01 00:00:00', '2020-01-01 00:00:00', 'err'), 'an expired in-flight lease is genuinely abandoned and fails');
+        self::assertSame(OperationRunStatus::Failed->value, $this->connection->fetchOne('SELECT status FROM ' . Installer::TABLE_OPERATION_RUN . ' WHERE id = ?', [$runId]));
+    }
+
+    #[Test]
+    public function startAndResumeItemTakeTheRunLockSoAFailedRunRejectsLateClaims(): void
+    {
+        // startItem/resumeItem claim under the run row lock, so once reconciliation fails a run no late worker
+        // can claim or reclaim its items (the post-fail half of the claim/reconcile serialization). A missing
+        // run declines the claim without erroring, exercising the tryLockRun-false path.
+        $store = new OperationRunStore($this->connection, leaseSeconds: 300);
+        $runId = $store->create(OperationRunKind::Organize, ActorContext::user(7), [
+            ['key' => 'object:10', 'type' => 'data_object', 'id' => 10],
+            ['key' => 'object:11', 'type' => 'data_object', 'id' => 11],
+        ]);
+        self::assertTrue($store->start($runId));
+        $store->fail($runId, 'reconciled');
+
+        self::assertFalse($store->startItem($runId, 'object:10', 'late-worker'), 'a failed run rejects a new claim');
+        self::assertFalse($store->resumeItem($runId, 'object:11', 'late-worker'), 'a failed run rejects a reclaim');
+        self::assertFalse($store->startItem('missing-run', 'object:10', 'late-worker'), 'a missing run declines the claim without erroring');
+    }
+
+    #[Test]
     public function aReclaimedItemLeaseFencesThePreviousWorkersRenewalAndCompletion(): void
     {
         $store = new OperationRunStore($this->connection, leaseSeconds: 300);
