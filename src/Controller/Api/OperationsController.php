@@ -205,6 +205,12 @@ class OperationsController
         $allEvaluations = [];
         foreach ($fieldInfos as $fieldInfo) {
             foreach ($fieldInfo->assets as $asset) {
+                // The object's own view was checked in resolveObjectFromBody, but a referenced asset can live in
+                // an asset workspace the caller cannot see: never disclose its path or rule detail (mirrors the
+                // per-asset view filter in AssetOrganizer::bestMatches and AssetZipService::buildFromObjects).
+                if (!$this->authorization->isAllowed($asset, 'view')) {
+                    continue;
+                }
                 $result = $this->ruleEngine->explain($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
 
                 foreach ($result['evaluations'] as $eval) {
