@@ -24,7 +24,9 @@ class PathTemplateExtension extends AbstractExtension
                     return 'unknown';
                 }
                 $str = (string) $value;
-                return preg_replace('/[^a-zA-Z0-9_\-.]/', '-', $str) ?: 'unknown';
+                $sanitized = preg_replace('/[^a-zA-Z0-9_\-.]/', '-', $str);
+
+                return $sanitized === null || $sanitized === '' ? 'unknown' : $sanitized;
             }),
 
             // |pluck('property') — extract a property/method from each item in an array
@@ -78,7 +80,9 @@ class PathTemplateExtension extends AbstractExtension
                 $str = (string) $value;
                 $str = mb_strtolower($str);
                 $str = preg_replace('/[^a-z0-9]+/', '-', $str) ?? $str;
-                return trim($str, '-') ?: 'unknown';
+                $slug = trim($str, '-');
+
+                return $slug === '' ? 'unknown' : $slug;
             }),
 
             // |fallback('default') — like |default but also catches empty strings

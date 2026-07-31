@@ -21,7 +21,9 @@ class PathTemplateExtensionTest extends TestCase
     public static function templates(): iterable
     {
         yield 'safe_key sanitizes' => ["{{ 'a/b c.x'|safe_key }}", 'a-b-c.x'];
+        yield 'safe_key preserves the literal zero' => ["{{ '0'|safe_key }}", '0'];
         yield 'slug lowercases and dashes' => ["{{ 'Hello World!'|slug }}", 'hello-world'];
+        yield 'slug preserves the literal zero' => ["{{ '0'|slug }}", '0'];
         yield 'fallback catches empty string' => ["{{ ''|fallback('def') }}", 'def'];
         yield 'trim_path strips slashes' => ["{{ '/a/b/'|trim_path }}", 'a/b'];
         yield 'coalesce picks first non-empty' => ["{{ coalesce('', null, 'x') }}", 'x'];
