@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
+use Oronts\AssetPilotBundle\Command\Support\ValidatesApplyPlanControl;
 use Oronts\AssetPilotBundle\Exception\OperationRecoveryPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\OperationRecoveryResult;
@@ -22,6 +23,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class RecoverOperationsCommand extends Command
 {
+    use ValidatesApplyPlanControl;
+
     public function __construct(private readonly OperationRecoveryCoordinatorInterface $recovery)
     {
         parent::__construct();
@@ -47,14 +50,7 @@ final class RecoverOperationsCommand extends Command
         $apply = (bool) $input->getOption('apply');
         $token = $input->getOption('plan-token');
 
-        if ($apply && !is_string($token)) {
-            $io->error('Applying requires --plan-token from a matching preview.');
-
-            return Command::INVALID;
-        }
-        if (!$apply && $token !== null) {
-            $io->error('--plan-token is only valid together with --apply.');
-
+        if (!$this->hasValidPlanControl($io, $apply, $token)) {
             return Command::INVALID;
         }
 
