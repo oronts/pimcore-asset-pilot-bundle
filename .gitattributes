@@ -1,0 +1,12 @@
+# Development-only paths kept out of the distributed source archive (git archive / the GitHub tag
+# ZIP that Packagist installs), mirroring composer.json archive.exclude so the tagged artifact matches
+# the verified custom release archive and passes tools/verify-release-archive.php (which forbids
+# .github, tests, and e2e paths). Runtime source, Composer metadata, public docs/notices, and the
+# active Studio build generation are retained.
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.nojekyll export-ignore
+/.php-cs-fixer.dist.php export-ignore
+/tests export-ignore
+/assets/studio/e2e export-ignore

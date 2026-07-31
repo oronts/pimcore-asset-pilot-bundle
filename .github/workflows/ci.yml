@@ -138,3 +138,11 @@ jobs:
 
       - name: Verify release archive
         run: php tools/verify-release-archive.php /tmp/asset-pilot-bundle.zip
+
+      # The Git tag archive is what Packagist/GitHub distribute for a VCS package. Verify it obeys the
+      # same release layout as the custom Composer archive (clean of .github/tests/e2e via .gitattributes
+      # export-ignore, one active Studio generation, prebuilt remote present) so both artifacts agree.
+      - name: Verify Git tag archive
+        run: |
+          git archive --format=zip HEAD -o /tmp/asset-pilot-tag.zip
+          php tools/verify-release-archive.php /tmp/asset-pilot-tag.zip
