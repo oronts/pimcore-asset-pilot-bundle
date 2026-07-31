@@ -159,7 +159,7 @@ class IntegrityController
             return $rejection;
         }
 
-        $results = $this->healer->healPlannedBatch($assetIds, $this->planFingerprints($plan));
+        $results = $this->healer->healPlannedBatch($assetIds, $plan->fingerprintMap());
 
         return new JsonResponse([
             'dryRun' => false,
@@ -179,17 +179,6 @@ class IntegrityController
             : new JsonResponse([
                 'error' => 'The apply plan is stale or was already used. Preview again.',
             ], JsonResponse::HTTP_CONFLICT);
-    }
-
-    /** @return array<string, string> */
-    private function planFingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
     }
 
     /**

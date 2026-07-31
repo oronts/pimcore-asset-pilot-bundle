@@ -37,4 +37,20 @@ readonly class ApplyPlan
             $targetIds[$target->id] = true;
         }
     }
+
+    /**
+     * The target-id => fingerprint map submitted as the expected-hash set that gates the apply-time
+     * optimistic lock (hash_equals) in every reviewed mutation path.
+     *
+     * @return array<string, string>
+     */
+    public function fingerprintMap(): array
+    {
+        $fingerprints = [];
+        foreach ($this->targets as $target) {
+            $fingerprints[$target->id] = $target->fingerprint;
+        }
+
+        return $fingerprints;
+    }
 }

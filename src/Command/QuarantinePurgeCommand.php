@@ -93,7 +93,7 @@ class QuarantinePurgeCommand extends Command
             $result = $this->quarantineService->purgePlanned(
                 $preview['graceDays'],
                 $preview['assetIds'],
-                $this->fingerprints($plan),
+                $plan->fingerprintMap(),
             );
         } catch (StaleApplyPlanException $e) {
             $io->error($e->getMessage());
@@ -121,17 +121,6 @@ class QuarantinePurgeCommand extends Command
             $preview['config'],
             $targets,
         );
-    }
-
-    /** @return array<string, string> */
-    private function fingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
     }
 
     /** @param array{purged: int, skipped: int, failed: int} $result */

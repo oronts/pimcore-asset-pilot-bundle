@@ -313,7 +313,7 @@ class UnusedAssetsController
         }
 
         $this->mutationFingerprints->reset();
-        $result = $apply($this->planFingerprints($plan));
+        $result = $apply($plan->fingerprintMap());
 
         return new JsonResponse($this->withPlanControl($result, false, null, count($assetIds)));
     }
@@ -327,17 +327,6 @@ class UnusedAssetsController
         return $status === ApplyPlanStatus::Claimed
             ? null
             : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], Response::HTTP_CONFLICT);
-    }
-
-    /** @return array<string, string> */
-    private function planFingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
     }
 
     /** @param list<int> $assetIds @param array<string, mixed> $requestData */

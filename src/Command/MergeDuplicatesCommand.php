@@ -103,7 +103,7 @@ class MergeDuplicatesCommand extends Command
         }
 
         $outcome = $apply
-            ? $this->merge->merge($group, $this->fingerprints($plan), $canonicalId, $resolvedStrategy)
+            ? $this->merge->merge($group, $plan->fingerprintMap(), $canonicalId, $resolvedStrategy)
             : $this->merge->preview($group, $canonicalId, $resolvedStrategy);
 
         $this->renderOutcome($io, $outcome);
@@ -181,17 +181,6 @@ class MergeDuplicatesCommand extends Command
             ],
             $targets,
         );
-    }
-
-    /** @return array<string, string> */
-    private function fingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
     }
 
     private function renderOutcome(SymfonyStyle $io, \Oronts\AssetPilotBundle\Merge\MergeOutcome $outcome): void

@@ -94,7 +94,7 @@ class SweepEmptyFoldersCommand extends Command
             return Command::INVALID;
         }
         try {
-            $result = $this->sweep->deleteEmpty($folderIds, $this->fingerprints($plan));
+            $result = $this->sweep->deleteEmpty($folderIds, $plan->fingerprintMap());
         } catch (StaleApplyPlanException $e) {
             $io->error($e->getMessage());
 
@@ -132,14 +132,4 @@ class SweepEmptyFoldersCommand extends Command
         );
     }
 
-    /** @return array<string, string> */
-    private function fingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
-    }
 }

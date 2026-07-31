@@ -269,7 +269,7 @@ class DuplicatesController
             return $rejection;
         }
 
-        return ['planToken' => null, 'fingerprints' => $this->planFingerprints($plan)];
+        return ['planToken' => null, 'fingerprints' => $plan->fingerprintMap()];
     }
 
     private function mergeClaimRejection(ApplyPlanStatus $status): ?JsonResponse
@@ -281,17 +281,6 @@ class DuplicatesController
         return $status === ApplyPlanStatus::Claimed
             ? null
             : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], JsonResponse::HTTP_CONFLICT);
-    }
-
-    /** @return array<string, string> */
-    private function planFingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
     }
 
     private function mergeResponse(MergeOutcome $outcome, bool $dryRun, ?string $planToken, ?string $statusRunId): JsonResponse

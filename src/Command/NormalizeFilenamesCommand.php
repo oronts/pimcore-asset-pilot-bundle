@@ -88,7 +88,7 @@ class NormalizeFilenamesCommand extends Command
         return $this->render($io, $this->normalizer->normalize(
             $selection['assetIds'],
             dryRun: false,
-            expectedFingerprints: $this->targetFingerprints($plan),
+            expectedFingerprints: $plan->fingerprintMap(),
         ), false);
     }
 
@@ -172,15 +172,5 @@ class NormalizeFilenamesCommand extends Command
         );
     }
 
-    /** @return array<string, string> */
-    private function targetFingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
-    }
 
 }

@@ -582,7 +582,7 @@ class AssetManagementController
         }
 
         return new JsonResponse($this->withPlanControl(
-            $apply($this->metadataFingerprints($currentPlan)),
+            $apply($currentPlan->fingerprintMap()),
             false,
             null,
             $requested,
@@ -610,16 +610,6 @@ class AssetManagementController
             : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], Response::HTTP_CONFLICT);
     }
 
-    /** @return array<string, string> */
-    private function metadataFingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
-    }
 
     private function metadataMutationFailure(\Throwable $exception): JsonResponse
     {

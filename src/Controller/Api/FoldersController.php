@@ -8,7 +8,6 @@ use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
 use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
-use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\EmptyFolderSweepServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
@@ -124,7 +123,7 @@ class FoldersController
         }
 
         return new JsonResponse([
-            ...$this->sweep->deleteEmpty($folderIds, $this->fingerprints($plan)),
+            ...$this->sweep->deleteEmpty($folderIds, $plan->fingerprintMap()),
             'dryRun' => false,
             'planToken' => null,
         ]);
@@ -141,14 +140,4 @@ class FoldersController
             : new JsonResponse(['error' => 'The apply plan is stale or was already used. Preview again.'], JsonResponse::HTTP_CONFLICT);
     }
 
-    /** @return array<string, string> */
-    private function fingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
-    }
 }

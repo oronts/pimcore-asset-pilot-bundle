@@ -171,7 +171,7 @@ class HealAssetsCommand extends Command
                 return Command::INVALID;
             }
             try {
-                $results = $this->healer->healPlannedBatch($assetIds, $this->planFingerprints($review['plan']));
+                $results = $this->healer->healPlannedBatch($assetIds, $review['plan']->fingerprintMap());
             } catch (StaleApplyPlanException $e) {
                 $io->error($e->getMessage());
 
@@ -430,17 +430,6 @@ class HealAssetsCommand extends Command
             : ['assetIds' => $byIds, 'mode' => 'asset_ids'];
 
         return ['assetIds' => $assetIds, 'mode' => $undo ? 'undo' : 'heal', 'selector' => $selector];
-    }
-
-    /** @return array<string, string> */
-    private function planFingerprints(ApplyPlan $plan): array
-    {
-        $fingerprints = [];
-        foreach ($plan->targets as $target) {
-            $fingerprints[$target->id] = $target->fingerprint;
-        }
-
-        return $fingerprints;
     }
 
 }
