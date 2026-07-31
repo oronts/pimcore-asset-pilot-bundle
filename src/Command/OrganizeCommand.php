@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
+use Oronts\AssetPilotBundle\Command\Support\RendersRuleExplain;
 use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
 use Oronts\AssetPilotBundle\Command\Support\ValidatesApplyPlanControl;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
@@ -32,6 +33,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class OrganizeCommand extends Command
 {
     use ValidatesApplyPlanControl;
+    use RendersRuleExplain;
     public function __construct(
         protected readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
         protected readonly ReviewedSelectionConsolePresenter $presenter,
@@ -208,31 +210,7 @@ class OrganizeCommand extends Command
             $io->section(sprintf('Field: %s (locale: %s)', $fieldInfo->fieldName, $localeLabel));
 
             foreach ($fieldInfo->assets as $asset) {
-                $io->text(sprintf('  Asset #%d: %s', $asset->getId(), $asset->getRealFullPath()));
-                $io->newLine();
-
-                $result = $this->ruleEngine->explain($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
-                $evaluations = $result['evaluations'];
-                $matches = $result['matches'];
-
-                $rows = [];
-                foreach ($evaluations as $eval) {
-                    $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-                    $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
-                }
-
-                $io->table(['Rule', 'Result', 'Detail'], $rows);
-
-                if (!empty($matches)) {
-                    $match = $matches[0];
-                    $targetFilename = $this->namingStrategy->generateName($match->asset, $match->resolvedPath);
-                    $fullPath = rtrim($match->resolvedPath, '/') . '/' . $targetFilename;
-                    $io->text(sprintf('  Decision: Rule "%s" matched -> %s', $match->rule->name, $fullPath));
-                } else {
-                    $io->text('  Decision: No rules matched this asset.');
-                }
-
-                $io->newLine();
+                $this->renderRuleExplain($io, $object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
             }
         }
 
