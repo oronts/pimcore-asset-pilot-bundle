@@ -2,6 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AuditFilters as Filters } from '../../types'
 import { theme } from 'antd'
+import { OPERATION_STAT_KEYS } from '../../../../i18n/backend-contract'
 
 interface AuditFiltersProps {
   filters: Filters
@@ -9,7 +10,7 @@ interface AuditFiltersProps {
   onExport: () => void
 }
 
-const statusOptions = ['completed', 'completed_with_observer_error', 'failed', 'skipped', 'pending', 'in_progress', 'recovery_required']
+const statusOptions = OPERATION_STAT_KEYS
 
 export const AuditFiltersBar: React.FC<AuditFiltersProps> = ({ filters, onChange, onExport }) => {
   const { t } = useTranslation()

@@ -255,14 +255,16 @@ export interface AuditFilters {
 export interface BulkPreviewObject {
   id: number
   key: string
-  className: string
+  className: string | null
 }
 
 export interface BulkPreviewResponse {
   objects: BulkPreviewObject[]
-  total: number
+  total: number | null
   page: number
-  pages: number
+  pages: number | null
+  hasMore: boolean
+  truncated: boolean
 }
 
 // Unused Assets

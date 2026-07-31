@@ -8,7 +8,7 @@ import { useToast } from '../../hooks/use-toast'
 import { usePermissions } from '../../hooks/use-permissions'
 import { useReviewedOperation, requireOperations } from '../../hooks/use-reviewed-operation'
 import { ConfirmDialog } from '../shared/confirm-dialog'
-import { pageNumbers } from '../../utils/format'
+import { Pagination } from '../shared/pagination'
 import { OperationRunPanel } from './operation-run-panel'
 
 interface ReviewedBulkPlan {
@@ -75,7 +75,7 @@ export const BulkOrganizeForm: React.FC = () => {
   }
 
   const handlePlanPreview = async (): Promise<void> => {
-    if (previewData == null || previewClass == null || previewData.total > 1000) return
+    if (previewData == null || previewClass == null) return
     const reviewedBatchSize = Math.max(1, parseInt(batchSize, 10) || 50)
     setError(null)
     await op.review(
@@ -157,83 +157,44 @@ export const BulkOrganizeForm: React.FC = () => {
       {previewData != null && (
         <div style={{ marginBottom: 12 }}>
           <p style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', marginBottom: 8 }}>
-            {t('asset-pilot.operations.preview-count', { count: previewData.total })}
+            {t('asset-pilot.common.showing-page', { count: previewData.objects.length })}
           </p>
 
           {previewData.objects.length > 0 && (
-            <>
-              <div style={{ overflowX: 'auto', maxHeight: 400, overflowY: 'auto', marginBottom: 12 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--ap-font-size)' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
-                      <th style={thStyle}>{t('asset-pilot.columns.id')}</th>
-                      <th style={thStyle}>{t('asset-pilot.columns.object-name')}</th>
-                      <th style={thStyle}>{t('asset-pilot.columns.class')}</th>
+            <div style={{ overflowX: 'auto', maxHeight: 400, overflowY: 'auto', marginBottom: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--ap-font-size)' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
+                    <th style={thStyle}>{t('asset-pilot.columns.id')}</th>
+                    <th style={thStyle}>{t('asset-pilot.columns.object-name')}</th>
+                    <th style={thStyle}>{t('asset-pilot.columns.class')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewData.objects.map(obj => (
+                    <tr key={obj.id} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
+                      <td style={tdStyle}><OpenButton id={obj.id} type="data-object" /></td>
+                      <td style={{ ...tdStyle, fontWeight: 500 }}>{obj.key}</td>
+                      <td style={tdStyle}>{obj.className}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {previewData.objects.map(obj => (
-                      <tr key={obj.id} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
-                        <td style={tdStyle}><OpenButton id={obj.id} type="data-object" /></td>
-                        <td style={{ ...tdStyle, fontWeight: 500 }}>{obj.key}</td>
-                        <td style={tdStyle}>{obj.className}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {previewData.pages > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12 }}>
-                  <button
-                    onClick={() => { void fetchPreview(previewPage - 1) }}
-                    disabled={previewPage <= 1 || previewLoading}
-                    style={pageBtnStyle}
-                  >
-                    {t('asset-pilot.common.prev')}
-                  </button>
-                  {pageNumbers(previewPage, previewData.pages).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => { void fetchPreview(p) }}
-                      disabled={previewLoading}
-                      aria-current={p === previewPage ? 'page' : undefined}
-                      aria-label={t('asset-pilot.common.page-number', { page: p })}
-                      style={{
-                        ...pageBtnStyle,
-                        background: p === previewPage ? 'var(--ap-color-primary)' : 'var(--ap-color-bg-container)',
-                        color: p === previewPage ? 'var(--ap-color-bg-container)' : 'var(--ap-color-text-secondary)',
-                        fontWeight: p === previewPage ? 600 : 400,
-                      }}
-                    >
-                      {p}
-                    </button>
                   ))}
-                  <button
-                    onClick={() => { void fetchPreview(previewPage + 1) }}
-                    disabled={previewPage >= previewData.pages || previewLoading}
-                    style={pageBtnStyle}
-                  >
-                    {t('asset-pilot.common.next')}
-                  </button>
-                  <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', marginLeft: 8 }}>
-                    {t('asset-pilot.common.page-info', { page: previewPage, pages: previewData.pages })}
-                  </span>
-                </div>
-              )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-              {previewData.total > 1000 && (
-                <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 'var(--ap-font-size)' }}>
-                  {t('asset-pilot.operations.bulk-limit', { count: previewData.total, max: 1000 })}
-                </p>
-              )}
+          <Pagination
+            page={previewPage}
+            pages={previewData.pages}
+            hasMore={previewData.hasMore}
+            truncated={previewData.truncated}
+            onPage={p => { void fetchPreview(p) }}
+          />
 
-              {operate && op.reviewedPlan == null && (
-                <button onClick={() => { void handlePlanPreview() }} disabled={op.running || previewData.total > 1000 || previewClass == null} style={previewBtnStyle}>
-                  {op.running ? t('asset-pilot.operations.previewing') : t('asset-pilot.operations.review-organization')}
-                </button>
-              )}
-            </>
+          {operate && op.reviewedPlan == null && (
+            <button onClick={() => { void handlePlanPreview() }} disabled={op.running || previewClass == null} style={{ ...previewBtnStyle, marginTop: 12 }}>
+              {op.running ? t('asset-pilot.operations.previewing') : t('asset-pilot.operations.review-organization')}
+            </button>
           )}
         </div>
       )}
@@ -301,10 +262,6 @@ const previewBtnStyle: React.CSSProperties = {
 const warnBtnStyle: React.CSSProperties = {
   padding: '6px 16px', border: '1px solid var(--ap-color-warning-border-hover)', borderRadius: 6, background: 'var(--ap-color-warning-bg)', color: 'var(--ap-color-warning-text)',
   cursor: 'pointer', fontSize: 13, fontWeight: 500,
-}
-const pageBtnStyle: React.CSSProperties = {
-  padding: '4px 10px', border: '1px solid var(--ap-color-border)', borderRadius: 4, background: 'var(--ap-color-bg-container)', color: 'var(--ap-color-text-secondary)',
-  cursor: 'pointer', fontSize: 'var(--ap-font-size)',
 }
 const thStyle: React.CSSProperties = { textAlign: 'left', padding: '6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500 }
 const tdStyle: React.CSSProperties = { padding: '6px' }

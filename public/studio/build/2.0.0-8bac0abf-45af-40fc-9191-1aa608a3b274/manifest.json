@@ -1,0 +1,44 @@
+{
+  "allFiles": [
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/main.3eb32688.js",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/remoteEntry.js",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/async/__federation_expose_default_export.1fded9e2.js",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/async/701.0d49eb74.js",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/710.de53b0d2.js",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/mf-stats.json",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/mf-manifest.json",
+    "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/main.html"
+  ],
+  "entries": {
+    "main": {
+      "html": [
+        "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/main.html"
+      ],
+      "initial": {
+        "js": [
+          "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/710.de53b0d2.js",
+          "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/main.3eb32688.js"
+        ]
+      },
+      "async": {
+        "js": [
+          "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/async/701.0d49eb74.js"
+        ]
+      }
+    },
+    "oronts_asset_pilot_bundle": {
+      "initial": {
+        "js": [
+          "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/remoteEntry.js"
+        ]
+      },
+      "async": {
+        "js": [
+          "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/async/701.0d49eb74.js",
+          "/bundles/orontsassetpilot/studio/build/2.0.0-8bac0abf-45af-40fc-9191-1aa608a3b274/static/js/async/__federation_expose_default_export.1fded9e2.js"
+        ]
+      }
+    }
+  },
+  "integrity": {}
+}

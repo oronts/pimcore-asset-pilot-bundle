@@ -537,6 +537,7 @@ services:
     Oronts\AssetPilotBundle\Controller\Api\OperationsController:
         arguments:
             $planConfiguration: '%oronts_asset_pilot.config%'
+            $objectScanBudget: '%oronts_asset_pilot.listing.scan_budget%'
 
     Oronts\AssetPilotBundle\Service\AssetSearchService:
         arguments:

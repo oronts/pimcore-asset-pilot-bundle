@@ -127,21 +127,81 @@ class OperationsControllerResolveTest extends TestCase
     }
 
     #[Test]
-    public function bulkPreviewPaginatesAndCountsOnlyVisibleObjects(): void
+    public function bulkPreviewPaginatesOnlyVisibleObjectsWithoutAnExactTotal(): void
     {
-        $objects = [];
-        foreach ([1, 2, 3] as $id) {
-            $object = $this->createMock(AbstractObject::class);
-            $object->method('getId')->willReturn($id);
-            $object->method('getKey')->willReturn('object-' . $id);
-            $objects[] = $object;
-        }
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('isAllowed')->willReturnCallback(
             static fn (AbstractObject $object): bool => $object->getId() !== 2,
         );
-        $controller = new class (
-            $organizer = $this->createMock(AssetOrganizer::class),
+        $controller = $this->objectPreviewController($authorization, $this->objectMocks([1, 2, 3]), [1, 2, 3]);
+
+        $payload = json_decode((string) $controller->bulkPreview($this->post('{"className":"Product","page":1,"limit":1}'))->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertNull($payload['total']);
+        self::assertNull($payload['pages']);
+        self::assertTrue($payload['hasMore']);
+        self::assertFalse($payload['truncated']);
+        self::assertSame([1], array_column($payload['objects'], 'id'));
+    }
+
+    #[Test]
+    public function bulkPreviewStopsAtTheCandidateBudgetAndReportsTruncated(): void
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+        $ids = range(1, 100);
+        $controller = $this->objectPreviewController($authorization, $this->objectMocks($ids), $ids, 10);
+
+        $payload = json_decode((string) $controller->bulkPreview($this->post('{"className":"Product","page":1,"limit":5}'))->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame([], $payload['objects']);
+        self::assertFalse($payload['hasMore']);
+        self::assertTrue($payload['truncated']);
+    }
+
+    #[Test]
+    public function bulkPreviewHasMoreReflectsAnAuthorizedSurplusPastThePage(): void
+    {
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
+
+        $exact = $this->objectPreviewController($authorization, $this->objectMocks([1, 2]), [1, 2]);
+        $payload = json_decode((string) $exact->bulkPreview($this->post('{"className":"Product","page":1,"limit":2}'))->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([1, 2], array_column($payload['objects'], 'id'));
+        self::assertFalse($payload['hasMore']);
+
+        $surplus = $this->objectPreviewController($authorization, $this->objectMocks([1, 2, 3]), [1, 2, 3]);
+        $payload = json_decode((string) $surplus->bulkPreview($this->post('{"className":"Product","page":1,"limit":2}'))->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([1, 2], array_column($payload['objects'], 'id'));
+        self::assertTrue($payload['hasMore']);
+    }
+
+    /**
+     * @param list<int> $ids
+     *
+     * @return array<int, AbstractObject>
+     */
+    private function objectMocks(array $ids): array
+    {
+        $map = [];
+        foreach ($ids as $id) {
+            $object = $this->createMock(AbstractObject::class);
+            $object->method('getId')->willReturn($id);
+            $object->method('getKey')->willReturn('object-' . $id);
+            $map[$id] = $object;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<int, AbstractObject> $objectsById
+     * @param list<int>                  $windowIds
+     */
+    private function objectPreviewController(ElementAuthorization $authorization, array $objectsById, array $windowIds, int $budget = 5000): OperationsController
+    {
+        return new class (
+            $this->createMock(AssetOrganizer::class),
             $this->createMock(OrganizeDispatcher::class),
             $this->createMock(AuditQueryInterface::class),
             $this->createMock(RuleEngine::class),
@@ -157,9 +217,14 @@ class OperationsControllerResolveTest extends TestCase
             $this->createMock(RunItemLease::class),
             new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
             new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcher::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
-            $objects,
+            $objectsById,
+            $windowIds,
+            $budget,
         ) extends OperationsController {
-            /** @param list<AbstractObject> $objects */
+            /**
+             * @param array<int, AbstractObject> $objectsById
+             * @param list<int>                  $windowIds
+             */
             public function __construct(
                 AssetOrganizer $organizer,
                 OrganizeDispatcher $dispatcher,
@@ -177,23 +242,22 @@ class OperationsControllerResolveTest extends TestCase
                 RunItemLease $runItemLease,
                 OperationResponseAssembler $responses,
                 OrganizeRunDispatchCoordinator $runCoordinator,
-                private readonly array $objects,
+                private readonly array $objectsById,
+                private readonly array $windowIds,
+                int $budget,
             ) {
-                parent::__construct($organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator);
+                parent::__construct($organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator, objectScanBudget: $budget);
             }
 
-            protected function objectsForClass(string $className): \Generator
+            protected function listObjectIds(string $className, int $offset, int $limit): array
             {
-                yield from $this->objects;
+                return array_slice($this->windowIds, $offset, $limit);
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->objectsById[$id] ?? null;
             }
         };
-        $request = $this->post('{"className":"Product","page":1,"limit":1}');
-
-        $response = $controller->bulkPreview($request);
-        $payload = json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR);
-
-        self::assertSame(2, $payload['total']);
-        self::assertSame(2, $payload['pages']);
-        self::assertSame(1, $payload['objects'][0]['id']);
     }
 }

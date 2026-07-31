@@ -101,6 +101,8 @@ class AssetReorganizer implements AssetReorganizerInterface
         [$condition, $params] = AssetFilter::condition(['folder' => $folderPath], excludeFolders: true);
         $listing = new Asset\Listing();
         $listing->setCondition($condition, $params);
+        $listing->setOrderKey('id');
+        $listing->setOrder('asc');
         $listing->setOffset($offset);
         $listing->setLimit($limit);
 

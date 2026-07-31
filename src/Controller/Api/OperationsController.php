@@ -37,6 +37,8 @@ use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\OrganizeRunDispatchCoordinator;
+use Oronts\AssetPilotBundle\Service\Query\BoundedScan;
+use Oronts\AssetPilotBundle\Service\Query\ObjectClassWindow;
 use Oronts\AssetPilotBundle\Service\Query\UtcSinceCutoff;
 use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Oronts\AssetPilotBundle\Service\RunItemLease;
@@ -80,6 +82,7 @@ class OperationsController
         private readonly OrganizeRunDispatchCoordinator $runCoordinator,
         protected readonly int $defaultBatchSize = 50,
         protected readonly array $planConfiguration = [],
+        protected readonly int $objectScanBudget = 5000,
         ?SynchronousRunExecutor $syncRunExecutor = null,
     ) {
         $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease);
@@ -513,29 +516,65 @@ class OperationsController
         if ($limit instanceof JsonResponse) {
             return $limit;
         }
-        $visibleOffset = ($page - 1) * $limit;
-        $total = 0;
-        $objects = [];
-        foreach ($this->objectsForClass((string) $className) as $obj) {
-            if (!$this->authorization->isAllowed($obj, 'view')) {
-                continue;
-            }
-            if ($total++ < $visibleOffset || count($objects) >= $limit) {
-                continue;
-            }
-            $objects[] = [
-                'id' => $obj->getId(),
-                'key' => $obj->getKey(),
-                'className' => $obj instanceof Concrete ? $obj->getClassName() : null,
-            ];
+        if ($page - 1 > intdiv(\PHP_INT_MAX, $limit)) {
+            return new JsonResponse(['error' => 'page is out of range'], Response::HTTP_BAD_REQUEST);
         }
 
+        $selection = $this->visibleObjectPage((string) $className, ($page - 1) * $limit, $limit);
+
         return new JsonResponse([
-            'objects' => $objects,
-            'total' => $total,
+            'objects' => $selection['objects'],
+            'total' => null,
             'page' => $page,
-            'pages' => (int) ceil($total / $limit),
+            'pages' => null,
+            'hasMore' => $selection['hasMore'],
+            'truncated' => $selection['truncated'],
         ]);
+    }
+
+    /**
+     * Bounded authorized object page for a class: the SQL className scope is a coarse prefilter, so every
+     * raw id is loaded and passed through the native `isAllowed('view')` check, and the raw scan is capped
+     * at {@see $objectScanBudget} (a workspace-restricted user cannot force an O(entire class) walk). It
+     * fills one authorized row past the requested page to derive an honest `hasMore` without a total, and
+     * reports `truncated` when the budget was hit before the page could be filled.
+     *
+     * @return array{objects: list<array{id: int, key: string, className: string|null}>, hasMore: bool, truncated: bool}
+     */
+    private function visibleObjectPage(string $className, int $visibleOffset, int $limit): array
+    {
+        $rows = [];
+        $visibleSeen = 0;
+
+        $truncated = BoundedScan::run(
+            fn (int $offset, int $batch): array => $this->listObjectIds($className, $offset, $batch),
+            function (int $id) use (&$rows, &$visibleSeen, $visibleOffset, $limit): bool {
+                $object = $this->loadObject($id);
+                if ($object !== null && $this->authorization->isAllowed($object, 'view') && $visibleSeen++ >= $visibleOffset) {
+                    $rows[] = [
+                        'id' => (int) $object->getId(),
+                        'key' => (string) $object->getKey(),
+                        'className' => $object instanceof Concrete ? $object->getClassName() : null,
+                    ];
+                }
+
+                return count($rows) > $limit;
+            },
+            $this->objectScanBudget,
+            min(500, max(50, $limit)),
+        );
+
+        return [
+            'objects' => array_slice($rows, 0, $limit),
+            'hasMore' => count($rows) > $limit,
+            'truncated' => $truncated,
+        ];
+    }
+
+    /** @return list<int> */
+    protected function listObjectIds(string $className, int $offset, int $limit): array
+    {
+        return ObjectClassWindow::ids($className, $offset, $limit);
     }
 
     #[Route('/operations/status', name: 'oronts_asset_pilot_operations_status', methods: ['GET'])]

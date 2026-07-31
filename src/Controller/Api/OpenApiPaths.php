@@ -871,18 +871,20 @@ class OpenApiAssetManagementSpecification
         new OA\Property(property: 'limit', type: 'integer', minimum: 1, maximum: 200, default: 50),
     ])),
     responses: [
-        new OA\Response(response: 200, description: 'Bulk candidate preview', content: new OA\JsonContent(type: 'object', required: ['objects', 'total', 'page', 'pages'], properties: [
+        new OA\Response(response: 200, description: 'Bulk candidate preview', content: new OA\JsonContent(type: 'object', required: ['objects', 'page', 'hasMore', 'truncated'], properties: [
             new OA\Property(property: 'objects', type: 'array', items: new OA\Items(type: 'object', required: ['id', 'key'], properties: [
                 new OA\Property(property: 'id', ref: '#/components/schemas/PositiveId'),
                 new OA\Property(property: 'key', type: 'string'),
                 new OA\Property(property: 'className', type: 'string', nullable: true),
             ])),
-            new OA\Property(property: 'total', type: 'integer', minimum: 0),
+            new OA\Property(property: 'total', type: 'integer', minimum: 0, nullable: true, description: 'Always null for this interactive View endpoint: the exact authorized total is never cheaply available (the supervised System bypass cannot apply to an HTTP route), so it is withheld and hasMore is authoritative.'),
             new OA\Property(property: 'page', type: 'integer', minimum: 1),
-            new OA\Property(property: 'pages', type: 'integer', minimum: 0),
+            new OA\Property(property: 'pages', type: 'integer', minimum: 0, nullable: true, description: 'Always null: total is withheld, so use hasMore for cursor pagination.'),
+            new OA\Property(property: 'hasMore', type: 'boolean', description: 'A further authorized object exists past this page.'),
+            new OA\Property(property: 'truncated', type: 'boolean', description: 'True when the bounded object scan hit its candidate budget before filling the page.'),
         ])),
         new OA\Response(response: 400, description: 'Invalid class or JSON', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
-        new OA\Response(response: 403, description: 'Operate permission required'),
+        new OA\Response(response: 403, description: 'View permission required'),
     ],
 )]
 #[OA\Get(

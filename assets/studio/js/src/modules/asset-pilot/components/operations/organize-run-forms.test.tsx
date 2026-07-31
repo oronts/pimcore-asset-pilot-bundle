@@ -47,9 +47,11 @@ describe('organize run integration', () => {
   it('tracks the run returned by queued bulk organization', async () => {
     vi.spyOn(assetPilotApi, 'organizeBulkPreview').mockResolvedValue({
       objects: [{ id: 42, key: 'product-42', className: 'Product' }],
-      total: 1,
+      total: null,
       page: 1,
-      pages: 1,
+      pages: null,
+      hasMore: false,
+      truncated: false,
     })
     const organize = vi.spyOn(assetPilotApi, 'organizeBulk')
       .mockResolvedValueOnce({ dryRun: true, planToken: 'bulk-plan', objectCount: 1, operations: [] })
@@ -67,6 +69,27 @@ describe('organize run integration', () => {
     expect(await screen.findByRole('status', { name: 'Tracked operation run' })).toHaveTextContent(runId)
     expect(organize).toHaveBeenNthCalledWith(1, { className: 'Product', dryRun: true, async: true, batchSize: 50 }, expect.any(AbortSignal))
     expect(organize).toHaveBeenNthCalledWith(2, { className: 'Product', dryRun: false, async: true, batchSize: 50, planToken: 'bulk-plan' }, expect.any(AbortSignal))
+  })
+
+  it('paginates the bulk preview by cursor and warns when the scan is truncated', async () => {
+    vi.spyOn(assetPilotApi, 'organizeBulkPreview').mockResolvedValue({
+      objects: [{ id: 1, key: 'product-1', className: 'Product' }, { id: 2, key: 'product-2', className: 'Product' }],
+      total: null,
+      page: 1,
+      pages: null,
+      hasMore: true,
+      truncated: true,
+    })
+    const user = userEvent.setup()
+
+    renderWithI18n(<BulkOrganizeForm />)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Select Class...' }), 'Product')
+    await user.click(screen.getByRole('button', { name: 'Browse Candidates' }))
+
+    expect(await screen.findByText('Showing 2 on this page')).toBeInTheDocument()
+    expect(screen.getByText(/scan ceiling/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: 'Review Organization' })).toBeEnabled()
   })
 
   it('invalidates a single-object plan when async mode changes', async () => {

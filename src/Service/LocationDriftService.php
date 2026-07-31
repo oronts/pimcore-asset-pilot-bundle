@@ -7,8 +7,8 @@ namespace Oronts\AssetPilotBundle\Service;
 use Oronts\AssetPilotBundle\Model\DriftItem;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\BoundedScan;
+use Oronts\AssetPilotBundle\Service\Query\ObjectClassWindow;
 use Pimcore\Model\DataObject\AbstractObject;
-use Pimcore\Model\DataObject\Listing;
 
 class LocationDriftService implements LocationDriftServiceInterface
 {
@@ -71,13 +71,7 @@ class LocationDriftService implements LocationDriftServiceInterface
      */
     protected function listObjectIds(string $className, int $offset, int $limit): array
     {
-        $listing = new Listing();
-        $listing->setObjectTypes([AbstractObject::OBJECT_TYPE_OBJECT, AbstractObject::OBJECT_TYPE_VARIANT]);
-        $listing->setCondition('className = ?', [$className]);
-        $listing->setOffset($offset);
-        $listing->setLimit($limit);
-
-        return array_map('intval', $listing->loadIdList());
+        return ObjectClassWindow::ids($className, $offset, $limit);
     }
 
     protected function loadObject(int $id): ?AbstractObject
