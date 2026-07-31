@@ -13,7 +13,6 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
-use Psr\Log\NullLogger;
 
 #[CoversClass(AssetIntegrityService::class)]
 class AssetIntegrityServiceTest extends TestCase
@@ -35,11 +34,11 @@ class AssetIntegrityServiceTest extends TestCase
             static fn (Asset $asset): bool => !in_array(spl_object_id($asset), $hiddenAssets, true),
         );
 
-        return new class ($composite, new NullLogger(), $ids, $assetsById, $enabled, $skip, $authorization) extends AssetIntegrityService {
+        return new class ($composite, $ids, $assetsById, $enabled, $skip, $authorization) extends AssetIntegrityService {
             /** @param list<int> $ids @param array<int, ?Asset> $assetsById */
-            public function __construct($c, $log, private array $ids, private array $assetsById, bool $enabled, array $skip, ElementAuthorization $authorization)
+            public function __construct($c, private array $ids, private array $assetsById, bool $enabled, array $skip, ElementAuthorization $authorization)
             {
-                parent::__construct($c, $log, $authorization, $enabled, $skip);
+                parent::__construct($c, $authorization, $enabled, $skip);
             }
 
             protected function listAssetIds(array $filters, int $offset, int $limit): array

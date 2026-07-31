@@ -7,7 +7,6 @@ namespace Oronts\AssetPilotBundle\Command;
 use Oronts\AssetPilotBundle\Audit\AuditQueryInterface;
 use Oronts\AssetPilotBundle\Audit\AuditRetentionInterface;
 use Oronts\AssetPilotBundle\Service\Query\UtcSinceCutoff;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -24,7 +23,6 @@ class AuditCommand extends Command
     public function __construct(
         private readonly AuditQueryInterface $auditQuery,
         private readonly AuditRetentionInterface $auditRetention,
-        protected readonly LoggerInterface $logger,
     ) {
         parent::__construct();
     }

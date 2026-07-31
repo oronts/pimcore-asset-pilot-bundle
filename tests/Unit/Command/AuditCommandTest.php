@@ -10,7 +10,6 @@ use Oronts\AssetPilotBundle\Command\AuditCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -22,7 +21,7 @@ final class AuditCommandTest extends TestCase
     {
         $query = $this->createMock(AuditQueryInterface::class);
         $query->expects(self::never())->method('getRecent');
-        $tester = new CommandTester(new AuditCommand($query, $this->createMock(AuditRetentionInterface::class), new NullLogger()));
+        $tester = new CommandTester(new AuditCommand($query, $this->createMock(AuditRetentionInterface::class)));
 
         $exitCode = $tester->execute(['--since' => '%%% definitely not a date %%%']);
 
@@ -38,7 +37,7 @@ final class AuditCommandTest extends TestCase
         $retention = $this->createMock(AuditRetentionInterface::class);
         $retention->expects(self::once())->method('getRetentionDays')->willReturn(30);
         $retention->expects(self::once())->method('cleanup')->with(30)->willReturn(7);
-        $tester = new CommandTester(new AuditCommand($query, $retention, new NullLogger()));
+        $tester = new CommandTester(new AuditCommand($query, $retention));
 
         $exitCode = $tester->execute(['--cleanup' => true]);
 
@@ -68,7 +67,7 @@ final class AuditCommandTest extends TestCase
             'duration_ms' => 12,
             'created_at' => '2026-07-15 10:00:00',
         ]]);
-        $tester = new CommandTester(new AuditCommand($query, $this->createMock(AuditRetentionInterface::class), new NullLogger()));
+        $tester = new CommandTester(new AuditCommand($query, $this->createMock(AuditRetentionInterface::class)));
 
         $exitCode = $tester->execute([
             '--class' => 'Product',

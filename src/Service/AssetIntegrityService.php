@@ -10,7 +10,6 @@ use Oronts\AssetPilotBundle\Model\IntegrityResult;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
-use Psr\Log\LoggerInterface;
 
 /**
  * Detects assets whose binary no longer renders, via the tagged integrity checkers. The scan is
@@ -22,7 +21,6 @@ class AssetIntegrityService implements AssetIntegrityServiceInterface
 {
     public function __construct(
         protected readonly IntegrityCheckerResolverInterface $checker,
-        protected readonly LoggerInterface $logger,
         protected readonly ElementAuthorizationInterface $authorization,
         protected readonly bool $enabled = true,
         protected readonly array $skipExtensions = ['svg'],
