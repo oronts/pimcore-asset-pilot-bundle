@@ -7,11 +7,11 @@ namespace Oronts\AssetPilotBundle;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Schema;
-use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\QuarantineStatus;
 use Oronts\AssetPilotBundle\Migrations\Version20260721000000;
+use Oronts\AssetPilotBundle\Support\SchemaIndex;
 use Pimcore\Bundle\StaticResolverBundle\Lib\CacheResolverInterface;
 use Pimcore\Bundle\StudioBackendBundle\Util\Constant\CacheKeys;
 use Pimcore\Extension\Bundle\Installer\SettingsStoreAwareInstaller;
@@ -149,32 +149,12 @@ class Installer extends SettingsStoreAwareInstaller
         }
 
         foreach ($indexes as $indexName => $indexColumns) {
-            self::ensureIndex($table, $indexName, $indexColumns, false);
+            SchemaIndex::ensure($table, $indexName, $indexColumns, false);
         }
 
         foreach ($uniqueIndexes as $indexName => $indexColumns) {
-            self::ensureIndex($table, $indexName, $indexColumns, true);
+            SchemaIndex::ensure($table, $indexName, $indexColumns, true);
         }
-    }
-
-    /** @param list<string> $columns */
-    private static function ensureIndex(Table $table, string $name, array $columns, bool $unique): void
-    {
-        if ($table->hasIndex($name)) {
-            $index = $table->getIndex($name);
-            if ($index->getColumns() === $columns && $index->isUnique() === $unique) {
-                return;
-            }
-            $table->dropIndex($name);
-        }
-
-        if ($unique) {
-            $table->addUniqueIndex($columns, $name);
-
-            return;
-        }
-
-        $table->addIndex($columns, $name);
     }
 
     private function applySchemaDiff(AbstractSchemaManager $schemaManager, Schema $current, Schema $target): void

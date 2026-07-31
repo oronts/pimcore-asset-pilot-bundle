@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
+use Oronts\AssetPilotBundle\Support\SchemaIndex;
 
 class DependencyProjectionSchema
 {
@@ -25,10 +26,10 @@ class DependencyProjectionSchema
         self::column($source, 'dirty_at', 'datetime', ['notnull' => false]);
         self::column($source, 'error_message', 'text', ['notnull' => false]);
         self::primary($source);
-        self::index($source, 'idx_dependency_source_state', ['state', 'dirty_at']);
-        self::index($source, 'idx_dependency_source_generation', ['generation']);
-        self::index($source, 'idx_dependency_source_element', ['source_type', 'source_id']);
-        self::index($source, 'uniq_dependency_source_key', ['source_key'], true);
+        SchemaIndex::ensure($source, 'idx_dependency_source_state', ['state', 'dirty_at']);
+        SchemaIndex::ensure($source, 'idx_dependency_source_generation', ['generation']);
+        SchemaIndex::ensure($source, 'idx_dependency_source_element', ['source_type', 'source_id']);
+        SchemaIndex::ensure($source, 'uniq_dependency_source_key', ['source_key'], true);
 
         $edge = self::table($schema, Installer::TABLE_DEPENDENCY_EDGE);
         self::column($edge, 'id', 'bigint', ['autoincrement' => true, 'notnull' => true]);
@@ -37,9 +38,9 @@ class DependencyProjectionSchema
         self::column($edge, 'source_id', 'integer', ['notnull' => true]);
         self::column($edge, 'target_asset_id', 'integer', ['notnull' => true]);
         self::primary($edge);
-        self::index($edge, 'idx_dependency_edge_target', ['target_asset_id']);
-        self::index($edge, 'idx_dependency_edge_source', ['source_type', 'source_id']);
-        self::index($edge, 'uniq_dependency_edge', ['source_key', 'target_asset_id'], true);
+        SchemaIndex::ensure($edge, 'idx_dependency_edge_target', ['target_asset_id']);
+        SchemaIndex::ensure($edge, 'idx_dependency_edge_source', ['source_type', 'source_id']);
+        SchemaIndex::ensure($edge, 'uniq_dependency_edge', ['source_key', 'target_asset_id'], true);
 
         $freshness = self::table($schema, Installer::TABLE_DEPENDENCY_FRESHNESS);
         self::column($freshness, 'id', 'integer', ['autoincrement' => false, 'notnull' => true]);
@@ -63,7 +64,7 @@ class DependencyProjectionSchema
         self::column($fence, 'heartbeat_at', 'datetime', ['notnull' => true]);
         self::column($fence, 'expires_at', 'datetime', ['notnull' => true]);
         self::primary($fence, ['asset_id']);
-        self::index($fence, 'idx_asset_deletion_fence_expires', ['expires_at']);
+        SchemaIndex::ensure($fence, 'idx_asset_deletion_fence_expires', ['expires_at']);
     }
 
     private static function table(Schema $schema, string $name): Table
@@ -101,24 +102,6 @@ class DependencyProjectionSchema
             $table->dropPrimaryKey();
         }
         $table->setPrimaryKey($columns);
-    }
-
-    /** @param list<string> $columns */
-    private static function index(Table $table, string $name, array $columns, bool $unique = false): void
-    {
-        if ($table->hasIndex($name)) {
-            $index = $table->getIndex($name);
-            if ($index->getColumns() === $columns && $index->isUnique() === $unique) {
-                return;
-            }
-            $table->dropIndex($name);
-        }
-
-        if ($unique) {
-            $table->addUniqueIndex($columns, $name);
-        } else {
-            $table->addIndex($columns, $name);
-        }
     }
 
     private function __construct() {}
