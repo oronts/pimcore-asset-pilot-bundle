@@ -236,12 +236,42 @@ class OrganizeAssetsHandler
             if ($owned) {
                 $this->runs->fail($message->runId, 'Async organization failed.');
             }
-            $this->loopGuard->clearObjectDispatched($message->objectId);
+            $this->drainCoalescedSaveAfterFailure($message);
 
             return;
         }
 
         throw $exception;
+    }
+
+    /**
+     * A save that coalesced into this run marked the object dirty and recorded no run of its own, trusting this
+     * run to drain it. The success and skip-stale paths do; the failure path must too, or that save is lost.
+     * Clear the coalescing marker (a later save now records its own run), then re-dispatch the dirty object so
+     * its latest state is organized. Best-effort: a dispatch failure must not turn the terminal failure into a
+     * retry loop, and a later save still recovers it.
+     */
+    private function drainCoalescedSaveAfterFailure(OrganizeAssetsMessage $message): void
+    {
+        $this->loopGuard->clearObjectDispatched($message->objectId);
+        if (!$this->loopGuard->isObjectDirty($message->objectId)) {
+            return;
+        }
+
+        try {
+            $this->dispatcher->dispatchObject(
+                $message->objectId,
+                $message->triggerType,
+                new ActorContext($message->actorType, $message->actorUserId),
+            );
+            $this->loopGuard->clearObjectDirty($message->objectId);
+        } catch (\Throwable $dispatchError) {
+            $this->logger->error('Asset Pilot: could not requeue a coalesced save after a failed organize for object {id}: {error}', [
+                'id' => $message->objectId,
+                'error' => $dispatchError->getMessage(),
+                'exception' => $dispatchError,
+            ]);
+        }
     }
 
     protected function loadObject(int $objectId): ?AbstractObject

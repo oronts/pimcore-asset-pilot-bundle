@@ -271,6 +271,38 @@ class OrganizeAssetsHandlerTest extends TestCase
 
 
     #[Test]
+    public function drainsACoalescedSaveWhenTheTrackedOrganizeFailsNonRetryably(): void
+    {
+        $object = $this->createMock(Concrete::class);
+        $object->method('getModificationDate')->willReturn(100);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('organizeWithHeartbeat')->willThrowException(new \RuntimeException('rule action threw'));
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
+        $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+            42,
+            TriggerType::ObjectSave,
+            self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willReturn(true);
+        $runs->expects(self::once())->method('completeItem')->willReturn(true);
+        $runs->expects(self::once())->method('fail')->with('run-1', self::anything());
+
+        ($this->handler($object, $organizer, $dispatcher, $authorization, loopGuard: $loopGuard, runs: $runs))(
+            new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7, 'run-1'),
+        );
+    }
+
+    #[Test]
     public function retryableInfrastructureFailureLeavesTheRunItemResumable(): void
     {
         $object = $this->createMock(AbstractObject::class);
