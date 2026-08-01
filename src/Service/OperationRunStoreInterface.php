@@ -53,6 +53,13 @@ interface OperationRunStoreInterface
 
     public function requestCancellation(string $runId, ActorContext $actor): bool;
 
+    /**
+     * The data-object target ids of a run, so a caller with LoopGuard can clear each object's dispatch marker.
+     *
+     * @return list<int>
+     */
+    public function dataObjectTargets(string $runId): array;
+
     /** @phpstan-impure */
     public function isCancellationRequested(string $runId): bool;
 

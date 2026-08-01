@@ -8,10 +8,15 @@ use Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OperationRunActor;
 use Oronts\AssetPilotBundle\Service\OperationRunExecutorInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -27,6 +32,9 @@ final class OperationRunsController
         private readonly ElementAuthorizationInterface $authorization,
         private readonly UrlGeneratorInterface $urlGenerator,
         private readonly ApiDateFormatterInterface $dates,
+        private readonly LoopGuard $loopGuard,
+        private readonly OrganizeDispatcherInterface $dispatcher,
+        private readonly LoggerInterface $logger,
     ) {}
 
     #[Route('/operations/runs', name: 'oronts_asset_pilot_operation_run_list', methods: ['GET'])]
@@ -70,12 +78,39 @@ final class OperationRunsController
             return new JsonResponse(['error' => 'Only pending, queued, or running operations can be cancelled.'], Response::HTTP_CONFLICT);
         }
 
+        // A pending-dispatch run is cancelled before any worker runs to clear its objects' dispatch-coalescing
+        // markers, so mirror the worker's finalize here: clear the marker, then drain any save that already
+        // coalesced into this now-cancelled run (best-effort, so a broker outage does not fail the cancel).
+        // Clearing a still-running run's marker only lets a concurrent save record its own run (safe).
+        foreach ($this->runs->dataObjectTargets($id) as $objectId) {
+            $this->loopGuard->clearObjectDispatched($objectId);
+            $this->drainCoalescedSave($objectId, $actor);
+        }
+
         $status = $this->runs->finish($id);
 
         return new JsonResponse(
             ['runId' => $id, 'status' => $status->value],
             $status === OperationRunStatus::Cancelled ? Response::HTTP_OK : Response::HTTP_ACCEPTED,
         );
+    }
+
+    private function drainCoalescedSave(int $objectId, ActorContext $actor): void
+    {
+        if (!$this->loopGuard->isObjectDirty($objectId)) {
+            return;
+        }
+
+        try {
+            $this->dispatcher->dispatchObject($objectId, TriggerType::ObjectSave, $actor);
+            $this->loopGuard->clearObjectDirty($objectId);
+        } catch (\Throwable $e) {
+            $this->logger->error('Asset Pilot: could not requeue a coalesced save after cancelling a run for object {id}: {error}', [
+                'id' => $objectId,
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+        }
     }
 
     #[Route('/operations/runs/{id}/retry', name: 'oronts_asset_pilot_operation_run_retry', requirements: ['id' => '[a-f0-9]{32}'], methods: ['POST'])]

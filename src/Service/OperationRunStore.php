@@ -144,6 +144,24 @@ final class OperationRunStore implements OperationRunStoreInterface
     }
 
     /**
+     * The data-object target ids of a run. On cancellation the caller clears each object's dispatch-coalescing
+     * marker so a save landing in the marker's TTL window records its own run instead of being folded into the
+     * cancelled run and dropped.
+     *
+     * @return list<int>
+     */
+    public function dataObjectTargets(string $runId): array
+    {
+        $ids = $this->connection->fetchFirstColumn(
+            'SELECT target_id FROM ' . Installer::TABLE_OPERATION_RUN_ITEM
+            . ' WHERE run_id = ? AND target_type = ? AND target_id IS NOT NULL',
+            [$runId, 'data_object'],
+        );
+
+        return array_values(array_map(static fn ($id): int => (int) $id, $ids));
+    }
+
+    /**
      * Atomically transition a committed pending-dispatch run to Queued once its message is published.
      * Returns true only for the caller that owned the transition, so a concurrent/duplicate relay never
      * re-queues an already-dispatched run. Publish happens before this call, so a crash in between leaves

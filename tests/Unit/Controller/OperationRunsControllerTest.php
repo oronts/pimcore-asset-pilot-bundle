@@ -8,15 +8,19 @@ use Oronts\AssetPilotBundle\Controller\Api\OperationRunsController;
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\OperationRunExecution;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OperationRunExecutorInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -111,6 +115,45 @@ final class OperationRunsControllerTest extends TestCase
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
         self::assertSame('cancelled', $body['status']);
+    }
+
+    #[Test]
+    public function cancellingClearsTheDispatchMarkersOfTheRunsObjectTargets(): void
+    {
+        $actor = ActorContext::user(7);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('get')->willReturn($this->runFixture());
+        $runs->method('requestCancellation')->with(self::RUN_ID, $actor)->willReturn(true);
+        $runs->method('dataObjectTargets')->with(self::RUN_ID)->willReturn([42, 43]);
+        $runs->method('finish')->willReturn(OperationRunStatus::Cancelled);
+        $cleared = [];
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->expects(self::exactly(2))->method('clearObjectDispatched')
+            ->willReturnCallback(static function (int $id) use (&$cleared): void {
+                $cleared[] = $id;
+            });
+
+        $this->controller($runs, $actor, loopGuard: $loopGuard)->cancel(self::RUN_ID);
+
+        self::assertSame([42, 43], $cleared);
+    }
+
+    #[Test]
+    public function cancellingDrainsASaveThatCoalescedIntoTheCancelledRun(): void
+    {
+        $actor = ActorContext::user(7);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('get')->willReturn($this->runFixture());
+        $runs->method('requestCancellation')->willReturn(true);
+        $runs->method('dataObjectTargets')->willReturn([42]);
+        $runs->method('finish')->willReturn(OperationRunStatus::Cancelled);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, $actor);
+
+        $this->controller($runs, $actor, loopGuard: $loopGuard, dispatcher: $dispatcher)->cancel(self::RUN_ID);
     }
 
     #[Test]
@@ -225,6 +268,8 @@ final class OperationRunsControllerTest extends TestCase
         ActorContext $actor,
         ?OperationRunExecutorInterface $executor = null,
         bool $admin = true,
+        ?LoopGuard $loopGuard = null,
+        ?OrganizeDispatcherInterface $dispatcher = null,
     ): OperationRunsController {
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn($actor);
@@ -243,6 +288,9 @@ final class OperationRunsControllerTest extends TestCase
             $authorization,
             $urls,
             new \Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter(),
+            $loopGuard ?? $this->createMock(LoopGuard::class),
+            $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class),
+            new NullLogger(),
         );
     }
 
