@@ -41,7 +41,7 @@ class PathTemplateExtension extends AbstractExtension
                 foreach ($items as $item) {
                     if (is_object($item)) {
                         $val = self::readAccessor($item, $property);
-                        if ($val !== null) {
+                        if ($val !== null && $val !== false) {
                             $values[] = (string) $val;
                         }
                     } elseif (is_array($item) && isset($item[$property])) {
@@ -62,7 +62,7 @@ class PathTemplateExtension extends AbstractExtension
                 foreach ($items as $item) {
                     if (is_object($item)) {
                         $val = self::readAccessor($item, $property);
-                        if ($val !== null && $val !== '') {
+                        if ($val !== null && $val !== '' && $val !== false) {
                             return (string) $val;
                         }
                     }

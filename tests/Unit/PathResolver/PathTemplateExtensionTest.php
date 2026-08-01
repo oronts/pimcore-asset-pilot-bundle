@@ -56,6 +56,22 @@ class PathTemplateExtensionTest extends TestCase
     }
 
     #[Test]
+    public function firstOfAndPluckTreatBooleanFalseLikeTheOtherFilters(): void
+    {
+        // A boolean-false accessor must map to the fallback/skip (like coalesce/fallback/safe_key), not a "" that
+        // gets dropped as an empty path segment and silently mis-files the asset one directory up.
+        $obj = new class () {
+            public function getFlag(): bool
+            {
+                return false;
+            }
+        };
+
+        self::assertSame('unknown', $this->render("{{ [o]|first_of('flag') }}", ['o' => $obj]));
+        self::assertSame('0', $this->render("{{ [o]|pluck('flag')|length }}", ['o' => $obj]));
+    }
+
+    #[Test]
     public function pluckAndFirstOfInvokeReadAccessorsOnly(): void
     {
         $flag = new \ArrayObject(['mutated' => false]);
