@@ -79,6 +79,7 @@ final class OperationRunsControllerTest extends TestCase
         $runs->method('get')->willReturn($this->runFixture());
 
         $response = $this->controller($runs, ActorContext::user(7))->get(self::RUN_ID);
+        self::assertStringContainsString('"state":{}', (string) $response->getContent(), 'an empty state payload serializes as a JSON object, not []');
         $body = json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
 
         self::assertSame(self::RUN_ID, $body['id']);
@@ -139,9 +140,9 @@ final class OperationRunsControllerTest extends TestCase
     }
 
     #[Test]
-    public function cancellingDrainsASaveThatCoalescedIntoTheCancelledRun(): void
+    public function cancellingDrainsASaveUnderTheRunsActorNotTheCanceller(): void
     {
-        $actor = ActorContext::user(7);
+        $canceller = ActorContext::user(99);
         $runs = $this->createMock(OperationRunStoreInterface::class);
         $runs->method('get')->willReturn($this->runFixture());
         $runs->method('requestCancellation')->willReturn(true);
@@ -151,9 +152,14 @@ final class OperationRunsControllerTest extends TestCase
         $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, $actor);
+        // The re-dispatch must run under the run's original actor (user 7 in the fixture), not the operator (99).
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+            42,
+            TriggerType::ObjectSave,
+            self::callback(static fn (ActorContext $a): bool => $a->userId === 7),
+        );
 
-        $this->controller($runs, $actor, loopGuard: $loopGuard, dispatcher: $dispatcher)->cancel(self::RUN_ID);
+        $this->controller($runs, $canceller, loopGuard: $loopGuard, dispatcher: $dispatcher)->cancel(self::RUN_ID);
     }
 
     #[Test]

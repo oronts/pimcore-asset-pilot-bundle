@@ -71,7 +71,8 @@ final class OperationRunsController
     public function cancel(string $id): JsonResponse
     {
         $actor = $this->authorization->currentActor();
-        if ($this->runs->get($id, $actor) === null) {
+        $run = $this->runs->get($id, $actor);
+        if ($run === null) {
             return new JsonResponse(['error' => 'Operation run not found.'], Response::HTTP_NOT_FOUND);
         }
         if (!$this->runs->requestCancellation($id, $actor)) {
@@ -81,10 +82,13 @@ final class OperationRunsController
         // A pending-dispatch run is cancelled before any worker runs to clear its objects' dispatch-coalescing
         // markers, so mirror the worker's finalize here: clear the marker, then drain any save that already
         // coalesced into this now-cancelled run (best-effort, so a broker outage does not fail the cancel).
-        // Clearing a still-running run's marker only lets a concurrent save record its own run (safe).
+        // Re-dispatch under the run's ORIGINAL actor (as the worker and retry do), not the cancelling operator, so
+        // the coalesced organize keeps its permissions and audit attribution. Clearing a still-running run's marker
+        // only lets a concurrent save record its own run (safe).
+        $runActor = OperationRunActor::fromRun($run);
         foreach ($this->runs->dataObjectTargets($id) as $objectId) {
             $this->loopGuard->clearObjectDispatched($objectId);
-            $this->drainCoalescedSave($objectId, $actor);
+            $this->drainCoalescedSave($objectId, $runActor);
         }
 
         $status = $this->runs->finish($id);
@@ -188,8 +192,8 @@ final class OperationRunsController
                 'fingerprint' => $item['fingerprint'],
                 'status' => $item['status'],
                 'attempts' => (int) $item['attempts'],
-                'state' => $item['state_payload'] ?? [],
-                'result' => $item['result_payload'],
+                'state' => (object) ($item['state_payload'] ?? []),
+                'result' => $item['result_payload'] === null ? null : (object) $item['result_payload'],
                 'error' => $item['error_message'],
                 'createdAt' => $this->dates->fromDatabase((string) $item['created_at']),
                 'updatedAt' => $this->dates->fromDatabase((string) $item['updated_at']),
@@ -213,7 +217,7 @@ final class OperationRunsController
             'failedCount' => (int) $run['failed_count'],
             'attempt' => (int) $run['attempt'],
             'retryOf' => $run['retry_of'],
-            'request' => $run['request_payload'],
+            'request' => (object) $run['request_payload'],
             'error' => $run['error_message'],
             'createdAt' => $this->dates->fromDatabase((string) $run['created_at']),
             'startedAt' => $this->dates->fromDatabase((string) $run['started_at']),
