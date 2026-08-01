@@ -357,7 +357,7 @@ class OpenApiRulesSpecification
         new OA\Parameter(name: 'type', in: 'query', schema: new OA\Schema(type: 'string')),
     ],
     responses: [
-        new OA\Response(response: 200, description: 'Duplicate groups', content: new OA\JsonContent(type: 'object', required: ['items', 'total', 'page', 'limit', 'truncated'], properties: [
+        new OA\Response(response: 200, description: 'Duplicate groups', content: new OA\JsonContent(type: 'object', required: ['items', 'total', 'page', 'limit', 'hasMore', 'truncated'], properties: [
             new OA\Property(property: 'items', type: 'array', items: new OA\Items(type: 'object', required: ['checksum', 'fileSize', 'count', 'assetIds', 'representative'], properties: [
                 new OA\Property(property: 'checksum', type: 'string'),
                 new OA\Property(property: 'fileSize', type: 'integer', minimum: 0),
@@ -371,9 +371,10 @@ class OpenApiRulesSpecification
                     new OA\Property(property: 'type', type: 'string'),
                 ]),
             ])),
-            new OA\Property(property: 'total', type: 'integer', minimum: 0),
+            new OA\Property(property: 'total', type: 'integer', minimum: 0, nullable: true, description: 'Null when the actor is workspace-scoped; the total is not computed for a scoped listing.'),
             new OA\Property(property: 'page', type: 'integer', minimum: 1),
             new OA\Property(property: 'limit', type: 'integer', minimum: 1, maximum: 100),
+            new OA\Property(property: 'hasMore', type: 'boolean'),
             new OA\Property(property: 'truncated', type: 'boolean'),
         ])),
         new OA\Response(response: 500, description: 'Duplicate listing failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
@@ -572,7 +573,7 @@ class OpenApiDuplicateSpecification
     ],
     responses: [
         new OA\Response(response: 200, description: 'Asset search', content: new OA\JsonContent(ref: '#/components/schemas/PaginatedAssets')),
-        new OA\Response(response: 403, description: 'View permission required'),
+        new OA\Response(response: 403, description: 'View permission required, or the objectId filter targets an object the actor cannot view', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 #[OA\Get(
@@ -1167,13 +1168,14 @@ class OpenApiIntegritySpecification
         new OA\Parameter(name: 'folder', in: 'query', schema: new OA\Schema(type: 'string')),
     ],
     responses: [
-        new OA\Response(response: 200, description: 'Empty folders', content: new OA\JsonContent(type: 'object', required: ['items', 'page', 'limit'], properties: [
+        new OA\Response(response: 200, description: 'Empty folders', content: new OA\JsonContent(type: 'object', required: ['items', 'page', 'limit', 'hasMore'], properties: [
             new OA\Property(property: 'items', type: 'array', items: new OA\Items(type: 'object', required: ['id', 'path'], properties: [
                 new OA\Property(property: 'id', ref: '#/components/schemas/PositiveId'),
                 new OA\Property(property: 'path', type: 'string'),
             ])),
             new OA\Property(property: 'page', type: 'integer', minimum: 1),
             new OA\Property(property: 'limit', type: 'integer', minimum: 1, maximum: 200),
+            new OA\Property(property: 'hasMore', type: 'boolean', description: 'This listing has no total; page again while hasMore is true.'),
         ])),
         new OA\Response(response: 500, description: 'Empty-folder scan failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
@@ -1185,15 +1187,22 @@ class OpenApiIntegritySpecification
     parameters: [new OA\Parameter(ref: '#/components/parameters/StudioPrefix')],
     requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(type: 'object', required: ['ids'], properties: [
         new OA\Property(property: 'ids', type: 'array', minItems: 1, maxItems: 200, uniqueItems: true, items: new OA\Items(ref: '#/components/schemas/PositiveId')),
+        new OA\Property(property: 'dryRun', type: 'boolean', default: false, description: 'Set true to preview and receive a planToken; false (default) applies the reviewed deletion and requires planToken.'),
+        new OA\Property(property: 'planToken', type: 'string', nullable: true, description: 'The signed token returned by a fresh dry-run preview; required to apply (dryRun false).'),
     ])),
     responses: [
-        new OA\Response(response: 200, description: 'Folder deletion result', content: new OA\JsonContent(type: 'object', required: ['deleted', 'skipped', 'failed', 'errors'], properties: [
+        new OA\Response(response: 200, description: 'Folder deletion preview or result', content: new OA\JsonContent(type: 'object', required: ['deleted', 'skipped', 'failed', 'errors', 'dryRun', 'planToken'], properties: [
             new OA\Property(property: 'deleted', type: 'integer', minimum: 0),
+            new OA\Property(property: 'eligible', type: 'integer', minimum: 0, description: 'Folders eligible for deletion; present on a dry-run preview.'),
             new OA\Property(property: 'skipped', type: 'integer', minimum: 0),
             new OA\Property(property: 'failed', type: 'integer', minimum: 0),
             new OA\Property(property: 'errors', ref: '#/components/schemas/BulkErrors'),
+            new OA\Property(property: 'dryRun', type: 'boolean'),
+            new OA\Property(property: 'planToken', type: 'string', nullable: true, description: 'Signed token from a dry-run preview; null on apply.'),
         ])),
-        new OA\Response(response: 400, description: 'Invalid or oversized ID list', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 400, description: 'Invalid or oversized ID list, or a missing plan token on apply', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 403, description: 'Operate permission required', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 409, description: 'A folder changed during preview, or the plan is stale or already used', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 500, description: 'Folder deletion failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
