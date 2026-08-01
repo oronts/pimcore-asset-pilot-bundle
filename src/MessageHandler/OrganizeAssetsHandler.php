@@ -236,7 +236,7 @@ class OrganizeAssetsHandler
             if ($owned) {
                 $this->runs->fail($message->runId, 'Async organization failed.');
             }
-            $this->drainCoalescedSaveAfterFailure($message);
+            $this->drainCoalescedSave($message);
 
             return;
         }
@@ -246,12 +246,11 @@ class OrganizeAssetsHandler
 
     /**
      * A save that coalesced into this run marked the object dirty and recorded no run of its own, trusting this
-     * run to drain it. The success and skip-stale paths do; the failure path must too, or that save is lost.
-     * Clear the coalescing marker (a later save now records its own run), then re-dispatch the dirty object so
-     * its latest state is organized. Best-effort: a dispatch failure must not turn the terminal failure into a
-     * retry loop, and a later save still recovers it.
+     * run to drain it. Every terminal path must, or that save is lost: clear the coalescing marker (a later save
+     * now records its own run), then re-dispatch the dirty object so its latest state is organized. Best-effort:
+     * a dispatch failure must not turn a terminal item into a retry loop, and a later save still recovers it.
      */
-    private function drainCoalescedSaveAfterFailure(OrganizeAssetsMessage $message): void
+    private function drainCoalescedSave(OrganizeAssetsMessage $message): void
     {
         $this->loopGuard->clearObjectDispatched($message->objectId);
         if (!$this->loopGuard->isObjectDirty($message->objectId)) {
@@ -372,7 +371,7 @@ class OrganizeAssetsHandler
             throw LostRunItemOwnershipException::forItem($message->runId, $itemKey);
         }
         $this->runs->finish($message->runId);
-        $this->loopGuard->clearObjectDispatched($message->objectId);
+        $this->drainCoalescedSave($message);
     }
 
     /**

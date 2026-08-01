@@ -303,6 +303,37 @@ class OrganizeAssetsHandlerTest extends TestCase
     }
 
     #[Test]
+    public function drainsACoalescedSaveWhenTheTrackedRunTerminatesWithoutOrganizing(): void
+    {
+        $object = $this->createMock(Concrete::class);
+        $object->method('getModificationDate')->willReturn(100);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::never())->method('organizeWithHeartbeat');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+            42,
+            TriggerType::ObjectSave,
+            self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),
+        );
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willReturn(true);
+        $runs->expects(self::once())->method('completeItem')->willReturn(true);
+        $runs->method('finish')->willReturn(OperationRunStatus::Failed);
+
+        ($this->handler($object, $organizer, $dispatcher, $authorization, loopGuard: $loopGuard, runs: $runs))(
+            new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7, 'run-1'),
+        );
+    }
+
+    #[Test]
     public function retryableInfrastructureFailureLeavesTheRunItemResumable(): void
     {
         $object = $this->createMock(AbstractObject::class);
