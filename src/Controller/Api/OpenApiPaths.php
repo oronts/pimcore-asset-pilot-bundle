@@ -130,6 +130,7 @@ class OpenApiPaths
         new OA\Response(response: 400, description: 'Invalid asset IDs, dryRun, or plan token', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 403, description: 'Operate permission required'),
         new OA\Response(response: 409, description: 'Plan is stale or already used', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'The bulk operation failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 #[OA\Post(
@@ -156,6 +157,7 @@ class OpenApiPaths
         new OA\Response(response: 400, description: 'Invalid asset IDs, target folder, dryRun, or plan token', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 403, description: 'Operate permission required'),
         new OA\Response(response: 409, description: 'Plan is stale or already used', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'The bulk operation failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 #[OA\Post(
@@ -181,6 +183,7 @@ class OpenApiPaths
         new OA\Response(response: 400, description: 'Invalid asset IDs, dryRun, or plan token', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 403, description: 'Operate permission required'),
         new OA\Response(response: 409, description: 'Plan is stale or already used', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'The bulk operation failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 class OpenApiHealthAndUnusedSpecification
@@ -664,6 +667,7 @@ class OpenApiDuplicateSpecification
         new OA\Response(response: 403, description: 'An asset cannot be published', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 409, description: 'The preview plan is stale or already applied; run a fresh dry-run', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 422, description: 'Dry-run preview rejected (for example no eligible assets in the selection)', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'The property mutation failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 class OpenApiAssetManagementSpecification
@@ -803,6 +807,7 @@ class OpenApiAssetManagementSpecification
         new OA\Response(response: 403, description: 'Object cannot be published', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 404, description: 'Object not found', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 409, description: 'Preview plan is stale or already claimed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'Organization failed; the response body carries the runId of the failed run', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 #[OA\Post(
@@ -859,6 +864,7 @@ class OpenApiAssetManagementSpecification
         new OA\Response(response: 403, description: 'An object cannot be published', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 409, description: 'Preview plan is stale or already claimed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 404, description: 'No matching objects found', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'Bulk organization failed; the response body carries the runId of the failed run', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 #[OA\Post(
@@ -983,6 +989,7 @@ class OpenApiAssetManagementSpecification
         new OA\Response(response: 403, description: 'Operate permission required'),
         new OA\Response(response: 404, description: 'Run not found or not visible to this actor', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 409, description: 'No retryable items', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 500, description: 'Retry failed; the response body carries the runId of the failed retry run', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]
 class OpenApiOperationsSpecification
