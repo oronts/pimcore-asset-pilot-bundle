@@ -33,11 +33,12 @@ class NormalizeFilenamesServiceTest extends TestCase
         return $asset;
     }
 
-    private function scanner(bool $canVerify = true, bool $referenced = false): ContentUsageScanner&MockObject
+    private function scanner(bool $canVerify = true, bool $referenced = false, ?bool $freshlyReferenced = null): ContentUsageScanner&MockObject
     {
         $scanner = $this->createMock(ContentUsageScanner::class);
         $scanner->method('canVerify')->willReturn($canVerify);
         $scanner->method('isReferencedInContent')->willReturn($referenced);
+        $scanner->method('freshlyReferencedInContent')->willReturn($freshlyReferenced ?? $referenced);
 
         return $scanner;
     }
@@ -220,6 +221,25 @@ class NormalizeFilenamesServiceTest extends TestCase
         $renamed = new \ArrayObject();
         $result = $this->service([1 => $this->asset(1, 'My File.JPG')], ['My File.JPG' => 'my-file.jpg'], $renamed, $this->scanner(referenced: true))
             ->normalize([1], dryRun: false);
+
+        self::assertSame(0, $result['renamed']);
+        self::assertSame(1, $result['failed']);
+        self::assertStringContainsString('content', $result['errors'][1]);
+        self::assertSame([], $renamed->getArrayCopy());
+    }
+
+    #[Test]
+    public function failsWhenAContentReferenceLandsAfterTheCachedScan(): void
+    {
+        // The earlier dry-run cached a negative (isReferencedInContent === false); a reference committed in
+        // the window before apply is only visible to the fenced fresh re-read, which must block the rename.
+        $renamed = new \ArrayObject();
+        $result = $this->service(
+            [1 => $this->asset(1, 'My File.JPG')],
+            ['My File.JPG' => 'my-file.jpg'],
+            $renamed,
+            $this->scanner(referenced: false, freshlyReferenced: true),
+        )->normalize([1], dryRun: false);
 
         self::assertSame(0, $result['renamed']);
         self::assertSame(1, $result['failed']);

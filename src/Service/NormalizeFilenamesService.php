@@ -131,7 +131,10 @@ class NormalizeFilenamesService implements NormalizeFilenamesServiceInterface
             if (!$this->contentScanner->canVerify()) {
                 return ['state' => 'failed', 'error' => 'Content-reference verification is not configured'];
             }
-            if ($this->contentScanner->isReferencedInContent($asset)) {
+            // Fenced fresh re-read inside the apply-time lock: a preview in this same process cached a negative,
+            // and a content reference committed in the window since must not authorize the rename (a rename
+            // breaks a hard-coded path exactly like a move). Matches every other destructive path.
+            if ($this->contentScanner->freshlyReferencedInContent($asset)) {
                 return ['state' => 'failed', 'error' => 'Asset is referenced in object content (text/WYSIWYG)'];
             }
 
