@@ -34,7 +34,7 @@ class HealthController
                     'name' => $result->name,
                     'status' => $result->status->value,
                     'message' => $result->message,
-                    'details' => $result->details,
+                    'details' => (object) $result->details,
                 ], $results),
             ]);
         } catch (\Throwable $e) {

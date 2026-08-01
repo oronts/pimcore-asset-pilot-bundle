@@ -115,7 +115,10 @@ class RulesController
     public function export(): JsonResponse
     {
         try {
-            return new JsonResponse($this->portability->export());
+            $export = $this->portability->export();
+            $export['rules'] = (object) ($export['rules'] ?? []);
+
+            return new JsonResponse($export);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to export rules.', ['exception' => $e]);
 
@@ -147,9 +150,9 @@ class RulesController
         }
 
         return new JsonResponse([
-            'added' => $diff->added,
-            'removed' => $diff->removed,
-            'changed' => $diff->changed,
+            'added' => (object) $diff->added,
+            'removed' => (object) $diff->removed,
+            'changed' => (object) $diff->changed,
             'unchanged' => $diff->unchanged,
             'hasChanges' => $diff->hasChanges(),
         ]);
@@ -171,7 +174,7 @@ class RulesController
                 'strategy' => $rule->strategy->value,
                 'priority' => $rule->priority,
                 'enabled' => $rule->enabled,
-                'filters' => $rule->filters,
+                'filters' => (object) $rule->filters,
             ], $rules);
 
             $this->logger->debug('Listed {count} rules.', ['count' => count($response)]);
@@ -219,8 +222,8 @@ class RulesController
                 'strategy' => $rule->strategy->value,
                 'priority' => $rule->priority,
                 'enabled' => $rule->enabled,
-                'filters' => $rule->filters,
-                'stats' => $stats,
+                'filters' => (object) $rule->filters,
+                'stats' => (object) $stats,
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to get rule detail for "{rule}".', [

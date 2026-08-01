@@ -1370,7 +1370,15 @@ class OpenApiQuarantineSpecification
     tags: ['Asset Pilot'],
     parameters: [new OA\Parameter(ref: '#/components/parameters/StudioPrefix')],
     responses: [
-        new OA\Response(response: 200, description: 'Class statistics', content: new OA\JsonContent(type: 'object', additionalProperties: true)),
+        new OA\Response(response: 200, description: 'Per-class operation statistics', content: new OA\JsonContent(type: 'array', items: new OA\Items(type: 'object', required: ['className', 'total', 'completed', 'completed_with_observer_error', 'failed', 'skipped', 'ruleCount'], properties: [
+            new OA\Property(property: 'className', type: 'string'),
+            new OA\Property(property: 'total', type: 'integer', minimum: 0),
+            new OA\Property(property: 'completed', type: 'integer', minimum: 0),
+            new OA\Property(property: 'completed_with_observer_error', type: 'integer', minimum: 0),
+            new OA\Property(property: 'failed', type: 'integer', minimum: 0),
+            new OA\Property(property: 'skipped', type: 'integer', minimum: 0),
+            new OA\Property(property: 'ruleCount', type: 'integer', minimum: 0),
+        ]))),
         new OA\Response(response: 500, description: 'Class statistics lookup failed', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
     ],
 )]

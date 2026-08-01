@@ -46,7 +46,7 @@ class DashboardController
                 'totalSkipped' => $stats['skipped'] ?? 0,
                 'rulesCount' => count($this->ruleEngine->getRules()),
                 'recentOperations' => $recent,
-                'operationsByClass' => $stats['by_class'] ?? [],
+                'operationsByClass' => (object) ($stats['by_class'] ?? []),
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to load dashboard.', ['exception' => $e]);
