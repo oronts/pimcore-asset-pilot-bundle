@@ -33,6 +33,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\AssetReorganizerInterface;
 use Oronts\AssetPilotBundle\Service\FailureReplayServiceInterface;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -78,11 +79,12 @@ class OperationsController
         private readonly OperationResponseAssembler $responses,
         private readonly OrganizeRunDispatchCoordinator $runCoordinator,
         private readonly VisibleObjectSelectorInterface $objectSelector,
+        private readonly ObjectSaveDrainInterface $drain,
         protected readonly int $defaultBatchSize = 50,
         protected readonly array $planConfiguration = [],
         ?SynchronousRunExecutor $syncRunExecutor = null,
     ) {
-        $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease);
+        $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease, $this->drain);
     }
 
     #[Route('/operations/reorganize', name: 'oronts_asset_pilot_operations_reorganize', methods: ['POST'])]
@@ -324,7 +326,7 @@ class OperationsController
             [(int) $objectId => $expectedFingerprint],
         );
         $this->runs->start($runId);
-        $outcome = $this->syncRunExecutor->executeSingle($runId, $object, TriggerType::Api, $expectedFingerprint);
+        $outcome = $this->syncRunExecutor->executeSingle($runId, $object, TriggerType::Api, $expectedFingerprint, $actor);
         if ($outcome->kind === SingleRunOutcomeKind::Failed) {
             $this->logger->error('Asset Pilot API: organization failed for object {id}', ['id' => $objectId, 'exception' => $outcome->cause]);
         }
@@ -490,7 +492,7 @@ class OperationsController
 
         $runId = $this->organizeDispatcher->createRun($objectIds, TriggerType::Api, $actor, $preview['fingerprints']);
         $this->runs->start($runId);
-        $outcome = $this->syncRunExecutor->executeBulk($runId, $objectIds, TriggerType::Api, $preview['fingerprints']);
+        $outcome = $this->syncRunExecutor->executeBulk($runId, $objectIds, TriggerType::Api, $preview['fingerprints'], $actor);
         if ($outcome->kind === BulkRunOutcomeKind::Failed) {
             $this->logger->error('Asset Pilot API: bulk organization failed', ['exception' => $outcome->cause]);
         }

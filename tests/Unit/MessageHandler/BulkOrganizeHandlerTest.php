@@ -175,6 +175,53 @@ class BulkOrganizeHandlerTest extends TestCase
     }
 
     #[Test]
+    public function drainsAFingerprintedObjectSavedWhileTheBulkJobWasProcessing(): void
+    {
+        // A save that coalesced into an immutable-plan bulk run still marks the object dirty; the tracked drain
+        // must re-dispatch it, not skip it because the object carried an expected fingerprint.
+        $object = $this->createMock(AbstractObject::class);
+        $object->method('getId')->willReturn(2);
+        $expected = (new OrganizePlanFingerprint())->forOperations($object, []);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('dryRun')->willReturn([]);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, mixed $progress, int $dispatchedAt, ?callable $stale, callable $cancel, callable $before, array $fingerprints, callable $heartbeat, callable $after): BulkOrganizeReport {
+                $before(2);
+                $after(new BulkObjectResult(2, BulkObjectStatus::Succeeded, operationCount: 1));
+
+                return new BulkOrganizeReport([], []);
+            },
+        );
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+            2,
+            TriggerType::BulkOperation,
+            self::callback(static fn (ActorContext $actor): bool => $actor->type === ActorType::System),
+        );
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->method('beginOperationRunItemLease')->willReturn('token-2');
+        $loopGuard->method('isObjectDirty')->with(2)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(2);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willReturn(true);
+        $runs->method('completeItem')->willReturn(true);
+        $runs->method('finish')->willReturn(OperationRunStatus::Completed);
+
+        ($this->handler($organizer, $dispatcher, $loopGuard, $runs, [2 => $object]))(
+            new BulkOrganizeMessage(
+                objectIds: [2],
+                triggerType: TriggerType::BulkOperation,
+                actorType: ActorType::System,
+                runId: 'run-1',
+                expectedFingerprints: [2 => $expected],
+            ),
+        );
+    }
+
+    #[Test]
     public function recordsPerObjectProgressForTrackedBatches(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);

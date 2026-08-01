@@ -211,7 +211,9 @@ class BulkOrganizeHandler
 
     private function requeueDirtyObject(BulkOrganizeMessage $message, ActorContext $actor, int $objectId): void
     {
-        if (isset($message->expectedFingerprints[$objectId]) || !$this->loopGuard->isObjectDirty($objectId)) {
+        // A concurrent save that coalesced into this run (including an immutable-plan one) needs a fresh
+        // non-fingerprinted organize, so drain the dirty flag regardless of expectedFingerprints.
+        if (!$this->loopGuard->isObjectDirty($objectId)) {
             return;
         }
 

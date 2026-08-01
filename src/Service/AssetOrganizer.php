@@ -105,10 +105,12 @@ class AssetOrganizer implements AssetOrganizerInterface
                 $heartbeat();
             }
             array_push($results, ...$this->organizeCurrentState($object, $triggerType, $ruleName, $expectedFingerprint, $heartbeat));
-            if (!$this->loopGuard->consumeObjectDirty($objectId)) {
+            if ($expectedFingerprint !== null) {
+                // Immutable-plan run: never replay, and leave any concurrent save's dirty flag for the drain
+                // rather than consuming (discarding) it here.
                 break;
             }
-            if ($expectedFingerprint !== null) {
+            if (!$this->loopGuard->consumeObjectDirty($objectId)) {
                 break;
             }
             if ($pass >= $this->maxObjectReplays) {
@@ -288,6 +290,10 @@ class AssetOrganizer implements AssetOrganizerInterface
             'id' => $objectId,
             'fieldCount' => count($fieldInfos),
         ]);
+
+        // Renew the coalescing/processing markers before the eager match planning, which runs before the first
+        // per-asset refresh below, so a coalesced save is not dropped by a marker lapsing during planning.
+        $this->loopGuard->refreshObject($objectId);
 
         $results = [];
         foreach ($this->bestMatches($object, $fieldInfos, $ruleName) as $candidate) {

@@ -66,6 +66,7 @@ element lookup, a render helper), never a safety decision.
 | `VisibleObjectSelectorInterface` | `VisibleObjectSelector` |
 | `MetricsServiceInterface` | `MetricsService` |
 | `NormalizeFilenamesServiceInterface` | `NormalizeFilenamesService` |
+| `ObjectSaveDrainInterface` | `ObjectSaveDrain` |
 | `OperationReverterInterface` | `OperationReverter` |
 | `PrometheusFormatterInterface` | `PrometheusFormatter` |
 | `QuarantineServiceInterface` | `QuarantineService` |

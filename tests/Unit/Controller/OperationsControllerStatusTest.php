@@ -15,6 +15,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\AssetReorganizerInterface;
 use Oronts\AssetPilotBundle\Service\FailureReplayServiceInterface;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -69,6 +70,7 @@ final class OperationsControllerStatusTest extends TestCase
             new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
             new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcherInterface::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
             $this->createMock(VisibleObjectSelectorInterface::class),
+            $this->createMock(ObjectSaveDrainInterface::class),
         );
     }
 }

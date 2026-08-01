@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\BulkRunOutcomeKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
@@ -11,14 +12,21 @@ use Oronts\AssetPilotBundle\Enum\SingleRunOutcomeKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\RunItemLease;
 use Oronts\AssetPilotBundle\Service\SynchronousRunExecutor;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
+use Psr\Log\NullLogger;
 
 final class SynchronousRunExecutorTest extends TestCase
 {
@@ -35,7 +43,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('start')->willReturn(false);
         $lease->expects(self::never())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::ClaimConflict, $outcome->kind);
     }
@@ -49,7 +57,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease = $this->createMock(RunItemLease::class);
         $lease->method('start')->willThrowException(new \RuntimeException('db error claiming the item'));
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::ClaimConflict, $outcome->kind);
     }
@@ -66,10 +74,92 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('complete')->willReturn(true);
         $lease->expects(self::once())->method('release')->with(self::RUN, 'object:42');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::Completed, $outcome->kind);
         self::assertSame([], $outcome->results);
+    }
+
+    #[Test]
+    public function executeSingleDrainsACoalescedSaveUnderTheRunActor(): void
+    {
+        // A save that coalesced into this synchronous reviewed run marked the object dirty; the executor must
+        // drain it (queue a fresh non-fingerprinted organize) under the run's actor, mirroring the async handlers.
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeWithHeartbeat')->willReturn([]);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('finish')->willReturn(OperationRunStatus::Completed);
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('complete')->willReturn(true);
+        $actor = ActorContext::user(7);
+        $drain = $this->createMock(ObjectSaveDrainInterface::class);
+        $drain->expects(self::once())->method('drain')->with(42, TriggerType::ObjectSave, $actor);
+
+        $this->executor($organizer, $runs, $lease, $drain)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', $actor);
+    }
+
+    #[Test]
+    public function executeBulkDrainsEveryCompletedObjectUnderTheRunActor(): void
+    {
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, ?callable $progress, ?int $dispatchedAt, ?callable $stale, ?callable $cancel, ?callable $before, array $fingerprints, ?callable $heartbeat, ?callable $after): BulkOrganizeReport {
+                foreach ([1, 2] as $id) {
+                    $before($id);
+                    $after(new BulkObjectResult($id, BulkObjectStatus::Succeeded, operationCount: 1));
+                }
+
+                return new BulkOrganizeReport([], []);
+            },
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('finish')->willReturn(OperationRunStatus::Completed);
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('complete')->willReturn(true);
+        $actor = ActorContext::user(7);
+        $drained = [];
+        $drain = $this->createMock(ObjectSaveDrainInterface::class);
+        $drain->expects(self::exactly(2))->method('drain')->willReturnCallback(
+            static function (int $id, TriggerType $trigger, ActorContext $a) use (&$drained, $actor): void {
+                self::assertSame(TriggerType::ObjectSave, $trigger);
+                self::assertSame($actor, $a);
+                $drained[] = $id;
+            },
+        );
+
+        $this->executor($organizer, $runs, $lease, $drain)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], $actor);
+        self::assertSame([1, 2], $drained);
+    }
+
+    #[Test]
+    public function executeBulkDrainsBeforeCompletingSoAThrowingCompletionCannotSkipTheDrain(): void
+    {
+        // Guards the drain-before-complete ordering: if completion throws, the coalesced save must already be drained.
+        $drained = [];
+        $drain = $this->createMock(ObjectSaveDrainInterface::class);
+        $drain->method('drain')->willReturnCallback(static function (int $id) use (&$drained): void {
+            $drained[] = $id;
+        });
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeBulkDetailed')->willReturnCallback(
+            static function (array $ids, TriggerType $trigger, ?callable $progress, ?int $dispatchedAt, ?callable $stale, ?callable $cancel, ?callable $before, array $fingerprints, ?callable $heartbeat, ?callable $after): BulkOrganizeReport {
+                $before(1);
+                $after(new BulkObjectResult(1, BulkObjectStatus::Succeeded, operationCount: 1));
+
+                return new BulkOrganizeReport([], []);
+            },
+        );
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('start')->willReturn(true);
+        $lease->method('token')->willReturn('tok');
+        $lease->method('complete')->willThrowException(new \RuntimeException('completion failed'));
+
+        $this->executor($organizer, $runs, $lease, $drain)->executeBulk(self::RUN, [1], TriggerType::Api, [], ActorContext::user(7));
+
+        self::assertSame([1], $drained, 'the drain ran before the completion threw');
     }
 
     #[Test]
@@ -83,7 +173,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('start')->willReturn(true);
         $lease->method('complete')->willReturn(false);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -99,7 +189,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('start')->willReturn(true);
         $lease->expects(self::once())->method('complete')->willReturn(true);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::Stale, $outcome->kind);
     }
@@ -115,7 +205,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('start')->willReturn(true);
         $lease->method('complete')->willReturn(false);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -133,7 +223,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('complete')->willReturn(true);
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::Failed, $outcome->kind);
         self::assertSame($error, $outcome->cause);
@@ -150,7 +240,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('start')->willReturn(true);
         $lease->method('complete')->willReturn(false);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -175,7 +265,7 @@ final class SynchronousRunExecutorTest extends TestCase
         });
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
         self::assertSame(1, $completeCalls, 'A successful item must not be re-completed as failed.');
@@ -193,7 +283,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->expects(self::once())->method('complete')->willThrowException(new \RuntimeException('db error recording the skip'));
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -208,7 +298,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $runs->expects(self::once())->method('finish')->with(self::RUN)->willReturn(OperationRunStatus::Completed);
         $lease = $this->createMock(RunItemLease::class);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::Completed, $outcome->kind);
         self::assertSame($report, $outcome->report);
@@ -224,7 +314,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $runs->expects(self::never())->method('fail');
         $lease = $this->createMock(RunItemLease::class);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
     }
@@ -249,7 +339,7 @@ final class SynchronousRunExecutorTest extends TestCase
             ->with(self::RUN, 'object:2', OperationRunItemStatus::Failed, [], 'Bulk organization failed.')
             ->willReturn(true);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2, 3], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2, 3], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::Failed, $outcome->kind);
         self::assertSame($error, $outcome->cause);
@@ -268,7 +358,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('token')->willReturnMap([[self::RUN, 'object:1', 'tok']]);
         $lease->method('complete')->willReturn(false);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
     }
@@ -283,7 +373,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $runs->method('finish')->willReturn(OperationRunStatus::Failed);
         $lease = $this->createMock(RunItemLease::class);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
     }
@@ -298,7 +388,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $runs->method('finish')->willReturn(OperationRunStatus::Partial);
         $lease = $this->createMock(RunItemLease::class);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::Completed, $outcome->kind);
         self::assertSame($report, $outcome->report);
@@ -319,7 +409,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->expects(self::once())->method('complete')->willReturn(true);
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -336,7 +426,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('complete')->willThrowException(new \RuntimeException('db error recording the failure'));
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -353,7 +443,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('complete')->willReturn(true);
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -370,7 +460,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('complete')->willReturn(true);
         $lease->expects(self::once())->method('release');
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
@@ -388,7 +478,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->expects(self::once())->method('release')->with(self::RUN, 'object:1');
         $lease->method('complete')->willThrowException(new \RuntimeException('cleanup db error'));
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
     }
@@ -406,7 +496,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease = $this->createMock(RunItemLease::class);
         $lease->method('token')->willReturn(null);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
     }
@@ -421,7 +511,7 @@ final class SynchronousRunExecutorTest extends TestCase
         $runs->method('finish')->willReturn(OperationRunStatus::Running);
         $lease = $this->createMock(RunItemLease::class);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, []);
+        $outcome = $this->executor($organizer, $runs, $lease)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::system());
 
         self::assertSame(BulkRunOutcomeKind::OwnershipLost, $outcome->kind);
     }
@@ -437,14 +527,14 @@ final class SynchronousRunExecutorTest extends TestCase
         $lease->method('start')->willReturn(true);
         $lease->method('complete')->willReturn(true);
 
-        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp');
+        $outcome = $this->executor($organizer, $runs, $lease)->executeSingle(self::RUN, $this->object(), TriggerType::Api, 'fp', ActorContext::system());
 
         self::assertSame(SingleRunOutcomeKind::LeaseLost, $outcome->kind);
     }
 
-    private function executor(AssetOrganizerInterface $organizer, OperationRunStoreInterface $runs, RunItemLease $lease): SynchronousRunExecutor
+    private function executor(AssetOrganizerInterface $organizer, OperationRunStoreInterface $runs, RunItemLease $lease, ?ObjectSaveDrainInterface $drain = null): SynchronousRunExecutor
     {
-        return new SynchronousRunExecutor($organizer, $runs, $lease);
+        return new SynchronousRunExecutor($organizer, $runs, $lease, $drain ?? new ObjectSaveDrain($this->createMock(LoopGuard::class), $this->createMock(OrganizeDispatcherInterface::class), new NullLogger()));
     }
 
     private function object(): AbstractObject

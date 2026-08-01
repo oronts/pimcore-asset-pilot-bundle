@@ -22,6 +22,8 @@ use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\ApplyPlanService;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -610,6 +612,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
                 new OrganizePlanFingerprint(),
                 new NullLogger(),
                 $lease ?? $this->createMock(RunItemLease::class),
+                new ObjectSaveDrain($this->createMock(LoopGuard::class), $this->createMock(OrganizeDispatcher::class), new NullLogger()),
                 ['rules' => ['product-assets']],
             ])
             ->onlyMethods(['loadObject'])

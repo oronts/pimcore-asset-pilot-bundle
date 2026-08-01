@@ -20,6 +20,8 @@ use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -52,10 +54,12 @@ class OrganizeAssetsHandlerTest extends TestCase
             $loopGuard->method('acquireOperationRunItem')->willReturn(true);
         }
 
-        return new class ($organizer, $dispatcher, $authorization, $actors, $loopGuard, new NullLogger(), $runs ?? $this->createMock(OperationRunStoreInterface::class), new OrganizePlanFingerprint(), $object, $reloadedObject ?? $object) extends OrganizeAssetsHandler {
-            public function __construct(AssetOrganizer $organizer, OrganizeDispatcher $dispatcher, ElementAuthorization $authorization, ActorContextStore $actors, LoopGuard $loopGuard, NullLogger $logger, OperationRunStoreInterface $runs, OrganizePlanFingerprint $fingerprints, private readonly AbstractObject $object, private readonly AbstractObject $reloadedObject)
+        $drain = new ObjectSaveDrain($loopGuard, $dispatcher, new NullLogger());
+
+        return new class ($organizer, $dispatcher, $authorization, $actors, $loopGuard, new NullLogger(), $runs ?? $this->createMock(OperationRunStoreInterface::class), new OrganizePlanFingerprint(), $drain, $object, $reloadedObject ?? $object) extends OrganizeAssetsHandler {
+            public function __construct(AssetOrganizer $organizer, OrganizeDispatcher $dispatcher, ElementAuthorization $authorization, ActorContextStore $actors, LoopGuard $loopGuard, NullLogger $logger, OperationRunStoreInterface $runs, OrganizePlanFingerprint $fingerprints, ObjectSaveDrainInterface $drain, private readonly AbstractObject $object, private readonly AbstractObject $reloadedObject)
             {
-                parent::__construct($organizer, $dispatcher, $authorization, $actors, $loopGuard, $logger, $runs, $fingerprints);
+                parent::__construct($organizer, $dispatcher, $authorization, $actors, $loopGuard, $logger, $runs, $fingerprints, $drain);
             }
 
             protected function loadObject(int $objectId): ?AbstractObject

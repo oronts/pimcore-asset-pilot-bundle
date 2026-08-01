@@ -16,6 +16,7 @@ use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -39,6 +40,7 @@ class OrganizeAssetsHandler
         protected readonly LoggerInterface $logger,
         protected readonly OperationRunStoreInterface $runs,
         protected readonly OrganizePlanFingerprint $planFingerprints,
+        protected readonly ObjectSaveDrainInterface $drain,
     ) {}
 
     public function __invoke(OrganizeAssetsMessage $message): void
@@ -252,25 +254,11 @@ class OrganizeAssetsHandler
      */
     private function drainCoalescedSave(OrganizeAssetsMessage $message): void
     {
-        $this->loopGuard->clearObjectDispatched($message->objectId);
-        if (!$this->loopGuard->isObjectDirty($message->objectId)) {
-            return;
-        }
-
-        try {
-            $this->dispatcher->dispatchObject(
-                $message->objectId,
-                $message->triggerType,
-                new ActorContext($message->actorType, $message->actorUserId),
-            );
-            $this->loopGuard->clearObjectDirty($message->objectId);
-        } catch (\Throwable $dispatchError) {
-            $this->logger->error('Asset Pilot: could not requeue a coalesced save after a failed organize for object {id}: {error}', [
-                'id' => $message->objectId,
-                'error' => $dispatchError->getMessage(),
-                'exception' => $dispatchError,
-            ]);
-        }
+        $this->drain->drain(
+            $message->objectId,
+            $message->triggerType,
+            new ActorContext($message->actorType, $message->actorUserId),
+        );
     }
 
     protected function loadObject(int $objectId): ?AbstractObject
@@ -285,10 +273,9 @@ class OrganizeAssetsHandler
 
     private function requeueWhenObjectChanged(OrganizeAssetsMessage $message, ActorContext $actor, ?int $processedModificationDate): void
     {
-        // A null modification date means a non-Concrete object, and an expected fingerprint means an immutable
-        // API/CLI plan; neither is ever produced by the save listeners, so neither carries a coalescing marker and
-        // skipping the drain here cannot orphan a coalesced save (a listener run is always a Concrete object).
-        if ($processedModificationDate === null || $message->expectedFingerprint !== null) {
+        // A non-Concrete object has no coalesced save to drain. An immutable-plan run still drains here: a
+        // concurrent save can coalesce into it and needs a fresh non-fingerprinted organize, not the one-shot plan.
+        if ($processedModificationDate === null) {
             return;
         }
 

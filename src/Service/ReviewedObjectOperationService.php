@@ -36,10 +36,11 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
         private readonly OrganizePlanFingerprint $fingerprints,
         private readonly LoggerInterface $logger,
         private readonly RunItemLease $runItemLease,
+        private readonly ObjectSaveDrainInterface $drain,
         private readonly array $planConfiguration = [],
         ?SynchronousRunExecutor $syncRunExecutor = null,
     ) {
-        $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease);
+        $this->syncRunExecutor = $syncRunExecutor ?? new SynchronousRunExecutor($this->organizer, $this->runs, $this->runItemLease, $this->drain);
     }
 
     public function execute(
@@ -303,7 +304,7 @@ class ReviewedObjectOperationService implements ReviewedObjectOperationServiceIn
             );
         }
         try {
-            $report = $this->syncRunExecutor->runBulkOrganize($runId, $objectIds, $triggerType, $fingerprints);
+            $report = $this->syncRunExecutor->runBulkOrganize($runId, $objectIds, $triggerType, $fingerprints, $this->authorization->currentActor());
         } catch (LostRunItemOwnershipException $e) {
             throw new ReviewedSelectionException(
                 ReviewedSelectionError::OwnershipLost,

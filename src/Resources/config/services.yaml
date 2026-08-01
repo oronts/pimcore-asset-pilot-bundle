@@ -60,6 +60,7 @@ services:
     Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface: '@Oronts\AssetPilotBundle\Service\AssetFieldExtractor'
     Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface: '@Oronts\AssetPilotBundle\Service\UnusedAssetFinder'
     Oronts\AssetPilotBundle\Service\AssetZipServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetZipService'
+    Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface: '@Oronts\AssetPilotBundle\Service\ObjectSaveDrain'
     Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetSearchService'
     Oronts\AssetPilotBundle\Service\ConfidenceScorerInterface: '@Oronts\AssetPilotBundle\Service\ConfidenceScorer'
     Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetIntegrityService'

@@ -11,6 +11,7 @@ use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
+use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
 use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
 use Oronts\AssetPilotBundle\Model\BulkRunOutcome;
@@ -29,11 +30,13 @@ final class SynchronousRunExecutor
         private readonly AssetOrganizerInterface $organizer,
         private readonly OperationRunStoreInterface $runs,
         private readonly RunItemLease $runItemLease,
+        private readonly ObjectSaveDrainInterface $drain,
     ) {}
 
-    public function executeSingle(string $runId, AbstractObject $object, TriggerType $trigger, string $expectedFingerprint): SingleRunOutcome
+    public function executeSingle(string $runId, AbstractObject $object, TriggerType $trigger, string $expectedFingerprint, ActorContext $actor): SingleRunOutcome
     {
-        $itemKey = $this->runItemKey((int) $object->getId());
+        $objectId = (int) $object->getId();
+        $itemKey = $this->runItemKey($objectId);
         try {
             $started = $this->runItemLease->start($runId, $itemKey);
         } catch (\Throwable) {
@@ -53,11 +56,17 @@ final class SynchronousRunExecutor
                     expectedFingerprint: $expectedFingerprint,
                 );
             } catch (StaleApplyPlanException) {
+                // The concurrent save that made the plan stale coalesced into this run; drain it so its new state organizes.
+                $this->drain->drain($objectId, TriggerType::ObjectSave, $actor);
+
                 return $this->completeItemThenFinish($runId, $itemKey, OperationRunItemStatus::Skipped, [], 'Object changed after preview; the immutable plan was not applied.', SingleRunOutcome::stale());
             }
+            $this->drain->drain($objectId, TriggerType::ObjectSave, $actor);
 
             return $this->completeItemThenFinish($runId, $itemKey, $this->operationItemStatus($results), ['operationCount' => count($results)], null, SingleRunOutcome::completed($results));
         } catch (\Throwable $e) {
+            $this->drain->drain($objectId, TriggerType::ObjectSave, $actor);
+
             return $this->failItemAndRun($runId, $itemKey, $e);
         } finally {
             $this->runItemLease->release($runId, $itemKey);
@@ -119,10 +128,10 @@ final class SynchronousRunExecutor
      * @param list<int>          $objectIds
      * @param array<int, string> $fingerprints
      */
-    public function executeBulk(string $runId, array $objectIds, TriggerType $trigger, array $fingerprints): BulkRunOutcome
+    public function executeBulk(string $runId, array $objectIds, TriggerType $trigger, array $fingerprints, ActorContext $actor): BulkRunOutcome
     {
         try {
-            $report = $this->runBulkOrganize($runId, $objectIds, $trigger, $fingerprints);
+            $report = $this->runBulkOrganize($runId, $objectIds, $trigger, $fingerprints, $actor);
         } catch (LostRunItemOwnershipException $e) {
             return BulkRunOutcome::ownershipLost($e);
         } catch (\Throwable $e) {
@@ -160,7 +169,7 @@ final class SynchronousRunExecutor
      * @param list<int>          $objectIds
      * @param array<int, string> $fingerprints
      */
-    public function runBulkOrganize(string $runId, array $objectIds, TriggerType $trigger, array $fingerprints): BulkOrganizeReport
+    public function runBulkOrganize(string $runId, array $objectIds, TriggerType $trigger, array $fingerprints, ActorContext $actor): BulkOrganizeReport
     {
         return $this->organizer->organizeBulkDetailed(
             $objectIds,
@@ -169,13 +178,18 @@ final class SynchronousRunExecutor
             beforeObject: fn (int $objectId): bool => $this->runItemLease->start($runId, $this->runItemKey($objectId)),
             expectedFingerprints: $fingerprints,
             heartbeat: fn (int $objectId) => $this->runItemLease->pulse($runId, $this->runItemKey($objectId)),
-            afterObject: fn (BulkObjectResult $result) => $this->runItemLease->complete(
-                $runId,
-                $this->runItemKey($result->objectId),
-                $this->bulkItemStatus($result->status),
-                ['operationCount' => $result->operationCount],
-                $result->reason,
-            ),
+            afterObject: function (BulkObjectResult $result) use ($runId, $actor): bool {
+                // Drain before completing so a completion failure cannot skip draining a coalesced save.
+                $this->drain->drain($result->objectId, TriggerType::ObjectSave, $actor);
+
+                return $this->runItemLease->complete(
+                    $runId,
+                    $this->runItemKey($result->objectId),
+                    $this->bulkItemStatus($result->status),
+                    ['operationCount' => $result->operationCount],
+                    $result->reason,
+                );
+            },
         );
     }
 

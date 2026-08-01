@@ -383,6 +383,24 @@ class AssetOrganizerTest extends TestCase
     }
 
     #[Test]
+    public function reviewedApplyLeavesTheDirtyFlagForTheDrainInsteadOfConsumingIt(): void
+    {
+        // An immutable-plan run never replays; it must leave a concurrent save's dirty flag for the terminal
+        // drain rather than consuming (discarding) it.
+        $object = $this->reviewedObject(42);
+        $fingerprints = new OrganizePlanFingerprint();
+        $plan = [$this->reviewedPendingOperation(7, '/o/7.jpg')];
+        $expected = $fingerprints->forOperations($object, $plan);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('acquireAsset')->willReturn(true);
+        $loopGuard->expects(self::never())->method('consumeObjectDirty');
+        $organizer = $this->reviewedOrganizer($object, $loopGuard, $fingerprints, [$plan, $plan]);
+
+        $organizer->organize($object, TriggerType::Api, expectedFingerprint: $expected);
+    }
+
+    #[Test]
     public function reviewedApplyRevalidatesUnderAssetLocksAndSkipsAStaleAssetDerivedPlan(): void
     {
         $object = $this->reviewedObject(42);

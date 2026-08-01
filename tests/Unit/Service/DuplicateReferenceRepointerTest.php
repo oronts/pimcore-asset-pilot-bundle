@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\DuplicateReferenceRepointer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -57,6 +60,7 @@ class DuplicateReferenceRepointerTest extends TestCase
         ?\ArrayObject $saved = null,
         bool $isObjectAuthorized = true,
         ?LoopGuard $loopGuard = null,
+        ?OrganizeDispatcherInterface $dispatcher = null,
     ): DuplicateReferenceRepointer {
         $writes ??= new \ArrayObject();
         $saved ??= new \ArrayObject();
@@ -65,6 +69,7 @@ class DuplicateReferenceRepointerTest extends TestCase
             $requiredBy, $fromAsset, $toAsset, $object, $relationFields, $wysiwygFields, $values,
             $stillReferences, $writes, $saved, $this->createMock(ElementAuthorization::class),
             $isObjectAuthorized, $loopGuard ?? new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+            $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class),
         ) extends DuplicateReferenceRepointer {
             /**
              * @param array<int, array{id: int, type: string}> $requiredBy
@@ -88,8 +93,9 @@ class DuplicateReferenceRepointerTest extends TestCase
                 ElementAuthorization $authorization,
                 private readonly bool $isObjectAuthorized,
                 LoopGuard $loopGuard,
+                OrganizeDispatcherInterface $dispatcher,
             ) {
-                parent::__construct($loopGuard, new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), $authorization);
+                parent::__construct($loopGuard, new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), $authorization, new ObjectSaveDrain($loopGuard, $dispatcher, new NullLogger()));
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -294,6 +300,28 @@ class DuplicateReferenceRepointerTest extends TestCase
     }
 
     #[Test]
+    public function repointDrainsACoalescedSaveAfterTheGuardedSave(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, self::anything());
+
+        $this->repointer(
+            [['id' => 42, 'type' => 'object']],
+            fromAsset: $this->asset(9, '/copy.jpg'),
+            toAsset: $this->asset(105, '/canonical.jpg'),
+            object: $this->createMock(Concrete::class),
+            relationFields: [['hero', 'manyToOneRelation']],
+            values: ['hero' => $this->asset(9)],
+            loopGuard: $loopGuard,
+            dispatcher: $dispatcher,
+        )->repoint(9, 105);
+    }
+
+    #[Test]
     public function blocksWhenTheObjectStillReferencesTheCopyAfterRewrite(): void
     {
         $report = $this->repointer(
@@ -384,6 +412,7 @@ class DuplicateReferenceRepointerTest extends TestCase
             new NullLogger(),
             $connection,
             $this->createMock(ElementAuthorization::class),
+            new ObjectSaveDrain(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), $this->createMock(OrganizeDispatcherInterface::class), new NullLogger()),
         );
 
         $method = new \ReflectionMethod(DuplicateReferenceRepointer::class, 'stillReferencesQuery');

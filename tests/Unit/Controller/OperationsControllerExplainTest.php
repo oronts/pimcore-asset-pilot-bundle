@@ -17,6 +17,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -89,6 +90,7 @@ final class OperationsControllerExplainTest extends TestCase
             new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
             new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcher::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
             $this->createMock(VisibleObjectSelectorInterface::class),
+            $this->createMock(ObjectSaveDrainInterface::class),
             $object,
         ) extends OperationsController {
             public function __construct(
@@ -110,9 +112,10 @@ final class OperationsControllerExplainTest extends TestCase
                 OperationResponseAssembler $responses,
                 OrganizeRunDispatchCoordinator $coordinator,
                 VisibleObjectSelectorInterface $selector,
+                ObjectSaveDrainInterface $drain,
                 private readonly AbstractObject $object,
             ) {
-                parent::__construct($organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, $dates, $lease, $responses, $coordinator, $selector);
+                parent::__construct($organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, $dates, $lease, $responses, $coordinator, $selector, $drain);
             }
 
             protected function loadObject(int $id): ?AbstractObject

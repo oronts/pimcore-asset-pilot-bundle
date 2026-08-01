@@ -24,6 +24,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -509,6 +510,7 @@ final class OperationsControllerPlanTest extends TestCase
                 $fingerprints,
                 new NullLogger(),
                 $this->createMock(RunItemLease::class),
+                $this->createMock(ObjectSaveDrainInterface::class),
             ])
             ->onlyMethods(['loadObject'])
             ->getMock();
@@ -542,6 +544,7 @@ final class OperationsControllerPlanTest extends TestCase
             new OperationResponseAssembler($urls),
             $runCoordinator,
             $this->createMock(VisibleObjectSelectorInterface::class),
+            $this->createMock(ObjectSaveDrainInterface::class),
             $objects,
         ) extends OperationsController {
             /** @param array<int, AbstractObject> $objects */
@@ -563,10 +566,11 @@ final class OperationsControllerPlanTest extends TestCase
                 OperationResponseAssembler $responses,
                 OrganizeRunDispatchCoordinator $runCoordinator,
                 VisibleObjectSelectorInterface $objectSelector,
+                ObjectSaveDrainInterface $drain,
                 private readonly array $objects,
             ) {
                 parent::__construct(
-                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator, $objectSelector,
+                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, $logger, new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator, $objectSelector, $drain,
                 );
             }
 

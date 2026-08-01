@@ -26,6 +26,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -243,7 +244,7 @@ final class OperationsControllerSyncRunTest extends TestCase
         $provider = $this->createMock(ActorContextProvider::class);
         $provider->method('current')->willReturn(ActorContext::system());
         $reviewed = $this->getMockBuilder(ReviewedObjectOperationService::class)
-            ->setConstructorArgs([$organizer, $dispatcher, $authorization, new ActorContextStore($provider), $runs, $plans, $fingerprints, new NullLogger(), $this->createMock(RunItemLease::class)])
+            ->setConstructorArgs([$organizer, $dispatcher, $authorization, new ActorContextStore($provider), $runs, $plans, $fingerprints, new NullLogger(), $this->createMock(RunItemLease::class), $this->createMock(ObjectSaveDrainInterface::class)])
             ->onlyMethods(['loadObject'])
             ->getMock();
         $responses = new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class));
@@ -266,6 +267,7 @@ final class OperationsControllerSyncRunTest extends TestCase
             $responses,
             $coordinator,
             $this->createMock(VisibleObjectSelectorInterface::class),
+            $this->createMock(ObjectSaveDrainInterface::class),
             $objects,
         ) extends OperationsController {
             /** @param array<int, AbstractObject> $objects */
@@ -286,10 +288,11 @@ final class OperationsControllerSyncRunTest extends TestCase
                 OperationResponseAssembler $responses,
                 OrganizeRunDispatchCoordinator $runCoordinator,
                 VisibleObjectSelectorInterface $objectSelector,
+                ObjectSaveDrainInterface $drain,
                 private readonly array $objects,
             ) {
                 parent::__construct(
-                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, new NullLogger(), new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator, $objectSelector,
+                    $organizer, $dispatcher, $audit, $rules, $fields, $replay, $reorganizer, $authorization, $runs, $plans, $fingerprints, $reviewed, new NullLogger(), new ApiDateFormatter(), $runItemLease, $responses, $runCoordinator, $objectSelector, $drain,
                 );
             }
 

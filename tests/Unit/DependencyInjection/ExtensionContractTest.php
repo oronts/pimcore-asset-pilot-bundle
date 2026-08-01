@@ -104,6 +104,8 @@ use Oronts\AssetPilotBundle\Service\MovePlanner;
 use Oronts\AssetPilotBundle\Service\MovePlannerInterface;
 use Oronts\AssetPilotBundle\Service\NormalizeFilenamesService;
 use Oronts\AssetPilotBundle\Service\NormalizeFilenamesServiceInterface;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationDeliveryDispatcher;
 use Oronts\AssetPilotBundle\Service\OperationDeliveryDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OperationDeliveryProcessor;
@@ -413,6 +415,7 @@ final class ExtensionContractTest extends TestCase
             VisibleObjectSelectorInterface::class => VisibleObjectSelector::class,
             MetricsServiceInterface::class => MetricsService::class,
             NormalizeFilenamesServiceInterface::class => NormalizeFilenamesService::class,
+            ObjectSaveDrainInterface::class => ObjectSaveDrain::class,
             OperationReverterInterface::class => OperationReverter::class,
             PrometheusFormatterInterface::class => PrometheusFormatter::class,
             QuarantineServiceInterface::class => QuarantineService::class,

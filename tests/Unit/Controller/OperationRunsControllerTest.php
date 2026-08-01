@@ -14,6 +14,7 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\OperationRunExecution;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
 use Oronts\AssetPilotBundle\Service\OperationRunExecutorInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
@@ -294,9 +295,7 @@ final class OperationRunsControllerTest extends TestCase
             $authorization,
             $urls,
             new \Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter(),
-            $loopGuard ?? $this->createMock(LoopGuard::class),
-            $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class),
-            new NullLogger(),
+            new ObjectSaveDrain($loopGuard ?? $this->createMock(LoopGuard::class), $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), new NullLogger()),
         );
     }
 

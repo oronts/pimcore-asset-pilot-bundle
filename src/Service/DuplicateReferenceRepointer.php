@@ -6,6 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\NotPermittedException;
 use Oronts\AssetPilotBundle\Merge\ReferrerSnapshot;
 use Oronts\AssetPilotBundle\Merge\RepointPreflight;
@@ -41,6 +42,7 @@ class DuplicateReferenceRepointer implements DuplicateReferenceRepointerInterfac
         protected readonly LoggerInterface $logger,
         protected readonly Connection $connection,
         protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly ObjectSaveDrainInterface $drain,
     ) {}
 
     public function preflight(int $fromAssetId, int $toAssetId, string $permission): RepointPreflight
@@ -215,6 +217,7 @@ class DuplicateReferenceRepointer implements DuplicateReferenceRepointerInterfac
                 } finally {
                     $this->loopGuard->unmarkObjectProcessing($objectId);
                 }
+                $this->drainObjectSave($objectId);
             }
 
             if ($this->objectStillReferences($objectId, $fromId)) {
@@ -227,6 +230,16 @@ class DuplicateReferenceRepointer implements DuplicateReferenceRepointerInterfac
                 $this->loopGuard->releaseObject($objectId);
             }
         }
+    }
+
+    /**
+     * The repoint save marks the object dirty (it swaps its asset relations under the processing marker), so a
+     * later organize would replay it; queue a fresh organize now to drain it (and any concurrent save that
+     * coalesced) rather than leaving the marker to linger. Best-effort: a dispatch failure never fails the merge.
+     */
+    private function drainObjectSave(int $objectId): void
+    {
+        $this->drain->drain($objectId, TriggerType::ObjectSave, $this->authorization->currentActor());
     }
 
     /**

@@ -15,6 +15,7 @@ use Oronts\AssetPilotBundle\Service\AssetFieldExtractor;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
 use Oronts\AssetPilotBundle\Service\FailureReplayService;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -56,6 +57,7 @@ class OperationsControllerResolveTest extends TestCase
             new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
             new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcher::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
             $this->createMock(VisibleObjectSelectorInterface::class),
+            $this->createMock(ObjectSaveDrainInterface::class),
         ) extends OperationsController {
             public ?AbstractObject $stub = null;
 
@@ -238,6 +240,7 @@ class OperationsControllerResolveTest extends TestCase
             new OperationResponseAssembler($this->createMock(UrlGeneratorInterface::class)),
             new OrganizeRunDispatchCoordinator($this->createMock(OrganizeDispatcher::class), $this->createMock(OperationRunStoreInterface::class), new NullLogger()),
             $selector,
+            $this->createMock(ObjectSaveDrainInterface::class),
         );
     }
 }
