@@ -538,19 +538,21 @@ class QuarantineServiceTest extends TestCase
     }
 
     #[Test]
-    public function recoverQuarantineFinalizesALingeringRecordWhoseAssetIsAlreadyBackAtItsOriginalPath(): void
+    public function recoverQuarantineReportsNotRecoveredWhenTheCopyNeverReachedQuarantine(): void
     {
-        // A prior restore committed the move but the record delete did not complete: the asset sits at
-        // its original path yet the row lingers. Reconciliation must finalize it idempotently.
+        // A merge disposition crashed after inserting the pending record but before moving the copy into
+        // quarantine, so the copy is still live at its original path. Recovery must report not-recovered so the
+        // disposition re-runs; it must NOT finalize it as a completed restore (which would drop the record and
+        // fire a spurious RESTORED event while leaving the duplicate copy live). Restore-crash reconciliation of
+        // an already-moved-back asset belongs to restore(), covered separately below.
         $service = $this->service(
             [5 => $this->asset('/Products/a.jpg')],
             [5 => '/Products/a.jpg'],
-            recordStatuses: [5 => QuarantineStatus::Committed],
+            recordStatuses: [5 => QuarantineStatus::Pending],
         );
 
-        self::assertTrue($service->recoverQuarantine(5));
-        self::assertSame([5], $service->removed, 'the lingering record is deleted');
-        self::assertNull($service->findOriginalPathForTest(5));
+        self::assertFalse($service->recoverQuarantine(5));
+        self::assertSame([], $service->removed, 'the pending record is kept so the disposition re-runs');
     }
 
     #[Test]

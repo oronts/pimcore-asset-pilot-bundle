@@ -158,7 +158,11 @@ class QuarantineService implements QuarantineServiceInterface
             return false;
         }
         if (!$this->isInQuarantine($asset)) {
-            return $this->finalizeRestoredRecord($asset, $assetId, $record['originalPath']);
+            // recoverQuarantine only resumes a crashed merge disposition: a record whose copy is not in quarantine
+            // means the quarantine move never completed, so report not-recovered and let the disposition re-run.
+            // Restore-crash reconciliation (asset already moved back) belongs to restore(), not this path, so a
+            // never-quarantined copy must not be finalized here as if it were restored.
+            return false;
         }
         if ($record['status'] === QuarantineStatus::Pending) {
             $this->markQuarantineCommitted($assetId);
