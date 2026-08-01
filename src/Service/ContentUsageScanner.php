@@ -126,12 +126,31 @@ class ContentUsageScanner implements ContentUsageScannerInterface, ResetInterfac
                     $columns[] = $column->getName();
                 }
             }
+            $columns = $this->contentColumnsFor($table, $columns);
             if ($columns !== []) {
                 $tables[] = [$table, $columns];
             }
         }
 
         return $tables;
+    }
+
+    /**
+     * Narrow a content table's string columns to the ones that can hold a hard-coded asset path. The properties
+     * table's structural columns (cpath/cid/ctype/name/type) are metadata: cpath stores the OWNER element's own
+     * path, so scanning it would make every asset that has a property self-match its own path. Only `data` holds a
+     * value a user could paste a path into.
+     *
+     * @param list<string> $columnNames
+     * @return list<string>
+     */
+    protected function contentColumnsFor(string $table, array $columnNames): array
+    {
+        if ($table !== 'properties') {
+            return $columnNames;
+        }
+
+        return array_values(array_filter($columnNames, static fn (string $name): bool => $name === 'data'));
     }
 
     private function isContentTable(string $table): bool

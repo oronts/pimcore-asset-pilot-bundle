@@ -150,6 +150,28 @@ class ContentUsageScannerTest extends TestCase
     }
 
     #[Test]
+    public function contentColumnsForKeepsOnlyThePropertiesDataColumn(): void
+    {
+        $scanner = new class ($this->createMock(Connection::class), new NullLogger()) extends ContentUsageScanner {
+            public function __construct(Connection $c, NullLogger $l)
+            {
+                parent::__construct($c, $l, true);
+            }
+
+            /** @param list<string> $columnNames @return list<string> */
+            public function exposeContentColumnsFor(string $table, array $columnNames): array
+            {
+                return $this->contentColumnsFor($table, $columnNames);
+            }
+        };
+
+        // The properties table's structural columns (cpath in particular) self-match, so only `data` is scanned.
+        self::assertSame(['data'], $scanner->exposeContentColumnsFor('properties', ['cid', 'cpath', 'ctype', 'name', 'type', 'data']));
+        // Other content tables keep all their value columns, even one literally named `name`.
+        self::assertSame(['name', 'data'], $scanner->exposeContentColumnsFor('object_store_product', ['name', 'data']));
+    }
+
+    #[Test]
     public function matchesAnyReportsReferencedWhenTheQueryFindsARow(): void
     {
         $scanner = $this->realMatchScanner(static fn (): string => '1');
