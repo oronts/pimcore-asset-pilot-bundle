@@ -11,6 +11,7 @@ use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\EmptyFolderSweepServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
+use Oronts\AssetPilotBundle\Support\BulkErrors;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -107,6 +108,8 @@ class FoldersController
             return new JsonResponse(['error' => 'A folder changed while the preview was being built. Preview again.'], JsonResponse::HTTP_CONFLICT);
         }
 
+        $result['errors'] = BulkErrors::forResponse($result['errors']);
+
         return new JsonResponse([
             ...$result,
             'dryRun' => true,
@@ -123,8 +126,11 @@ class FoldersController
             return $rejection;
         }
 
+        $result = $this->sweep->deleteEmpty($folderIds, $plan->fingerprintMap());
+        $result['errors'] = BulkErrors::forResponse($result['errors']);
+
         return new JsonResponse([
-            ...$this->sweep->deleteEmpty($folderIds, $plan->fingerprintMap()),
+            ...$result,
             'dryRun' => false,
             'planToken' => null,
         ]);

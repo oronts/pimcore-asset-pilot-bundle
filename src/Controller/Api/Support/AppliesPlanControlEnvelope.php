@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api\Support;
 
+use Oronts\AssetPilotBundle\Support\BulkErrors;
+
 /**
  * Wraps a bulk-mutation result in the shared apply-response envelope (dryRun, planToken, and eligible
  * count), so every reviewed apply endpoint returns one consistent shape.
@@ -18,6 +20,9 @@ trait AppliesPlanControlEnvelope
     private function withPlanControl(array $result, bool $dryRun, ?string $planToken, int $requested): array
     {
         $result['observerWarnings'] ??= [];
+        if (array_key_exists('errors', $result) && is_array($result['errors'])) {
+            $result['errors'] = BulkErrors::forResponse($result['errors']);
+        }
 
         return [
             ...$result,
