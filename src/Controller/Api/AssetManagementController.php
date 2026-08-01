@@ -24,9 +24,11 @@ use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Oronts\AssetPilotBundle\Service\ZipDownloadTokenStoreInterface;
+use Oronts\AssetPilotBundle\Support\BulkErrors;
 use Oronts\AssetPilotBundle\Support\PropertyValue;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
 use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -226,11 +228,21 @@ class AssetManagementController
     {
         [$page, $limit] = Pagination::fromRequest($request, 200);
 
+        $objectId = $request->query->getInt('objectId');
+        if ($objectId > 0) {
+            // The objectId filter discloses which assets a data object references, so authorize the object's own
+            // view (as explain does): its asset associations reveal the object across the actor's workspace boundary.
+            $object = $this->loadObject($objectId);
+            if ($object === null || !$this->authorization->isAllowed($object, 'view')) {
+                return new JsonResponse(['error' => 'Object access is not permitted.', 'objectId' => $objectId], Response::HTTP_FORBIDDEN);
+            }
+        }
+
         $filters = [
             'q' => trim((string) $request->query->get('q', '')),
             'type' => $request->query->get('type'),
             'folder' => $request->query->get('folder'),
-            'objectId' => $request->query->getInt('objectId'),
+            'objectId' => $objectId,
             'extension' => $request->query->get('extension'),
             'referenced' => $request->query->get('referenced'),
         ];
@@ -242,6 +254,11 @@ class AssetManagementController
             $request->query->get('sort'),
             $request->query->get('order'),
         ));
+    }
+
+    protected function loadObject(int $objectId): ?AbstractObject
+    {
+        return AbstractObject::getById($objectId);
     }
 
     #[Route('/assets/tags', name: 'oronts_asset_pilot_available_tags', methods: ['GET'])]
@@ -383,7 +400,7 @@ class AssetManagementController
         return [
             'tagged' => $result['tagged'],
             'failed' => $result['failed'],
-            'errors' => empty($result['errors']) ? (object) [] : $result['errors'],
+            'errors' => BulkErrors::forResponse($result['errors']),
             'observerWarnings' => $result['observerWarnings'],
         ];
     }
@@ -482,7 +499,7 @@ class AssetManagementController
         return [
             'updated' => $result['updated'],
             'failed' => $result['failed'],
-            'errors' => empty($result['errors']) ? (object) [] : $result['errors'],
+            'errors' => BulkErrors::forResponse($result['errors']),
             'observerWarnings' => $result['observerWarnings'],
         ];
     }

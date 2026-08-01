@@ -498,7 +498,7 @@ configured ZIP asset ceiling is rejected with `422` rather than returned as a tr
 | `q` | `string` | Search by filename or path (LIKE match) |
 | `type` | `string` | Filter by asset type: `image`, `document`, `video`, `audio`, `text`, `archive` |
 | `folder` | `string` | Filter by folder path (e.g., `/Products/`) |
-| `objectId` | `int` | Filter to assets referenced by a specific DataObject (via dependencies table) |
+| `objectId` | `int` | Filter to assets referenced by a specific DataObject (via dependencies table). Requires `view` on that object (its asset associations disclose it); an unviewable or missing object returns `403`. |
 | `extension` | `string` | Filter by file extension (single, e.g. `jpg`) |
 | `referenced` | `string` | Reference state: `referenced` or `unreferenced` |
 | `page` | `int` | Page number (default: 1) |

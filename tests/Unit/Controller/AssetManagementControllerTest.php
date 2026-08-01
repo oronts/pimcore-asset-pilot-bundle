@@ -21,6 +21,7 @@ use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Pimcore\Model\DataObject\AbstractObject;
 use Pimcore\Model\Element\Tag;
 use Psr\Log\NullLogger;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
@@ -205,6 +206,75 @@ final class AssetManagementControllerTest extends TestCase
         self::assertFalse($data['dryRun']);
         self::assertNull($data['planToken']);
         self::assertSame(2, $data['eligible']);
+    }
+
+    #[Test]
+    public function searchDeniesTheObjectIdFilterWhenTheObjectIsNotViewable(): void
+    {
+        $searchService = $this->createMock(AssetSearchServiceInterface::class);
+        $searchService->expects(self::never())->method('search');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+
+        $response = $this->searchController($searchService, $authorization, $this->createMock(AbstractObject::class))
+            ->search(Request::create('/assets/search', 'GET', ['objectId' => 500]));
+
+        self::assertSame(Response::HTTP_FORBIDDEN, $response->getStatusCode());
+        self::assertStringContainsString('Object access is not permitted', (string) $response->getContent());
+    }
+
+    #[Test]
+    public function searchAppliesTheObjectIdFilterWhenTheObjectIsViewable(): void
+    {
+        $searchService = $this->createMock(AssetSearchServiceInterface::class);
+        $searchService->expects(self::once())
+            ->method('search')
+            ->with(self::callback(static fn (array $filters): bool => ($filters['objectId'] ?? null) === 500))
+            ->willReturn(['items' => [], 'total' => 0, 'page' => 1, 'pages' => 0, 'hasMore' => false, 'truncated' => false]);
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
+
+        $response = $this->searchController($searchService, $authorization, $this->createMock(AbstractObject::class))
+            ->search(Request::create('/assets/search', 'GET', ['objectId' => 500]));
+
+        self::assertSame(Response::HTTP_OK, $response->getStatusCode());
+    }
+
+    private function searchController(
+        AssetSearchServiceInterface $searchService,
+        ElementAuthorization $authorization,
+        ?AbstractObject $object,
+    ): AssetManagementController {
+        return new class (
+            $searchService,
+            $this->createMock(AssetPropertyService::class),
+            new NullLogger(),
+            $this->createMock(AssetZipServiceInterface::class),
+            $authorization,
+            new ZipDownloadTokenStore(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+            $this->createMock(ApplyPlanServiceInterface::class),
+            $this->createMock(AssetMetadataMutationService::class),
+            $object,
+        ) extends AssetManagementController {
+            public function __construct(
+                AssetSearchServiceInterface $searchService,
+                AssetPropertyService $propertyService,
+                NullLogger $logger,
+                AssetZipServiceInterface $zipService,
+                ElementAuthorization $authorization,
+                ZipDownloadTokenStore $zipDownloads,
+                ApplyPlanServiceInterface $applyPlans,
+                AssetMetadataMutationService $metadataMutations,
+                private readonly ?AbstractObject $object,
+            ) {
+                parent::__construct($searchService, $propertyService, $logger, $zipService, $authorization, $zipDownloads, $applyPlans, $metadataMutations);
+            }
+
+            protected function loadObject(int $objectId): ?AbstractObject
+            {
+                return $this->object;
+            }
+        };
     }
 
     #[Test]
