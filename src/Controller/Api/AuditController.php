@@ -104,7 +104,7 @@ class AuditController
         );
     }
 
-    #[Route('/audit/{id}/revert', name: 'oronts_asset_pilot_audit_revert', methods: ['POST'])]
+    #[Route('/audit/{id}/revert', name: 'oronts_asset_pilot_audit_revert', requirements: ['id' => '\d+'], methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Admin->value)]
     public function revert(int $id): JsonResponse
     {

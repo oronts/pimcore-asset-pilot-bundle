@@ -174,7 +174,7 @@ class AssetManagementController
         return new ZipBuildOptions($data['strategy'] ?? null, $data['thumbnail'] ?? null);
     }
 
-    #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_lock_asset', methods: ['POST'])]
+    #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_lock_asset', requirements: ['id' => '\d+'], methods: ['POST'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function lockAsset(int $id): JsonResponse
     {
@@ -198,7 +198,7 @@ class AssetManagementController
         }
     }
 
-    #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_unlock_asset', methods: ['DELETE'])]
+    #[Route('/assets/{id}/lock', name: 'oronts_asset_pilot_unlock_asset', requirements: ['id' => '\d+'], methods: ['DELETE'])]
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function unlockAsset(int $id): JsonResponse
     {
