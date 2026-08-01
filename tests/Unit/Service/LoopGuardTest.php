@@ -27,6 +27,24 @@ class LoopGuardTest extends TestCase
     }
 
     #[Test]
+    public function refreshObjectKeepsExistingMarkersAliveButNeverCreatesThem(): void
+    {
+        $guard = new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()));
+
+        // With no markers set, refreshing the object lock must not fabricate a processing or dirty marker.
+        $guard->refreshObject(42);
+        self::assertFalse($guard->isProcessingObject(42));
+        self::assertFalse($guard->isObjectDirty(42));
+
+        // Once a coalesced save has marked the object, the heartbeat re-arm keeps both markers present.
+        $guard->markObjectProcessing(42);
+        $guard->markObjectDirty(42);
+        $guard->refreshObject(42);
+        self::assertTrue($guard->isProcessingObject(42));
+        self::assertTrue($guard->isObjectDirty(42));
+    }
+
+    #[Test]
     public function tryCoalesceFoldsIntoAnInFlightRunOnlyWhileItsMarkerStands(): void
     {
         $guard = new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()));

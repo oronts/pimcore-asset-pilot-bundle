@@ -62,6 +62,21 @@ class LoopGuard
     public function refreshObject(int $objectId): void
     {
         $this->refresh('asset_pilot_lock_object_' . $objectId);
+        // The processing and dirty markers otherwise lapse at lock_ttl while a heartbeated run can outlive it, so a
+        // save that coalesced into this run would be dropped once its marker expired mid-pass. Keep them alive for
+        // as long as the object lock is refreshed. Refresh only when already set, so this never creates a marker
+        // (refreshObject is also called from the repoint path, which does not mark the object processing).
+        $this->refreshMarkerIfSet($this->objectKey($objectId));
+        $this->refreshMarkerIfSet($this->dirtyObjectKey($objectId));
+    }
+
+    private function refreshMarkerIfSet(string $key): void
+    {
+        $item = $this->cache->getItem($key);
+        if ($item->isHit()) {
+            $item->set(true)->expiresAfter((int) ceil($this->lockTtl));
+            $this->cache->save($item);
+        }
     }
 
     public function acquireAsset(int $assetId): bool
