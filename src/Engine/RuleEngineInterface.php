@@ -11,7 +11,12 @@ use Pimcore\Model\DataObject\AbstractObject;
 
 interface RuleEngineInterface
 {
-    /** @return RuleMatch[] */
+    /**
+     * Supported convenience API: every RuleMatch for the asset across all of the object's fields in one call.
+     * Use matchField() to scope to a single field/locale, or explain() for the matches plus the evaluation trace.
+     *
+     * @return RuleMatch[]
+     */
     public function match(AbstractObject $object, Asset $asset): array;
 
     /** @return RuleMatch[] */

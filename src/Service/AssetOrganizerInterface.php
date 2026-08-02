@@ -39,7 +39,14 @@ interface AssetOrganizerInterface
     /** @return list<DriftItem> */
     public function analyzeDrift(AbstractObject $object, ?string $ruleName = null): array;
 
-    /** @param list<int> $objectIds @return list<OperationResult> */
+    /**
+     * Supported convenience API: organize the objects and return only the flat OperationResult list. Use
+     * organizeBulkDetailed() for the full BulkOrganizeReport (per-object status and observer warnings) and the
+     * run-item lease callbacks (stale, cancel, before/after, heartbeat).
+     *
+     * @param list<int> $objectIds
+     * @return list<OperationResult>
+     */
     public function organizeBulk(array $objectIds, TriggerType $triggerType, ?callable $progressCallback = null, ?int $dispatchedAt = null): array;
 
     /** @param list<int> $objectIds @param array<int, string> $expectedFingerprints */
