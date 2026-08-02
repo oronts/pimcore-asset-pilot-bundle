@@ -319,7 +319,7 @@ class BulkOrganizeHandler
             return $message->objectIds;
         }
 
-        return $this->actors->runAs($actor, function () use ($message): array {
+        return $this->actors->runAs($actor, function () use ($message, $actor): array {
             $eligible = [];
             foreach ($message->objectIds as $objectId) {
                 $itemKey = $this->itemKey($objectId);
@@ -346,6 +346,8 @@ class BulkOrganizeHandler
                             error: 'Object changed after preview; the immutable plan was not applied.',
                         );
                     }
+                    // The plan changed (often a coalesced save marked the object dirty); drain so the new state organizes.
+                    $this->requeueDirtyObject($message, $actor, $objectId);
                 } finally {
                     if ($message->runId !== null) {
                         $this->loopGuard->releaseOperationRunItem($message->runId, $itemKey);

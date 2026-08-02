@@ -222,6 +222,39 @@ class BulkOrganizeHandlerTest extends TestCase
     }
 
     #[Test]
+    public function drainsAFingerprintMismatchedObjectThatAConcurrentSaveMarkedDirty(): void
+    {
+        // The reviewed plan changed after preview (often a coalesced save marked the object dirty); the skip path
+        // must still drain it so its new state is organized rather than lost.
+        $object = $this->createMock(AbstractObject::class);
+        $object->method('getId')->willReturn(2);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->method('dryRun')->willReturn([]);
+        $organizer->expects(self::never())->method('organizeBulkDetailed');
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(2, TriggerType::BulkOperation, self::anything());
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->method('isObjectDirty')->with(2)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(2);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('completeItem')->willReturn(true);
+        $runs->method('finish')->willReturn(OperationRunStatus::Completed);
+
+        ($this->handler($organizer, $dispatcher, $loopGuard, $runs, [2 => $object]))(
+            new BulkOrganizeMessage(
+                objectIds: [2],
+                triggerType: TriggerType::BulkOperation,
+                actorType: ActorType::System,
+                runId: 'run-1',
+                expectedFingerprints: [2 => 'stale-fingerprint-that-will-not-match'],
+            ),
+        );
+    }
+
+    #[Test]
     public function recordsPerObjectProgressForTrackedBatches(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);

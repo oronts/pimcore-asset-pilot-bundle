@@ -166,6 +166,8 @@ class OrganizeAssetsHandler
         } catch (\Throwable $exception) {
             throw new RetryableDispatchException('The latest object state could not be queued.', previous: $exception);
         }
+        // This re-dispatch already covers the latest state, so clear dirty to stop the terminal drain re-dispatching.
+        $this->loopGuard->clearObjectDirty($message->objectId);
 
         $this->completeRunItem($message, OperationRunItemStatus::Skipped, 'Object changed after this run was dispatched.');
 

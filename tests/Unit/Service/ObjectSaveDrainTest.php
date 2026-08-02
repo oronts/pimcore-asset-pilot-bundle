@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 #[CoversClass(ObjectSaveDrain::class)]
@@ -65,6 +66,21 @@ final class ObjectSaveDrainTest extends TestCase
         $dispatcher->method('dispatchObject')->willThrowException(new \RuntimeException('broker down'));
 
         $this->drain($loopGuard, $dispatcher)->drain(42, TriggerType::ObjectSave, ActorContext::system());
+
+        $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function neverThrowsEvenWhenTheLoggerThrowsInsideTheCatch(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('isObjectDirty')->willReturn(true);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->method('dispatchObject')->willThrowException(new \RuntimeException('broker down'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->method('error')->willThrowException(new \RuntimeException('logger down'));
+
+        (new ObjectSaveDrain($loopGuard, $dispatcher, $logger))->drain(42, TriggerType::ObjectSave, ActorContext::system());
 
         $this->addToAssertionCount(1);
     }

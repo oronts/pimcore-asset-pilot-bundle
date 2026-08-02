@@ -50,11 +50,15 @@ class NonFatalEventDispatcher
 
     private static function log(LoggerInterface $logger, string $eventName, \Throwable $e, array $context): void
     {
-        $logger->error('Asset Pilot: observer failed for {event}: {error}', [
-            ...$context,
-            'event' => $eventName,
-            'error' => $e->getMessage(),
-            'exception' => $e,
-        ]);
+        try {
+            $logger->error('Asset Pilot: observer failed for {event}: {error}', [
+                ...$context,
+                'event' => $eventName,
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+        } catch (\Throwable) {
+            // A broken logger must not turn a non-fatal observer failure into a fatal one.
+        }
     }
 }

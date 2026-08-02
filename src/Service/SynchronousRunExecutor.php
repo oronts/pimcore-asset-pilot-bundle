@@ -140,6 +140,10 @@ final class SynchronousRunExecutor
                     'A run item was reclaimed by a concurrent attempt during bulk-failure cleanup; that attempt records it.',
                 ));
             }
+            // A failure before an item's afterObject would strand a coalesced save (sync has no worker retry), so drain.
+            foreach ($objectIds as $objectId) {
+                $this->drain->drain($objectId, TriggerType::ObjectSave, $actor);
+            }
 
             return BulkRunOutcome::failed($e);
         }

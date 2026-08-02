@@ -163,6 +163,27 @@ final class SynchronousRunExecutorTest extends TestCase
     }
 
     #[Test]
+    public function executeBulkDrainsCoalescedSavesWhenTheBulkFailsBeforeAfterObject(): void
+    {
+        // A retryable infra failure can abort before an item's afterObject; sync has no worker retry, so the
+        // failure path must still drain each object's coalesced save.
+        $drained = [];
+        $drain = $this->createMock(ObjectSaveDrainInterface::class);
+        $drain->method('drain')->willReturnCallback(static function (int $id) use (&$drained): void {
+            $drained[] = $id;
+        });
+        $organizer = $this->createMock(AssetOrganizerInterface::class);
+        $organizer->method('organizeBulkDetailed')->willThrowException(new \RuntimeException('infra failure'));
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $lease = $this->createMock(RunItemLease::class);
+        $lease->method('token')->willReturn(null);
+
+        $this->executor($organizer, $runs, $lease, $drain)->executeBulk(self::RUN, [1, 2], TriggerType::Api, [], ActorContext::user(7));
+
+        self::assertSame([1, 2], $drained, 'a bulk failure still drains every object');
+    }
+
+    #[Test]
     public function executeSingleReturnsLeaseLostWhenCompletionFails(): void
     {
         $organizer = $this->createMock(AssetOrganizerInterface::class);

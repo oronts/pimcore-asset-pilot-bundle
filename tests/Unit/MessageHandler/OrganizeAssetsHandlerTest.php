@@ -96,6 +96,39 @@ class OrganizeAssetsHandlerTest extends TestCase
     }
 
     #[Test]
+    public function aStaleTrackedMessageDoesNotDoubleDispatchWhenAConcurrentSaveIsDirty(): void
+    {
+        // The stale re-dispatch already covers the latest state; the terminal drain must not send a second organize.
+        $object = $this->createMock(Concrete::class);
+        $object->method('getModificationDate')->willReturn(200);
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::never())->method('organizeWithHeartbeat');
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, self::anything());
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
+        $dirty = true;
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
+        $loopGuard->method('isObjectDirty')->willReturnCallback(static function () use (&$dirty): bool {
+            return $dirty;
+        });
+        $loopGuard->method('clearObjectDirty')->willReturnCallback(static function () use (&$dirty): void {
+            $dirty = false;
+        });
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->method('isCancellationRequested')->willReturn(false);
+        $runs->method('resume')->willReturn(true);
+        $runs->method('resumeItem')->willReturn(true);
+        $runs->method('completeItem')->willReturn(true);
+        $runs->method('finish')->willReturn(OperationRunStatus::Completed);
+
+        ($this->handler($object, $organizer, $dispatcher, $authorization, loopGuard: $loopGuard, runs: $runs))(
+            new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7, 'run-1'),
+        );
+    }
+
+    #[Test]
     public function staleReplacementDispatchFailureLeavesTheRunItemResumable(): void
     {
         $object = $this->createMock(Concrete::class);
