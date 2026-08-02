@@ -9,6 +9,8 @@ use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\DependencyProjectionSchema;
 use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\AssetDeletionFenceLostException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -27,6 +29,7 @@ use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\ValidationException;
 use Psr\Log\NullLogger;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 
 #[CoversClass(EmptyFolderSweepService::class)]
 class EmptyFolderSweepServiceTest extends TestCase
@@ -50,7 +53,7 @@ class EmptyFolderSweepServiceTest extends TestCase
      * @param \ArrayObject<int, int>                     $deleted
      * @param list<array{id: int, full_path: string}>    $rows
      */
-    private function service(array $foldersById = [], ?\ArrayObject $deleted = null, array $rows = [], ?array $visibleIds = null, ?LoopGuard $loopGuard = null, array $referencedIds = [], ?AssetDeletionFenceInterface $fence = null, ?DependencyUsageVerifierInterface $verifier = null): EmptyFolderSweepService
+    private function service(array $foldersById = [], ?\ArrayObject $deleted = null, array $rows = [], ?array $visibleIds = null, ?LoopGuard $loopGuard = null, array $referencedIds = [], ?AssetDeletionFenceInterface $fence = null, ?DependencyUsageVerifierInterface $verifier = null, ?EventDispatcher $dispatcher = null): EmptyFolderSweepService
     {
         $deleted ??= new \ArrayObject();
 
@@ -81,16 +84,16 @@ class EmptyFolderSweepServiceTest extends TestCase
             $this->createMock(ActorContextProvider::class),
         );
 
-        return new class ($foldersById, $deleted, $rows, $referencedIds, $connection, $authorization, $loopGuard, $workspaceScope, $fence, $verifier) extends EmptyFolderSweepService {
+        return new class ($foldersById, $deleted, $rows, $referencedIds, $connection, $authorization, $loopGuard, $workspaceScope, $fence, $verifier, $dispatcher ?? new EventDispatcher()) extends EmptyFolderSweepService {
             /**
              * @param array<int, ?Asset\Folder>               $foldersById
              * @param \ArrayObject<int, int>                  $deleted
              * @param list<array{id: int, full_path: string}> $rows
              * @param list<int>                               $referencedIds
              */
-            public function __construct(private readonly array $foldersById, private readonly \ArrayObject $deleted, private readonly array $rows, private readonly array $referencedIds, Connection $connection, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence, DependencyUsageVerifierInterface $verifier)
+            public function __construct(private readonly array $foldersById, private readonly \ArrayObject $deleted, private readonly array $rows, private readonly array $referencedIds, Connection $connection, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence, DependencyUsageVerifierInterface $verifier, EventDispatcher $dispatcher)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence, $verifier);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence, $verifier, $dispatcher);
             }
 
             protected function loadFolder(int $id): ?Asset\Folder
@@ -131,6 +134,24 @@ class EmptyFolderSweepServiceTest extends TestCase
 
         self::assertSame(1, $result['deleted']);
         self::assertSame([5], $deleted->getArrayCopy());
+    }
+
+    #[Test]
+    public function dispatchesATypedEmptyFolderDeletedEventOnEachDeletion(): void
+    {
+        $received = [];
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::EMPTY_FOLDER_DELETED, static function (AssetMutationEvent $event) use (&$received): void {
+            $received[] = $event;
+        });
+        $service = $this->service([5 => $this->folder(5, hasChildren: false, allowed: true)], new \ArrayObject(), dispatcher: $dispatcher);
+
+        $this->apply($service, [5]);
+
+        self::assertCount(1, $received, 'a deleted empty folder dispatches exactly one typed outcome');
+        self::assertSame([5], $received[0]->assetIds);
+        self::assertSame('empty_folder_deleted', $received[0]->mutation);
+        self::assertArrayHasKey('path', $received[0]->context);
     }
 
     #[Test]
@@ -233,7 +254,7 @@ class EmptyFolderSweepServiceTest extends TestCase
         $service = new class ($connection, $folder, $deleted, $authorization, $loopGuard, $workspaceScope, $fence, $verifier) extends EmptyFolderSweepService {
             public function __construct(Connection $connection, private readonly Asset\Folder $folder, private readonly \ArrayObject $deleted, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence, DependencyUsageVerifierInterface $verifier)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence, $verifier);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence, $verifier, new EventDispatcher());
             }
 
             protected function loadFolder(int $id): Asset\Folder
@@ -279,7 +300,7 @@ class EmptyFolderSweepServiceTest extends TestCase
         $service = new class ($connection, $folder, $deleted, $authorization, $loopGuard, $workspaceScope, $fence, $verifier) extends EmptyFolderSweepService {
             public function __construct(Connection $connection, private readonly Asset\Folder $folder, private readonly \ArrayObject $deleted, ElementAuthorization $authorization, LoopGuard $loopGuard, AssetWorkspaceQueryScope $workspaceScope, AssetDeletionFenceInterface $fence, DependencyUsageVerifierInterface $verifier)
             {
-                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence, $verifier);
+                parent::__construct($connection, new NullLogger(), $authorization, $loopGuard, new ReviewedAssetLockCoordinator($loopGuard), $workspaceScope, $fence, $verifier, new EventDispatcher());
             }
 
             protected function loadFolder(int $id): Asset\Folder

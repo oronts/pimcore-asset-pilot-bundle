@@ -7,6 +7,8 @@ namespace Oronts\AssetPilotBundle\Service;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Oronts\AssetPilotBundle\Enum\DependencyUsageVerdict;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Model\ApplyPlan;
 use Oronts\AssetPilotBundle\Model\ApplyPlanTarget;
@@ -17,6 +19,7 @@ use Oronts\AssetPilotBundle\Service\Query\Like;
 use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Finds and (guarded) deletes empty asset folders — the residue left behind after a cleanup or
@@ -28,6 +31,8 @@ use Psr\Log\LoggerInterface;
  */
 class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
 {
+    use MapsObserverDeliveryWarnings;
+
     /** The asset tree root (id 1, path '/') is never a sweep candidate. */
     private const int ROOT_ID = 1;
     private const int PLAN_VERSION = 1;
@@ -42,6 +47,7 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
         protected readonly AssetWorkspaceQueryScope $workspaceScope,
         private readonly AssetDeletionFenceInterface $deletionFence,
         private readonly DependencyUsageVerifierInterface $dependencyVerifier,
+        private readonly EventDispatcherInterface $eventDispatcher,
         protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
@@ -218,10 +224,17 @@ class EmptyFolderSweepService implements EmptyFolderSweepServiceInterface
                     continue;
                 }
                 ++$deleted;
+                $path = $folder->getRealFullPath();
                 $this->logger->info('Asset Pilot: swept empty folder {id} at {path}', [
                     'id' => $id,
-                    'path' => $folder->getRealFullPath(),
+                    'path' => $path,
                 ]);
+                $this->observerWarnings(
+                    new AssetMutationEvent([$id], 'empty_folder_deleted', ['path' => $path]),
+                    AssetPilotEvents::EMPTY_FOLDER_DELETED,
+                    'Empty-folder-deleted observer delivery failed.',
+                    ['folder_id' => $id],
+                );
             } catch (\Throwable $e) {
                 $errors[$id] = 'Failed to delete the empty folder.';
                 ++$failed;

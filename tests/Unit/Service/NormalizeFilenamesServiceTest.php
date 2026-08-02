@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService;
@@ -18,6 +20,7 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Psr\Log\NullLogger;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 
 #[CoversClass(NormalizeFilenamesService::class)]
 class NormalizeFilenamesServiceTest extends TestCase
@@ -81,8 +84,9 @@ class NormalizeFilenamesServiceTest extends TestCase
         ?LoopGuard $loopGuard = null,
         array $assetsByPath = [],
         ?AssetMutationFingerprintService $fingerprints = null,
+        ?EventDispatcher $dispatcher = null,
     ): NormalizeFilenamesService {
-        return new class ($loopGuard ?? $this->loopGuard(), $scanner ?? $this->scanner(), $this->authorization(), $fingerprints ?? $this->fingerprints(), $assetsById, $validKeys, $renamed, $assetsByPath) extends NormalizeFilenamesService {
+        return new class ($loopGuard ?? $this->loopGuard(), $scanner ?? $this->scanner(), $this->authorization(), $fingerprints ?? $this->fingerprints(), $dispatcher ?? new EventDispatcher(), $assetsById, $validKeys, $renamed, $assetsByPath) extends NormalizeFilenamesService {
             /**
              * @param array<int, ?Asset>    $assetsById
              * @param array<string, string> $validKeys
@@ -94,12 +98,13 @@ class NormalizeFilenamesServiceTest extends TestCase
                 ContentUsageScanner $cs,
                 ElementAuthorization $authorization,
                 AssetMutationFingerprintService $fingerprints,
+                EventDispatcher $dispatcher,
                 private readonly array $assetsById,
                 private readonly array $validKeys,
                 private readonly \ArrayObject $renamed,
                 private readonly array $assetsByPath,
             ) {
-                parent::__construct($lg, new NullLogger(), $cs, $authorization, $fingerprints, new LoopGuardedAssetSaver($lg));
+                parent::__construct($lg, new NullLogger(), $cs, $authorization, $fingerprints, new LoopGuardedAssetSaver($lg), $dispatcher);
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -139,6 +144,40 @@ class NormalizeFilenamesServiceTest extends TestCase
         self::assertSame(1, $result['renamed']);
         self::assertSame([[1, 'my-file.jpg', '/uploads/my-file.jpg']], $renamed->getArrayCopy());
         self::assertSame([['id' => 1, 'from' => 'My File.JPG', 'to' => 'my-file.jpg']], $result['changes']);
+    }
+
+    #[Test]
+    public function dispatchesATypedFilenameNormalizedEventOnEachAppliedRename(): void
+    {
+        $received = [];
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::FILENAME_NORMALIZED, static function (AssetMutationEvent $event) use (&$received): void {
+            $received[] = $event;
+        });
+        $renamed = new \ArrayObject();
+
+        $this->service([1 => $this->asset(1, 'My File.JPG')], ['My File.JPG' => 'my-file.jpg'], $renamed, dispatcher: $dispatcher)
+            ->normalize([1], dryRun: false);
+
+        self::assertCount(1, $received, 'an applied rename dispatches exactly one typed outcome');
+        self::assertSame([1], $received[0]->assetIds);
+        self::assertSame('filename_normalized', $received[0]->mutation);
+        self::assertSame(['id' => 1, 'from' => 'My File.JPG', 'to' => 'my-file.jpg'], $received[0]->context);
+    }
+
+    #[Test]
+    public function dryRunDoesNotDispatchAFilenameNormalizedEvent(): void
+    {
+        $received = 0;
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(AssetPilotEvents::FILENAME_NORMALIZED, static function () use (&$received): void {
+            ++$received;
+        });
+
+        $this->service([1 => $this->asset(1, 'My File.JPG')], ['My File.JPG' => 'my-file.jpg'], new \ArrayObject(), dispatcher: $dispatcher)
+            ->normalize([1], dryRun: true);
+
+        self::assertSame(0, $received, 'a dry run previews without dispatching a mutation outcome');
     }
 
     #[Test]
@@ -334,7 +373,7 @@ class NormalizeFilenamesServiceTest extends TestCase
         $service = new class ($loopGuard, $this->scanner(), $this->authorization(), $this->fingerprints(), $asset) extends NormalizeFilenamesService {
             public function __construct(LoopGuard $loopGuard, ContentUsageScanner $scanner, ElementAuthorization $authorization, AssetMutationFingerprintService $fingerprints, private readonly Asset $asset)
             {
-                parent::__construct($loopGuard, new NullLogger(), $scanner, $authorization, $fingerprints, new LoopGuardedAssetSaver($loopGuard));
+                parent::__construct($loopGuard, new NullLogger(), $scanner, $authorization, $fingerprints, new LoopGuardedAssetSaver($loopGuard), new EventDispatcher());
             }
 
             protected function reloadAsset(int $id): ?Asset

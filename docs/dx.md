@@ -60,17 +60,17 @@ curated subset, not an exhaustive list of every service alias.
 
 The supported extension boundaries below dispatch typed events you can subscribe to. Constants live
 on `AssetPilotEvents`. Purely scheduled maintenance (snapshot capture, audit retention) is intentionally
-outside this contract. A few interactive mutations currently have no dedicated completion event, notably
-filename normalization and empty-folder deletion (an Operate action behind a signed preview/apply plan):
-observe those through the durable operation journal and audit log, or by decorating their replaceable
-service.
+outside this contract. Every interactive asset mutation, including filename normalization and
+empty-folder deletion, dispatches a typed completion event at the service boundary; subscribe to the
+constant rather than decorating the service. Observer delivery is non-fatal: a failing subscriber is
+logged after the mutation has committed and never rolls it back.
 
 | Group | Events |
 |-------|--------|
 | Move pipeline | `PRE_MOVE`, `POST_MOVE`, `MOVE_FAILED` |
 | Durable outcomes | `DURABLE_OPERATION_SUCCEEDED`, `DURABLE_OPERATION_FAILED` |
 | Bulk runs | `BULK_STARTED`, `BULK_COMPLETED` |
-| Asset mutations | `ASSET_LOCKED`, `ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED`, `QUARANTINED`, `RESTORED` |
+| Asset mutations | `ASSET_LOCKED`, `ASSET_UNLOCKED`, `ASSET_PROPERTY_SET`, `ASSETS_TAGGED`, `UNUSED_DELETED`, `UNUSED_MOVED`, `REVERTED`, `QUARANTINED`, `RESTORED`, `FILENAME_NORMALIZED`, `EMPTY_FOLDER_DELETED` |
 | Duplicate merge | `DUPLICATE_MERGE_COMMITTED` |
 | Integrity heal | `INTEGRITY_PRE_HEAL`, `INTEGRITY_POST_HEAL` |
 

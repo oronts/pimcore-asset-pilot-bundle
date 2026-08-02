@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Service as ElementService;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Renames assets whose filename is not a valid/normalized Pimcore asset key to the sanitized form
@@ -20,6 +23,8 @@ use Psr\Log\LoggerInterface;
  */
 class NormalizeFilenamesService implements NormalizeFilenamesServiceInterface
 {
+    use MapsObserverDeliveryWarnings;
+
     public function __construct(
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
@@ -27,6 +32,7 @@ class NormalizeFilenamesService implements NormalizeFilenamesServiceInterface
         protected readonly ElementAuthorizationInterface $authorization,
         protected readonly AssetMutationFingerprintService $fingerprints,
         protected readonly LoopGuardedAssetSaver $assetSaver,
+        private readonly EventDispatcherInterface $eventDispatcher,
         protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
@@ -88,6 +94,12 @@ class NormalizeFilenamesService implements NormalizeFilenamesServiceInterface
             $changes[] = $outcome['change'];
             if ($outcome['state'] === 'renamed') {
                 ++$renamed;
+                $this->observerWarnings(
+                    new AssetMutationEvent([$id], 'filename_normalized', $outcome['change']),
+                    AssetPilotEvents::FILENAME_NORMALIZED,
+                    'Filename-normalized observer delivery failed.',
+                    ['asset_id' => $id],
+                );
             }
         }
 

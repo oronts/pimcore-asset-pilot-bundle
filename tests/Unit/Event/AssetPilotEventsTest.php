@@ -27,5 +27,7 @@ class AssetPilotEventsTest extends TestCase
         self::assertSame('oronts_asset_pilot.unused_deleted', AssetPilotEvents::UNUSED_DELETED);
         self::assertSame('oronts_asset_pilot.unused_moved', AssetPilotEvents::UNUSED_MOVED);
         self::assertSame('oronts_asset_pilot.reverted', AssetPilotEvents::REVERTED);
+        self::assertSame('oronts_asset_pilot.filename_normalized', AssetPilotEvents::FILENAME_NORMALIZED);
+        self::assertSame('oronts_asset_pilot.empty_folder_deleted', AssetPilotEvents::EMPTY_FOLDER_DELETED);
     }
 }

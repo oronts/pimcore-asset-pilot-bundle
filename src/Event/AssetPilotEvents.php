@@ -23,6 +23,8 @@ class AssetPilotEvents
     public const string REVERTED = 'oronts_asset_pilot.reverted';
     public const string QUARANTINED = 'oronts_asset_pilot.quarantined';
     public const string RESTORED = 'oronts_asset_pilot.restored';
+    public const string FILENAME_NORMALIZED = 'oronts_asset_pilot.filename_normalized';
+    public const string EMPTY_FOLDER_DELETED = 'oronts_asset_pilot.empty_folder_deleted';
     public const string DUPLICATE_MERGE_COMMITTED = 'oronts_asset_pilot.duplicate_merge_committed';
 
     public const string INTEGRITY_PRE_HEAL = 'oronts_asset_pilot.integrity_pre_heal';

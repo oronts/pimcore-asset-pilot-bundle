@@ -816,6 +816,8 @@ interactive asset changes outside the move pipeline (CDN purge, search reindex, 
 | `oronts_asset_pilot.reverted` | `AssetPilotEvents::REVERTED` | A move was reverted |
 | `oronts_asset_pilot.quarantined` | `AssetPilotEvents::QUARANTINED` | Unused assets were quarantined (soft-deleted) |
 | `oronts_asset_pilot.restored` | `AssetPilotEvents::RESTORED` | An asset was restored from quarantine |
+| `oronts_asset_pilot.filename_normalized` | `AssetPilotEvents::FILENAME_NORMALIZED` | An asset filename was normalized to a safe form |
+| `oronts_asset_pilot.empty_folder_deleted` | `AssetPilotEvents::EMPTY_FOLDER_DELETED` | An empty asset folder was deleted |
 
 > These notify listeners of a completed mutation and are best-effort: a listener that throws is isolated and
 > logged (it never rolls back the mutation), and the event is not replayed if the process crashes after the
