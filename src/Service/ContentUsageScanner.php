@@ -9,6 +9,7 @@ use Doctrine\DBAL\Types\JsonType;
 use Doctrine\DBAL\Types\StringType;
 use Doctrine\DBAL\Types\TextType;
 use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Service\Query\PimcoreSchema;
 use Pimcore\Model\Asset;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Service\ResetInterface;
@@ -146,7 +147,7 @@ class ContentUsageScanner implements ContentUsageScannerInterface, ResetInterfac
      */
     protected function contentColumnsFor(string $table, array $columnNames): array
     {
-        if ($table !== 'properties') {
+        if ($table !== PimcoreSchema::TABLE_PROPERTIES) {
             return $columnNames;
         }
 
@@ -155,7 +156,7 @@ class ContentUsageScanner implements ContentUsageScannerInterface, ResetInterfac
 
     private function isContentTable(string $table): bool
     {
-        return $table === 'properties'
+        return $table === PimcoreSchema::TABLE_PROPERTIES
             || str_starts_with($table, 'object_')
             || str_starts_with($table, 'documents_')
             || str_starts_with($table, 'classificationstore_');
