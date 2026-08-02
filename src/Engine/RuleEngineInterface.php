@@ -12,8 +12,9 @@ use Pimcore\Model\DataObject\AbstractObject;
 interface RuleEngineInterface
 {
     /**
-     * Supported convenience API: every RuleMatch for the asset across all of the object's fields in one call.
-     * Use matchField() to scope to a single field/locale, or explain() for the matches plus the evaluation trace.
+     * Supported convenience API: evaluate the object's rules against the asset with no field or locale scoping.
+     * A rule's field constraint is not applied and locale-scoped rules are excluded, so this is a coarse check.
+     * Use matchField() for field- and locale-scoped matching, or explain() for the matches plus the evaluation trace.
      *
      * @return RuleMatch[]
      */

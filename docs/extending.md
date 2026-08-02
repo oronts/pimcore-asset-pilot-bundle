@@ -821,8 +821,9 @@ interactive asset changes outside the move pipeline (CDN purge, search reindex, 
 
 > These notify listeners of a completed mutation and are best-effort: a listener that throws is isolated and
 > logged (it never rolls back the mutation), and the event is not replayed if the process crashes after the
-> mutation commits. A consumer that needs a guaranteed signal reconciles from the durable asset and audit
-> state rather than relying on the event.
+> mutation commits. Where the operation records durable run/audit history a consumer needing a guaranteed
+> signal can reconcile from it; filename normalization and empty-folder deletion write no journal/audit
+> record, so subscribe to their events (or read the PSR log) if you must not miss them.
 
 Duplicate merge events (`DuplicateMergeEvent`) are emitted only after a copy's persisted merge
 phase commits:
