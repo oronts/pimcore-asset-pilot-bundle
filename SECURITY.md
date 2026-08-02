@@ -15,6 +15,18 @@ Supported releases receive dependency and security fixes. Release CI runs locked
 audits without ignored advisories. A remaining upstream advisory must have a documented reachability
 assessment and mitigation before release.
 
+### Known upstream advisories
+
+The locked npm graph reports three Moderate advisories in `react-router` / `react-router-dom`
+(`GHSA-wrjc-x8rr-h8h6`, `GHSA-337j-9hxr-rhxg`). They are transitive-only through
+`@pimcore/studio-ui-bundle` (Pimcore Studio 2025.4), which the Asset Pilot Studio remote consumes as a
+Module Federation shared singleton: the host application provides react-router at runtime, so no
+react-router code is bundled into or shipped by this bundle's remote. The SSR hydration advisory does
+not apply to the client-side Studio SPA, which performs no server-side rendering. The upstream fix ships
+only in the breaking `@pimcore/studio-ui-bundle` 2026.1 line; this bundle targets Studio 2025.4, so the
+fix is deferred to the coordinated host-stack upgrade rather than forced under an incompatible host. The
+`brace-expansion`, `fast-uri`, and `dompurify` advisories were resolved by refreshing the lockfile.
+
 ## Authority model
 
 Asset Pilot permissions do not replace Pimcore workspaces. Interactive operations must satisfy the

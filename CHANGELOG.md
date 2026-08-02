@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Security
+
+- Refreshed the Studio npm lockfile to clear the `brace-expansion`, `fast-uri`, and `dompurify`
+  advisories. The remaining transitive `react-router` Moderate advisories are provided by the host
+  through `@pimcore/studio-ui-bundle` 2025.4 (not bundled in this remote; see SECURITY.md) and are
+  deferred to the coordinated Pimcore Studio 2026.1 upgrade.
+
 ## [2.0.0] - Unreleased
 
 ### Added
