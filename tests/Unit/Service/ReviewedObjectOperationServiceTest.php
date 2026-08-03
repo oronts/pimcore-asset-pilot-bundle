@@ -612,7 +612,7 @@ final class ReviewedObjectOperationServiceTest extends TestCase
                 new OrganizePlanFingerprint(),
                 new NullLogger(),
                 $lease ?? $this->createMock(RunItemLease::class),
-                new ObjectSaveDrain($this->createMock(LoopGuard::class), $this->createMock(OrganizeDispatcher::class), new NullLogger()),
+                new ObjectSaveDrain($this->createMock(LoopGuard::class), $this->createMock(OrganizeDispatcher::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), new NullLogger()),
                 ['rules' => ['product-assets']],
             ])
             ->onlyMethods(['loadObject'])

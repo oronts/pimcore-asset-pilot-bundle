@@ -18,10 +18,11 @@ use Oronts\AssetPilotBundle\Model\ActorContext;
 interface ObjectSaveDrainInterface
 {
     /**
-     * Release the object's dispatch-coalescing marker, then, if a concurrent save marked it dirty, queue a
-     * fresh non-fingerprinted organize under $actor for its latest state and clear the dirty flag. A no-op when
-     * the object is not dirty. Best-effort: a dispatch failure is logged and never propagated, so a terminal
+     * Release the object's dispatch-coalescing marker and, when $runId is given, its durable automatic-organize
+     * intent bound to that run; then, if either the cache marker or the intent recorded a coalesced save, queue
+     * one fresh non-fingerprinted organize under $actor for the latest state and clear the dirty flag. A no-op
+     * when nothing coalesced. Best-effort: a dispatch failure is logged and never propagated, so a terminal
      * caller is never turned into a retry loop and a later save still recovers the object.
      */
-    public function drain(int $objectId, TriggerType $trigger, ActorContext $actor): void;
+    public function drain(int $objectId, TriggerType $trigger, ActorContext $actor, ?string $runId = null): void;
 }

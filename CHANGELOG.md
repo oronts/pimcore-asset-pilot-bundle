@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Automatic organize producers now bind a durable per-object coalescing intent (a new
+  `asset_pilot_automatic_organize_intent` table) so concurrent saves of the same object, including two
+  inside one source transaction, fold into a single pending run instead of creating duplicate runs. A
+  maintenance backstop reclaims and rotates intents whose bound run terminated, was cancelled, or was
+  purged, so a dirty object left behind by an undispatchable or exhausted run is still re-organized.
+
 ### Security
 
 - Refreshed the Studio npm lockfile to clear the `brace-expansion`, `fast-uri`, and `dompurify`

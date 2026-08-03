@@ -66,6 +66,7 @@ class AuditTableHealthCheck implements HealthCheckInterface
         $missing = array_values(array_filter(
             [
                 Installer::TABLE_APPLY_PLAN_CLAIM,
+                Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT,
                 Installer::TABLE_AUDIT_LOG,
                 Installer::TABLE_QUARANTINE,
                 Installer::TABLE_INTEGRITY_LOG,

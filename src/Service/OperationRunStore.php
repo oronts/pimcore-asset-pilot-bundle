@@ -25,13 +25,13 @@ final class OperationRunStore implements OperationRunStoreInterface
      * @param list<array{key: string, type: string, id?: int|null, fingerprint?: string|null, payload?: array<string, mixed>, state?: array<string, mixed>}> $items
      * @param array<string, mixed>                                                                                                             $request
      */
-    public function create(OperationRunKind $kind, ActorContext $actor, array $items, array $request = [], ?string $retryOf = null, OperationRunStatus $initialStatus = OperationRunStatus::Queued): string
+    public function create(OperationRunKind $kind, ActorContext $actor, array $items, array $request = [], ?string $retryOf = null, OperationRunStatus $initialStatus = OperationRunStatus::Queued, ?string $runId = null): string
     {
         if ($items === []) {
             throw new \InvalidArgumentException('Operation runs require at least one item.');
         }
 
-        $runId = bin2hex(random_bytes(16));
+        $runId ??= bin2hex(random_bytes(16));
         $now = $this->now();
         $this->connection->transactional(function () use ($runId, $kind, $actor, $items, $request, $retryOf, $now, $initialStatus): void {
             $attempt = 1;

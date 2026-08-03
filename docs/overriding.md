@@ -85,6 +85,7 @@ element lookup, a render helper), never a safety decision.
 | `AssetOrganizerInterface` | `AssetOrganizer` |
 | `MovePlannerInterface` | `MovePlanner` |
 | `OrganizeDispatcherInterface` | `OrganizeDispatcher` |
+| `AutomaticOrganizeIntentStoreInterface` | `AutomaticOrganizeIntentStore` |
 | `AssetZipServiceInterface` | `AssetZipService` |
 | `ApplyPlanServiceInterface` | `ApplyPlanService` |
 | `RulePreviewPlanServiceInterface` | `RulePreviewPlanService` |

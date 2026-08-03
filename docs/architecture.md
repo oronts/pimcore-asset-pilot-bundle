@@ -289,12 +289,16 @@ reindexed or rebuilt.
 
 ## Database Schema
 
-The installer creates fourteen tables (`asset_pilot_apply_plan_claim`, `asset_pilot_audit_log`,
+The installer creates fifteen tables (`asset_pilot_apply_plan_claim`, `asset_pilot_audit_log`,
 `asset_pilot_quarantine`, `asset_pilot_integrity_log`, `asset_pilot_checksum`,
 `asset_pilot_storage_run`, `asset_pilot_storage_snapshot`, `asset_pilot_operation_run`,
 `asset_pilot_operation_run_item`, `asset_pilot_operation_delivery`,
 `asset_pilot_dependency_source`, `asset_pilot_dependency_edge`,
-`asset_pilot_dependency_freshness`, and `asset_pilot_asset_deletion_fence`). The
+`asset_pilot_dependency_freshness`, `asset_pilot_automatic_organize_intent`, and
+`asset_pilot_asset_deletion_fence`). The `asset_pilot_automatic_organize_intent` table binds one
+durable coalescing identity (keyed by object id) to each automatic organize, so concurrent saves,
+even inside one source transaction, fold into a single pending run instead of racing to create
+duplicate runs; the dispatch relay reclaims and rotates intents whose run terminated. The
 `asset_pilot_asset_deletion_fence` table holds token-owned tombstones that block a concurrent
 asset-referencing save while a hard delete is in flight (a PRE-save fence); a reaper reclaims stale
 leases. The apply-plan claim table has a SHA-256 claim ID primary key

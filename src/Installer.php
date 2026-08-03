@@ -10,7 +10,7 @@ use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Types\Type;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\QuarantineStatus;
-use Oronts\AssetPilotBundle\Migrations\Version20260721000000;
+use Oronts\AssetPilotBundle\Migrations\Version20260802000000;
 use Oronts\AssetPilotBundle\Support\SchemaIndex;
 use Pimcore\Bundle\StaticResolverBundle\Lib\CacheResolverInterface;
 use Pimcore\Bundle\StudioBackendBundle\Util\Constant\CacheKeys;
@@ -34,6 +34,7 @@ class Installer extends SettingsStoreAwareInstaller
     public const string TABLE_DEPENDENCY_EDGE = 'asset_pilot_dependency_edge';
     public const string TABLE_DEPENDENCY_FRESHNESS = 'asset_pilot_dependency_freshness';
     public const string TABLE_ASSET_DELETION_FENCE = 'asset_pilot_asset_deletion_fence';
+    public const string TABLE_AUTOMATIC_ORGANIZE_INTENT = 'asset_pilot_automatic_organize_intent';
 
     public function __construct(
         BundleInterface $bundle,
@@ -65,7 +66,7 @@ class Installer extends SettingsStoreAwareInstaller
         $currentSchema = $schemaManager->introspectSchema();
         $schema = clone $currentSchema;
 
-        foreach ([self::TABLE_ASSET_DELETION_FENCE, self::TABLE_DEPENDENCY_EDGE, self::TABLE_DEPENDENCY_SOURCE, self::TABLE_DEPENDENCY_FRESHNESS, self::TABLE_APPLY_PLAN_CLAIM, self::TABLE_OPERATION_DELIVERY, self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG, self::TABLE_CHECKSUM, self::TABLE_STORAGE_SNAPSHOT, self::TABLE_STORAGE_RUN, self::TABLE_OPERATION_RUN_ITEM, self::TABLE_OPERATION_RUN] as $tableName) {
+        foreach ([self::TABLE_ASSET_DELETION_FENCE, self::TABLE_AUTOMATIC_ORGANIZE_INTENT, self::TABLE_DEPENDENCY_EDGE, self::TABLE_DEPENDENCY_SOURCE, self::TABLE_DEPENDENCY_FRESHNESS, self::TABLE_APPLY_PLAN_CLAIM, self::TABLE_OPERATION_DELIVERY, self::TABLE_AUDIT_LOG, self::TABLE_QUARANTINE, self::TABLE_INTEGRITY_LOG, self::TABLE_CHECKSUM, self::TABLE_STORAGE_SNAPSHOT, self::TABLE_STORAGE_RUN, self::TABLE_OPERATION_RUN_ITEM, self::TABLE_OPERATION_RUN] as $tableName) {
             if ($schema->hasTable($tableName)) {
                 $schema->dropTable($tableName);
             }
@@ -116,6 +117,7 @@ class Installer extends SettingsStoreAwareInstaller
         self::ensureTable($schema, self::TABLE_OPERATION_RUN_ITEM, self::operationRunItemColumns(), self::operationRunItemIndexes(), self::operationRunItemUniqueIndexes());
         self::ensureTable($schema, self::TABLE_OPERATION_DELIVERY, self::operationDeliveryColumns(), self::operationDeliveryIndexes(), self::operationDeliveryUniqueIndexes());
         self::ensureTable($schema, self::TABLE_APPLY_PLAN_CLAIM, self::applyPlanClaimColumns(), self::applyPlanClaimIndexes());
+        self::ensureTable($schema, self::TABLE_AUTOMATIC_ORGANIZE_INTENT, self::automaticOrganizeIntentColumns(), self::automaticOrganizeIntentIndexes());
         DependencyProjectionSchema::ensure($schema);
 
         $auditTable = $schema->getTable(self::TABLE_AUDIT_LOG);
@@ -517,6 +519,33 @@ class Installer extends SettingsStoreAwareInstaller
         return ['idx_apply_plan_claim_expires' => ['expires_at']];
     }
 
+    /**
+     * `id` is the data-object id: one durable automatic-organize intent per object, so concurrent saves
+     * coalesce into one run instead of racing to create duplicate pending runs. `run_id` binds the intent
+     * to that run; `dirty` records that a later save arrived while it was in flight.
+     *
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    protected static function automaticOrganizeIntentColumns(): array
+    {
+        return [
+            ['id', 'integer', ['notnull' => true, 'unsigned' => true]],
+            ['run_id', 'string', ['length' => 32, 'notnull' => true]],
+            ['trigger_type', 'string', ['length' => 32, 'notnull' => true]],
+            ['actor_type', 'string', ['length' => 20, 'notnull' => true]],
+            ['actor_user_id', 'integer', ['notnull' => false]],
+            ['dirty', 'boolean', ['notnull' => true, 'default' => false]],
+            ['created_at', 'datetime', ['notnull' => true]],
+            ['updated_at', 'datetime', ['notnull' => true]],
+        ];
+    }
+
+    /** @return array<string, list<string>> */
+    protected static function automaticOrganizeIntentIndexes(): array
+    {
+        return ['idx_auto_organize_intent_run' => ['run_id']];
+    }
+
     public function needsReloadAfterInstall(): bool
     {
         return true;
@@ -528,6 +557,6 @@ class Installer extends SettingsStoreAwareInstaller
      */
     public function getLastMigrationVersionClassName(): ?string
     {
-        return Version20260721000000::class;
+        return Version20260802000000::class;
     }
 }

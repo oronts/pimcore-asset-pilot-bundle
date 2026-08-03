@@ -407,7 +407,7 @@ bin/console asset-pilot:health
 ```
 
 Built-in checks (extensible via the `oronts_asset_pilot.health_check` tag):
-- `database_schema`: all fourteen owned tables, columns, primary keys, and indexes match the current
+- `database_schema`: all fifteen owned tables, columns, primary keys, and indexes match the current
   migration target (CRITICAL when missing or drifted).
 - `rule_config`: the loaded rules pass `validate-config` (CRITICAL on a failure, WARNING on a warning).
 - `shared_cache`: reports WARNING for a known process-local adapter or when cross-process

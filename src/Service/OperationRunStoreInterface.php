@@ -15,7 +15,7 @@ interface OperationRunStoreInterface
      * @param list<array{key: string, type: string, id?: int|null, fingerprint?: string|null, payload?: array<string, mixed>, state?: array<string, mixed>}> $items
      * @param array<string, mixed>                                                                                                             $request
      */
-    public function create(OperationRunKind $kind, ActorContext $actor, array $items, array $request = [], ?string $retryOf = null, OperationRunStatus $initialStatus = OperationRunStatus::Queued): string;
+    public function create(OperationRunKind $kind, ActorContext $actor, array $items, array $request = [], ?string $retryOf = null, OperationRunStatus $initialStatus = OperationRunStatus::Queued, ?string $runId = null): string;
 
     /**
      * @return list<array{id: string, actorType: string, actorUserId: int|null, trigger: string, targets: list<array{id: int, fingerprint: string|null}>}>

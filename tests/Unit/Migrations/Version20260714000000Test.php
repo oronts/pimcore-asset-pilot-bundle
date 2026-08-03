@@ -63,6 +63,7 @@ class Version20260714000000Test extends TestCase
             Installer::TABLE_APPLY_PLAN_CLAIM,
             Installer::TABLE_ASSET_DELETION_FENCE,
             Installer::TABLE_AUDIT_LOG,
+            Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT,
             Installer::TABLE_CHECKSUM,
             Installer::TABLE_DEPENDENCY_EDGE,
             Installer::TABLE_DEPENDENCY_FRESHNESS,

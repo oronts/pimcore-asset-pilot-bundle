@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Migrations;
 use Doctrine\DBAL\Schema\Schema;
 use Oronts\AssetPilotBundle\Installer;
 use Oronts\AssetPilotBundle\Migrations\Version20260716120000;
-use Oronts\AssetPilotBundle\Migrations\Version20260721000000;
+use Oronts\AssetPilotBundle\Migrations\Version20260802000000;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -20,7 +20,7 @@ final class Version20260716120000Test extends TestCase
     {
         $installer = (new \ReflectionClass(Installer::class))->newInstanceWithoutConstructor();
 
-        self::assertSame(Version20260721000000::class, $installer->getLastMigrationVersionClassName());
+        self::assertSame(Version20260802000000::class, $installer->getLastMigrationVersionClassName());
     }
 
     #[Test]

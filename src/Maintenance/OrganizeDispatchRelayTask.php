@@ -8,7 +8,9 @@ use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Pimcore\Maintenance\TaskInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Envelope;
@@ -29,12 +31,15 @@ final class OrganizeDispatchRelayTask implements TaskInterface
     public function __construct(
         private readonly MessageBusInterface $messageBus,
         private readonly OperationRunStoreInterface $runs,
+        private readonly AutomaticOrganizeIntentStoreInterface $intents,
+        private readonly OrganizeDispatcherInterface $dispatcher,
         private readonly LoggerInterface $logger,
         private readonly int $batchSize,
     ) {}
 
     public function execute(): void
     {
+        $this->reclaimStaleIntents();
         $published = 0;
         $failed = 0;
         foreach ($this->runs->dueForDispatch($this->batchSize) as $run) {
@@ -67,6 +72,28 @@ final class OrganizeDispatchRelayTask implements TaskInterface
                 'published' => $published,
                 'failed' => $failed,
             ]);
+        }
+    }
+
+    /**
+     * Reclaim automatic-organize intents whose bound run finished or was purged but whose normal terminal path
+     * missed the release (undispatchable, exhausted delivery, or a crash). A dirty intent means a save coalesced
+     * into a run that never organized it, so re-dispatch its latest state; a clean one is just released.
+     */
+    private function reclaimStaleIntents(): void
+    {
+        foreach ($this->intents->staleIntents($this->batchSize) as $intent) {
+            try {
+                if ($this->intents->releaseIfOwnedBy($intent->objectId, $intent->runId)) {
+                    $this->dispatcher->dispatchObject($intent->objectId, $intent->trigger, $intent->actor);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->error('Asset Pilot: could not reclaim a stale automatic-organize intent for object {id}: {error}', [
+                    'id' => $intent->objectId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+            }
         }
     }
 

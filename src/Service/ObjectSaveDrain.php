@@ -13,14 +13,16 @@ final class ObjectSaveDrain implements ObjectSaveDrainInterface
     public function __construct(
         private readonly LoopGuard $loopGuard,
         private readonly OrganizeDispatcherInterface $dispatcher,
+        private readonly AutomaticOrganizeIntentStoreInterface $intents,
         private readonly LoggerInterface $logger,
     ) {}
 
-    public function drain(int $objectId, TriggerType $trigger, ActorContext $actor): void
+    public function drain(int $objectId, TriggerType $trigger, ActorContext $actor, ?string $runId = null): void
     {
         try {
+            $intentDirty = $runId !== null && $this->intents->releaseIfOwnedBy($objectId, $runId);
             $this->loopGuard->clearObjectDispatched($objectId);
-            if (!$this->loopGuard->isObjectDirty($objectId)) {
+            if (!$this->loopGuard->isObjectDirty($objectId) && !$intentDirty) {
                 return;
             }
             $this->dispatcher->dispatchObject($objectId, $trigger, $actor);

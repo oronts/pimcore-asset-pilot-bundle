@@ -20,6 +20,7 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
         private readonly MessageBusInterface $messageBus,
         private readonly ElementAuthorizationInterface $authorization,
         private readonly OperationRunStoreInterface $runs,
+        private readonly AutomaticOrganizeIntentStoreInterface $intents,
     ) {}
 
     public function dispatchObject(
@@ -93,6 +94,7 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
         OperationRunKind $kind = OperationRunKind::Organize,
         array $request = [],
         OperationRunStatus $initialStatus = OperationRunStatus::Queued,
+        ?string $runId = null,
     ): string {
         if ($objectIds === []) {
             throw new \InvalidArgumentException('An organize run requires at least one object ID.');
@@ -112,6 +114,7 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
             ['trigger' => $triggerType->value, ...$request],
             null,
             $initialStatus,
+            $runId,
         );
     }
 
@@ -124,13 +127,30 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
      */
     public function deferObject(int $objectId, TriggerType $triggerType, ?ActorContext $actor = null, ?string $expectedFingerprint = null): string
     {
-        return $this->createRun(
-            [$objectId],
-            $triggerType,
-            $actor,
-            $expectedFingerprint === null ? [] : [$objectId => $expectedFingerprint],
-            initialStatus: OperationRunStatus::PendingDispatch,
-        );
+        $actor ??= $this->authorization->currentActor();
+        // Reserve one durable intent per object first: only the winning save creates the pending run, so
+        // concurrent saves (even inside one source transaction) coalesce into it instead of racing to
+        // publish duplicate runs. The reservation commits and rolls back atomically with the source save.
+        $candidateRunId = bin2hex(random_bytes(16));
+        $binding = $this->intents->bindOrCoalesce($objectId, $candidateRunId, $triggerType, $actor);
+        if (!$binding->isNew) {
+            return $binding->runId;
+        }
+
+        try {
+            return $this->createRun(
+                [$objectId],
+                $triggerType,
+                $actor,
+                $expectedFingerprint === null ? [] : [$objectId => $expectedFingerprint],
+                initialStatus: OperationRunStatus::PendingDispatch,
+                runId: $candidateRunId,
+            );
+        } catch (\Throwable $e) {
+            $this->intents->releaseIfOwnedBy($objectId, $candidateRunId);
+
+            throw $e;
+        }
     }
 
     private function failOwnedRun(string $runId, bool $ownsRun): void

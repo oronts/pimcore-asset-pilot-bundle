@@ -69,6 +69,8 @@ use Oronts\AssetPilotBundle\Service\AssetSearchService;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetZipService;
 use Oronts\AssetPilotBundle\Service\AssetZipServiceInterface;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\ConfidenceScorer;
 use Oronts\AssetPilotBundle\Service\ConfidenceScorerInterface;
 use Oronts\AssetPilotBundle\Service\ConfigValidator;
@@ -434,6 +436,7 @@ final class ExtensionContractTest extends TestCase
             AssetOrganizerInterface::class => AssetOrganizer::class,
             MovePlannerInterface::class => MovePlanner::class,
             OrganizeDispatcherInterface::class => OrganizeDispatcher::class,
+            AutomaticOrganizeIntentStoreInterface::class => AutomaticOrganizeIntentStore::class,
             AssetZipServiceInterface::class => AssetZipService::class,
             ApplyPlanServiceInterface::class => ApplyPlanService::class,
             RulePreviewPlanServiceInterface::class => RulePreviewPlanService::class,

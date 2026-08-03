@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Maintenance;
 
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Maintenance\OrganizeDispatchRelayTask;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\AutomaticOrganizeIntent;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -45,6 +50,16 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
         return $bus;
     }
 
+    private function relayTask(MessageBusInterface $bus, OperationRunStoreInterface $store, ?AutomaticOrganizeIntentStoreInterface $intents = null, ?OrganizeDispatcherInterface $dispatcher = null): OrganizeDispatchRelayTask
+    {
+        if ($intents === null) {
+            $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+            $intents->method('staleIntents')->willReturn([]);
+        }
+
+        return new OrganizeDispatchRelayTask($bus, $store, $intents, $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), new NullLogger(), 50);
+    }
+
     #[Test]
     public function publishesASingleTargetPendingRunAndMarksItDispatched(): void
     {
@@ -58,7 +73,7 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
             self::assertSame(7, $message->actorUserId);
         });
 
-        (new OrganizeDispatchRelayTask($bus, $store, new NullLogger(), 50))->execute();
+        $this->relayTask($bus, $store)->execute();
     }
 
     #[Test]
@@ -71,7 +86,7 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
 
         // Must not throw out of execute(): the source save already committed and must stay truthful; the run
         // stays pending_dispatch for the next relay pass.
-        (new OrganizeDispatchRelayTask($bus, $store, new NullLogger(), 50))->execute();
+        $this->relayTask($bus, $store)->execute();
 
         $this->addToAssertionCount(1);
     }
@@ -85,7 +100,7 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
         $bus = $this->createMock(MessageBusInterface::class);
         $bus->expects(self::never())->method('dispatch');
 
-        (new OrganizeDispatchRelayTask($bus, $store, new NullLogger(), 50))->execute();
+        $this->relayTask($bus, $store)->execute();
     }
 
     #[Test]
@@ -100,6 +115,36 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
             self::assertNull($message->actorUserId);
         });
 
-        (new OrganizeDispatchRelayTask($bus, $store, new NullLogger(), 50))->execute();
+        $this->relayTask($bus, $store)->execute();
+    }
+
+    #[Test]
+    public function reclaimsAStaleDirtyIntentByReleasingAndReDispatchingIt(): void
+    {
+        $store = $this->storeReturning();
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->method('staleIntents')->willReturn([
+            new AutomaticOrganizeIntent(42, 'run-dead', TriggerType::ObjectSave, ActorContext::user(7), true),
+        ]);
+        $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-dead')->willReturn(true);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, self::anything());
+
+        $this->relayTask($this->createMock(MessageBusInterface::class), $store, $intents, $dispatcher)->execute();
+    }
+
+    #[Test]
+    public function releasesAStaleCleanIntentWithoutReDispatching(): void
+    {
+        $store = $this->storeReturning();
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->method('staleIntents')->willReturn([
+            new AutomaticOrganizeIntent(42, 'run-done', TriggerType::ObjectSave, ActorContext::system(), false),
+        ]);
+        $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-done')->willReturn(false);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::never())->method('dispatchObject');
+
+        $this->relayTask($this->createMock(MessageBusInterface::class), $store, $intents, $dispatcher)->execute();
     }
 }

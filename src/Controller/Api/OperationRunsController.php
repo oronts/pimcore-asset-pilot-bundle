@@ -78,7 +78,7 @@ final class OperationRunsController
         // operator, so a coalesced organize keeps its permissions and audit attribution.
         $runActor = OperationRunActor::fromRun($run);
         foreach ($this->runs->dataObjectTargets($id) as $objectId) {
-            $this->drain->drain($objectId, TriggerType::ObjectSave, $runActor);
+            $this->drain->drain($objectId, TriggerType::ObjectSave, $runActor, $id);
         }
 
         $status = $this->runs->finish($id);

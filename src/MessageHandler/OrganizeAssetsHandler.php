@@ -260,6 +260,7 @@ class OrganizeAssetsHandler
             $message->objectId,
             $message->triggerType,
             new ActorContext($message->actorType, $message->actorUserId),
+            $message->runId,
         );
     }
 

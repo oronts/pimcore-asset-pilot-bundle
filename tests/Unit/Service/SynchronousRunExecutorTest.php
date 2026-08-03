@@ -555,7 +555,7 @@ final class SynchronousRunExecutorTest extends TestCase
 
     private function executor(AssetOrganizerInterface $organizer, OperationRunStoreInterface $runs, RunItemLease $lease, ?ObjectSaveDrainInterface $drain = null): SynchronousRunExecutor
     {
-        return new SynchronousRunExecutor($organizer, $runs, $lease, $drain ?? new ObjectSaveDrain($this->createMock(LoopGuard::class), $this->createMock(OrganizeDispatcherInterface::class), new NullLogger()));
+        return new SynchronousRunExecutor($organizer, $runs, $lease, $drain ?? new ObjectSaveDrain($this->createMock(LoopGuard::class), $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), new NullLogger()));
     }
 
     private function object(): AbstractObject

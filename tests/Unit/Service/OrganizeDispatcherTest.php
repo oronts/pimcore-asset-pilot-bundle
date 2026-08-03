@@ -9,7 +9,9 @@ use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\AutomaticOrganizeIntentBinding;
 use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -49,13 +51,44 @@ class OrganizeDispatcherTest extends TestCase
         MessageBusInterface $bus,
         ActorContext $actor,
         ?OperationRunStoreInterface $runs = null,
+        ?AutomaticOrganizeIntentStoreInterface $intents = null,
     ): OrganizeDispatcher {
         if ($runs === null) {
             $runs = $this->createMock(OperationRunStoreInterface::class);
             $runs->method('create')->willReturn(self::RUN_ID);
         }
 
-        return new OrganizeDispatcher($bus, $this->authorization($actor), $runs);
+        return new OrganizeDispatcher($bus, $this->authorization($actor), $runs, $intents ?? $this->createMock(AutomaticOrganizeIntentStoreInterface::class));
+    }
+
+    #[Test]
+    public function deferObjectRecordsOnePendingRunForTheWinningSave(): void
+    {
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::once())->method('create')->willReturnArgument(6);
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->method('bindOrCoalesce')->willReturnCallback(
+            static fn (int $objectId, string $candidate): AutomaticOrganizeIntentBinding => new AutomaticOrganizeIntentBinding($candidate, true),
+        );
+
+        $runId = $this->dispatcher($this->createMock(MessageBusInterface::class), ActorContext::system(), $runs, $intents)
+            ->deferObject(42, TriggerType::ObjectSave);
+
+        self::assertNotSame('', $runId, 'the winning save owns a fresh pending run');
+    }
+
+    #[Test]
+    public function deferObjectCoalescesASecondSaveWithoutRecordingASecondRun(): void
+    {
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::never())->method('create');
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->method('bindOrCoalesce')->willReturn(new AutomaticOrganizeIntentBinding('existing-run', false));
+
+        self::assertSame(
+            'existing-run',
+            $this->dispatcher($this->createMock(MessageBusInterface::class), ActorContext::system(), $runs, $intents)->deferObject(42, TriggerType::ObjectSave),
+        );
     }
 
     #[Test]
@@ -130,7 +163,7 @@ class OrganizeDispatcherTest extends TestCase
             },
         );
 
-        $runId = (new OrganizeDispatcher($bus, $this->authorization(ActorContext::system()), $runs))->createRun(
+        $runId = (new OrganizeDispatcher($bus, $this->authorization(ActorContext::system()), $runs, $this->createMock(AutomaticOrganizeIntentStoreInterface::class)))->createRun(
             [42],
             TriggerType::Manual,
             kind: OperationRunKind::Reorganize,
