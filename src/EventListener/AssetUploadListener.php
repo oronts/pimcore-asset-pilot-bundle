@@ -133,26 +133,32 @@ class AssetUploadListener
 
         // Check if the object is already being processed (loop prevention)
         if ($this->loopGuard->isProcessingObject($objectId)) {
-            $this->loopGuard->markObjectDirty($objectId);
-            $this->logger->debug('AssetUploadListener: object {id} already being processed, skipping', [
+            // Fold the save into the live automatic intent durably; a bulk/sync run owns no intent, so fall
+            // back to the cache dirty flag that path drains.
+            try {
+                if (!$this->intents->markDirtyIfPresent($objectId)) {
+                    $this->loopGuard->markObjectDirty($objectId);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->error('AssetUploadListener: failed to record a coalesced save for object {id}: {error}', [
+                    'id' => $objectId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+                if ($this->connection->getTransactionNestingLevel() > 0) {
+                    throw $e;
+                }
+            }
+            $this->logger->debug('AssetUploadListener: object {id} already being processed, folding into its run', [
                 'id' => $objectId,
             ]);
             return;
         }
 
         if ($this->asyncEnabled) {
-            if ($this->loopGuard->tryCoalesceIntoInFlightRun($objectId)) {
-                // Record the coalesce durably too, so a save folded in through the cache fast path survives a
-                // crash before the run drains rather than being lost with the ephemeral marker.
-                $this->intents->markDirtyIfPresent($objectId);
-                $this->logger->debug('AssetUploadListener: object {id} coalesced into the in-flight run', [
-                    'id' => $objectId,
-                ]);
-                return;
-            }
-
             try {
-                // Record the organize intent as a pending-dispatch run; the relay publishes it after commit.
+                // The durable intent is the single coalescing record: deferObject folds the save into the live
+                // pending run or records a fresh one, so no cache dispatch marker is needed.
                 $this->dispatcher->deferObject($objectId, TriggerType::AssetUpload);
             } catch (\Throwable $e) {
                 $this->logger->error('AssetUploadListener: failed to record async organize for object {id}: {error}', [
@@ -167,10 +173,6 @@ class AssetUploadListener
                 }
 
                 return;
-            }
-            // Mark dispatched only once the run has committed (nesting 0); a rolled-back save must leave no stale dedup marker.
-            if ($this->connection->getTransactionNestingLevel() === 0) {
-                $this->loopGuard->markObjectDispatched($objectId);
             }
 
             $this->logger->debug('AssetUploadListener: recorded pending async organize intent for object {id}', [

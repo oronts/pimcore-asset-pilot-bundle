@@ -182,13 +182,12 @@ class OrganizeAssetsHandler
         ]);
 
         try {
-            $processedModificationDate = $object instanceof Concrete ? $object->getModificationDate() : null;
             $results = $this->executeOrganization($message, $object, $actor);
             $this->logger->info('Asset Pilot: async organization complete for object {id} - {count} operations', [
                 'id' => $message->objectId,
                 'count' => count($results),
             ]);
-            $this->requeueWhenObjectChanged($message, $actor, $processedModificationDate);
+            $this->drainCoalescedSave($message);
             $this->completeRunItem($message, $this->itemStatus($results), null, ['operationCount' => count($results)]);
         } catch (StaleApplyPlanException) {
             $this->completeStalePlan($message);
@@ -272,36 +271,6 @@ class OrganizeAssetsHandler
     protected function reloadObject(int $objectId): ?AbstractObject
     {
         return AbstractObject::getById($objectId, ['force' => true]);
-    }
-
-    private function requeueWhenObjectChanged(OrganizeAssetsMessage $message, ActorContext $actor, ?int $processedModificationDate): void
-    {
-        // A non-Concrete object has no coalesced save to drain. An immutable-plan run still drains here: a
-        // concurrent save can coalesce into it and needs a fresh non-fingerprinted organize, not the one-shot plan.
-        if ($processedModificationDate === null) {
-            return;
-        }
-
-        // Release the coalescing marker before draining the dirty flag: a save that coalesced while this run was
-        // in-flight marked dirty before re-reading the marker it still saw, so it is guaranteed to be observed by
-        // the isObjectDirty read below; a save landing after this point sees no marker and records its own run.
-        $this->loopGuard->clearObjectDispatched($message->objectId);
-        $current = $this->reloadObject($message->objectId);
-        $wasSavedDuringProcessing = $this->loopGuard->isObjectDirty($message->objectId);
-        if (!$wasSavedDuringProcessing && (!$current instanceof Concrete || $current->getModificationDate() <= $processedModificationDate)) {
-            return;
-        }
-
-        $this->loopGuard->markObjectDirty($message->objectId);
-        $this->logger->info('Asset Pilot: object {id} changed during organization; queueing its latest state', [
-            'id' => $message->objectId,
-        ]);
-        try {
-            $this->dispatcher->dispatchObject($message->objectId, $message->triggerType, $actor);
-        } catch (\Throwable $exception) {
-            throw new RetryableDispatchException('The latest object state could not be queued.', previous: $exception);
-        }
-        $this->loopGuard->clearObjectDirty($message->objectId);
     }
 
     private function startRun(OrganizeAssetsMessage $message): bool

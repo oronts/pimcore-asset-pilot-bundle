@@ -21,11 +21,10 @@ use Psr\Log\NullLogger;
 final class ObjectSaveDrainTest extends TestCase
 {
     #[Test]
-    public function clearsTheDispatchMarkerThenReDispatchesAndClearsDirtyWhenDirty(): void
+    public function reDispatchesAndClearsTheBulkSyncDirtyFlagWhenDirty(): void
     {
         $actor = ActorContext::user(7);
         $loopGuard = $this->createMock(LoopGuard::class);
-        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
         $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
@@ -35,16 +34,31 @@ final class ObjectSaveDrainTest extends TestCase
     }
 
     #[Test]
-    public function clearsTheDispatchMarkerButDoesNotReDispatchWhenNotDirty(): void
+    public function doesNotReDispatchWhenNotDirty(): void
     {
         $loopGuard = $this->createMock(LoopGuard::class);
-        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
         $loopGuard->method('isObjectDirty')->with(42)->willReturn(false);
         $loopGuard->expects(self::never())->method('clearObjectDirty');
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
         $dispatcher->expects(self::never())->method('dispatchObject');
 
         $this->drain($loopGuard, $dispatcher)->drain(42, TriggerType::ObjectSave, ActorContext::system());
+    }
+
+    #[Test]
+    public function subsumesTheCacheDirtyFlagUnderADurableRotation(): void
+    {
+        $actor = ActorContext::user(7);
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('isObjectDirty')->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, $actor);
+        $dispatcher->expects(self::never())->method('dispatchObject');
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->method('releaseIfOwnedBy')->with(42, 'run-1')->willReturn(true);
+
+        $this->drain($loopGuard, $dispatcher, $intents)->drain(42, TriggerType::ObjectSave, $actor, 'run-1');
     }
 
     #[Test]
@@ -88,10 +102,10 @@ final class ObjectSaveDrainTest extends TestCase
     }
 
     #[Test]
-    public function neverThrowsWhenTheMarkerReadFails(): void
+    public function neverThrowsWhenTheDirtyReadFails(): void
     {
         $loopGuard = $this->createMock(LoopGuard::class);
-        $loopGuard->method('clearObjectDispatched')->willThrowException(new \RuntimeException('cache unavailable'));
+        $loopGuard->method('isObjectDirty')->willThrowException(new \RuntimeException('cache unavailable'));
 
         $this->drain($loopGuard)->drain(42, TriggerType::ObjectSave, ActorContext::system());
 

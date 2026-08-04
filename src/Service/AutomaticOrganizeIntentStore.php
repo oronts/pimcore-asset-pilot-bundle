@@ -61,12 +61,12 @@ class AutomaticOrganizeIntentStore implements AutomaticOrganizeIntentStoreInterf
         return $this->connection->delete(Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT, ['id' => $objectId, 'run_id' => $runId, 'dirty' => 1]) === 1;
     }
 
-    public function markDirtyIfPresent(int $objectId): void
+    public function markDirtyIfPresent(int $objectId): bool
     {
-        $this->connection->executeStatement(
+        return $this->connection->executeStatement(
             'UPDATE ' . Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT . ' SET dirty = 1, updated_at = :now WHERE id = :id',
             ['now' => $this->now(), 'id' => $objectId],
-        );
+        ) > 0;
     }
 
     /** @return list<AutomaticOrganizeIntent> */

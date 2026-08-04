@@ -120,7 +120,7 @@ final class OperationRunsControllerTest extends TestCase
     }
 
     #[Test]
-    public function cancellingClearsTheDispatchMarkersOfTheRunsObjectTargets(): void
+    public function cancellingReleasesTheDispatchIntentsOfTheRunsObjectTargets(): void
     {
         $actor = ActorContext::user(7);
         $runs = $this->createMock(OperationRunStoreInterface::class);
@@ -128,16 +128,19 @@ final class OperationRunsControllerTest extends TestCase
         $runs->method('requestCancellation')->with(self::RUN_ID, $actor)->willReturn(true);
         $runs->method('dataObjectTargets')->with(self::RUN_ID)->willReturn([42, 43]);
         $runs->method('finish')->willReturn(OperationRunStatus::Cancelled);
-        $cleared = [];
-        $loopGuard = $this->createMock(LoopGuard::class);
-        $loopGuard->expects(self::exactly(2))->method('clearObjectDispatched')
-            ->willReturnCallback(static function (int $id) use (&$cleared): void {
-                $cleared[] = $id;
+        $released = [];
+        $intents = $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class);
+        $intents->expects(self::exactly(2))->method('releaseIfOwnedBy')
+            ->willReturnCallback(static function (int $id, string $runId) use (&$released): bool {
+                TestCase::assertSame(self::RUN_ID, $runId);
+                $released[] = $id;
+
+                return false;
             });
 
-        $this->controller($runs, $actor, loopGuard: $loopGuard)->cancel(self::RUN_ID);
+        $this->controller($runs, $actor, intents: $intents)->cancel(self::RUN_ID);
 
-        self::assertSame([42, 43], $cleared);
+        self::assertSame([42, 43], $released);
     }
 
     #[Test]
@@ -277,6 +280,7 @@ final class OperationRunsControllerTest extends TestCase
         bool $admin = true,
         ?LoopGuard $loopGuard = null,
         ?OrganizeDispatcherInterface $dispatcher = null,
+        ?\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface $intents = null,
     ): OperationRunsController {
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('currentActor')->willReturn($actor);
@@ -295,8 +299,16 @@ final class OperationRunsControllerTest extends TestCase
             $authorization,
             $urls,
             new \Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter(),
-            new ObjectSaveDrain($loopGuard ?? $this->createMock(LoopGuard::class), $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger()),
+            new ObjectSaveDrain($loopGuard ?? $this->createMock(LoopGuard::class), $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), $intents ?? $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->passthroughConnection(), new NullLogger()),
         );
+    }
+
+    private function passthroughConnection(): \Doctrine\DBAL\Connection
+    {
+        $connection = $this->createMock(\Doctrine\DBAL\Connection::class);
+        $connection->method('transactional')->willReturnCallback(static fn (\Closure $work): mixed => $work($connection));
+
+        return $connection;
     }
 
     /** @return array<string, mixed> */

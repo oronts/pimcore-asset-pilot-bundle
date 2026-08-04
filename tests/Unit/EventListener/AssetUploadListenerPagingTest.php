@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 
 use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\EventListener\AssetUploadListener;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
@@ -114,9 +115,8 @@ class AssetUploadListenerPagingTest extends TestCase
     {
         $guard = $this->createMock(LoopGuard::class);
         $guard->method('isProcessingObject')->with(42)->willReturn(false);
-        $guard->method('tryCoalesceIntoInFlightRun')->with(42)->willReturn(true);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::never())->method('dispatchObject');
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::AssetUpload);
 
         $listener = $this->dependentListener($guard, $dispatcher);
         $listener->runDependent(['type' => 'object', 'id' => 42]);

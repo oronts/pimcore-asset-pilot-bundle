@@ -44,24 +44,6 @@ class LoopGuardTest extends TestCase
         self::assertTrue($guard->isObjectDirty(42));
     }
 
-    #[Test]
-    public function tryCoalesceFoldsIntoAnInFlightRunOnlyWhileItsMarkerStands(): void
-    {
-        $guard = new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore()));
-
-        // No run in flight: nothing to coalesce into, and the object is left un-dirtied.
-        self::assertFalse($guard->tryCoalesceIntoInFlightRun(42));
-        self::assertFalse($guard->isObjectDirty(42));
-
-        // A run is in flight: the save is folded in and the object is marked dirty for that run to drain.
-        $guard->markObjectDispatched(42);
-        self::assertTrue($guard->tryCoalesceIntoInFlightRun(42));
-        self::assertTrue($guard->isObjectDirty(42));
-
-        // The run finalized and cleared its marker: a later save can no longer coalesce and must record its own run.
-        $guard->clearObjectDispatched(42);
-        self::assertFalse($guard->tryCoalesceIntoInFlightRun(42));
-    }
 
     #[Test]
     public function acquireObjectIsExclusiveAcrossJobsAndReleasableByTheOwner(): void

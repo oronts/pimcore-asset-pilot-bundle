@@ -173,35 +173,10 @@ class OrganizeAssetsHandlerTest extends TestCase
     }
 
     #[Test]
-    public function requeuesWhenObjectChangesWhileOrganizationIsRunning(): void
+    public function reOrganizesWhenABulkOrSyncSaveSetTheCacheDirtyFlag(): void
     {
         $loaded = $this->createMock(Concrete::class);
         $loaded->method('getModificationDate')->willReturn(100);
-        $reloaded = $this->createMock(Concrete::class);
-        $reloaded->method('getModificationDate')->willReturn(101);
-        $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->expects(self::once())->method('organize')->with($loaded, TriggerType::ObjectSave)->willReturn([]);
-        $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
-            42,
-            TriggerType::ObjectSave,
-            self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),
-        );
-        $authorization = $this->createMock(ElementAuthorization::class);
-        $authorization->method('isAllowed')->willReturn(true);
-
-        ($this->handler($loaded, $organizer, $dispatcher, $authorization, $reloaded))(
-            new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7),
-        );
-    }
-
-    #[Test]
-    public function requeuesWhenObjectIsSavedWithinTheSameSecond(): void
-    {
-        $loaded = $this->createMock(Concrete::class);
-        $loaded->method('getModificationDate')->willReturn(100);
-        $reloaded = $this->createMock(Concrete::class);
-        $reloaded->method('getModificationDate')->willReturn(100);
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::once())->method('organize')->willReturn([]);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
@@ -213,12 +188,10 @@ class OrganizeAssetsHandlerTest extends TestCase
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('isAllowed')->willReturn(true);
         $loopGuard = $this->createMock(LoopGuard::class);
-        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
-        $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(true);
-        $loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
+        $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
 
-        ($this->handler($loaded, $organizer, $dispatcher, $authorization, $reloaded, $loopGuard))(
+        ($this->handler($loaded, $organizer, $dispatcher, $authorization, $loaded, $loopGuard))(
             new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7),
         );
     }
@@ -245,7 +218,6 @@ class OrganizeAssetsHandlerTest extends TestCase
         $runs->expects(self::once())->method('finish')->with('run-1')->willReturn(OperationRunStatus::Completed);
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireOperationRunItem')->willReturn(true);
-        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
 
         ($this->handler($object, $organizer, $this->createMock(OrganizeDispatcher::class), $authorization, runs: $runs, loopGuard: $loopGuard))(
             new OrganizeAssetsMessage(42, TriggerType::Api, actorType: ActorType::User, actorUserId: 7, runId: 'run-1'),
@@ -269,43 +241,6 @@ class OrganizeAssetsHandlerTest extends TestCase
             new OrganizeAssetsMessage(42, TriggerType::Api, actorType: ActorType::User, actorUserId: 7, runId: 'run-1'),
         );
     }
-    #[Test]
-    public function latestStateDispatchFailureKeepsDirtyTrackedItemResumable(): void
-    {
-        $loaded = $this->createMock(Concrete::class);
-        $loaded->method('getModificationDate')->willReturn(100);
-        $reloaded = $this->createMock(Concrete::class);
-        $reloaded->method('getModificationDate')->willReturn(101);
-        $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->expects(self::once())
-            ->method('organizeWithHeartbeat')
-            ->willReturn([]);
-        $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())
-            ->method('dispatchObject')
-            ->willThrowException(new \RuntimeException('broker unavailable'));
-        $authorization = $this->createMock(ElementAuthorization::class);
-        $authorization->method('isAllowed')->willReturn(true);
-        $loopGuard = $this->createMock(LoopGuard::class);
-        $loopGuard->method('acquireOperationRunItem')->willReturn(true);
-        $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(false);
-        $loopGuard->expects(self::once())->method('markObjectDirty')->with(42);
-        $loopGuard->expects(self::never())->method('clearObjectDirty');
-        $runs = $this->createMock(OperationRunStoreInterface::class);
-        $runs->method('isCancellationRequested')->willReturn(false);
-        $runs->method('resume')->willReturn(true);
-        $runs->method('resumeItem')->willReturn(true);
-        $runs->expects(self::never())->method('completeItem');
-        $runs->expects(self::never())->method('finish');
-        $runs->expects(self::never())->method('fail');
-
-        $this->expectException(RetryableDispatchException::class);
-
-        ($this->handler($loaded, $organizer, $dispatcher, $authorization, $reloaded, $loopGuard, $runs))(
-            new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7, 'run-1'),
-        );
-    }
-
 
     #[Test]
     public function drainsACoalescedSaveWhenTheTrackedOrganizeFailsNonRetryably(): void
@@ -318,7 +253,6 @@ class OrganizeAssetsHandlerTest extends TestCase
         $authorization->method('isAllowed')->willReturn(true);
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireOperationRunItem')->willReturn(true);
-        $loopGuard->expects(self::once())->method('clearObjectDispatched')->with(42);
         $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);

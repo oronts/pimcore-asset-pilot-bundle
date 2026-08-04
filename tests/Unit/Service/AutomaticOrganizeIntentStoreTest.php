@@ -136,19 +136,17 @@ final class AutomaticOrganizeIntentStoreTest extends TestCase
         $store = $this->store();
         $store->bindOrCoalesce(42, 'run-a', TriggerType::ObjectSave, ActorContext::user(7));
 
-        $store->markDirtyIfPresent(42);
-
+        self::assertTrue($store->markDirtyIfPresent(42), 'a live intent is marked and reported present');
         self::assertSame(1, (int) $this->firstConnection->fetchOne(
             'SELECT dirty FROM ' . Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT . ' WHERE id = 42',
-        ), 'a cache-coalesced save is recorded durably so a crash before drain does not lose it');
+        ), 'a save landing while the run is in flight is recorded durably so a crash before drain does not lose it');
         self::assertTrue($store->releaseIfOwnedBy(42, 'run-a'), 'the durable dirty flag drives a rotation');
     }
 
     #[Test]
-    public function markDirtyIfPresentIsANoOpWithoutAnIntent(): void
+    public function markDirtyIfPresentReportsFalseWithoutAnIntent(): void
     {
-        $this->store()->markDirtyIfPresent(999);
-
+        self::assertFalse($this->store()->markDirtyIfPresent(999), 'no intent means the caller must record a fresh run');
         self::assertSame(0, (int) $this->firstConnection->fetchOne(
             'SELECT COUNT(*) FROM ' . Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT . ' WHERE id = 999',
         ));

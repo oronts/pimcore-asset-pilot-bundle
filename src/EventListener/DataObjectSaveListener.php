@@ -94,7 +94,25 @@ class DataObjectSaveListener
 
     private function deferObject(int $objectId, string $className, string $reason): void
     {
-        $this->loopGuard->markObjectDirty($objectId);
+        // A save while this object is being organized: fold it into the live automatic intent durably. A
+        // bulk/sync run owns no intent, so fall back to the cache dirty flag that path drains.
+        try {
+            if (!$this->intents->markDirtyIfPresent($objectId)) {
+                $this->loopGuard->markObjectDirty($objectId);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('DataObjectSaveListener: failed to record a coalesced save for {class}:{id}: {error}', [
+                'class' => $className,
+                'id' => $objectId,
+                'error' => $e->getMessage(),
+                'exception' => $e,
+            ]);
+            if ($this->connection->getTransactionNestingLevel() > 0) {
+                throw $e;
+            }
+
+            return;
+        }
         $this->logger->debug('DataObjectSaveListener: {reason} for {class}:{id}, deferring', [
             'reason' => $reason,
             'class' => $className,
@@ -104,20 +122,9 @@ class DataObjectSaveListener
 
     private function dispatchAsync(int $objectId, string $className, TriggerType $triggerType): void
     {
-        if ($this->loopGuard->tryCoalesceIntoInFlightRun($objectId)) {
-            // Record the coalesce durably too, so a save folded in through the cache fast path is still
-            // re-organized after the run drains rather than lost if the run crashes first.
-            $this->intents->markDirtyIfPresent($objectId);
-            $this->logger->debug('DataObjectSaveListener: {class}:{id} coalesced into the in-flight run', [
-                'class' => $className,
-                'id' => $objectId,
-            ]);
-
-            return;
-        }
-
         try {
-            // Record the organize intent as a pending-dispatch run; the relay publishes it after commit.
+            // The durable intent is the single coalescing record: deferObject folds the save into the live
+            // pending run or records a fresh one, so no cache dispatch marker is needed.
             $this->dispatcher->deferObject($objectId, $triggerType);
         } catch (\Throwable $e) {
             $this->logger->error('DataObjectSaveListener: failed to record async organize for {class}:{id}: {error}', [
@@ -133,10 +140,6 @@ class DataObjectSaveListener
             }
 
             return;
-        }
-        // Mark dispatched only once the run has committed (nesting 0); a rolled-back save must leave no stale dedup marker.
-        if ($this->connection->getTransactionNestingLevel() === 0) {
-            $this->loopGuard->markObjectDispatched($objectId);
         }
         $this->logger->debug('DataObjectSaveListener: recorded pending async organize intent for {class}:{id}', [
             'class' => $className,
