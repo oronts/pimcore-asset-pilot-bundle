@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ToastProvider } from './shared/toast/toast-context'
 import { DashboardTab } from './dashboard/dashboard-tab'
@@ -16,6 +16,7 @@ import { AssetManagementTab } from './asset-management/asset-management-tab'
 import { theme } from 'antd'
 import { assetPilotThemeVariables } from './shared/theme-variables'
 import { usePermissions } from '../hooks/use-permissions'
+import { organizeTargetStore } from '../services/organize-target-store'
 
 const DOCS_URL = 'https://github.com/oronts/pimcore-asset-pilot-bundle/tree/main/docs'
 
@@ -44,6 +45,16 @@ export const AssetPilotDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard')
   // Storage trends read an admin-only endpoint; hide the tab from non-admins so it is neither shown nor fetched.
   const visibleTabKeys = tabKeys.filter(key => key !== 'storage' || admin)
+
+  useEffect(() => {
+    // F9: when a tree context action requested an organize, land on the Operations tab. Peek (do not consume)
+    // so the Reorganize form stays the sole consumer of the target folder; a plain tab remount then carries none.
+    const focusOperations = (): void => {
+      if (organizeTargetStore.peek() !== null) setActiveTab('operations')
+    }
+    focusOperations()
+    return organizeTargetStore.subscribe(focusOperations)
+  }, [])
 
   const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, current: number): void => {
     const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End']

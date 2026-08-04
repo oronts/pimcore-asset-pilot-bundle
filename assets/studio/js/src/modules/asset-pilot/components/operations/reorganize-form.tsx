@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
+import { organizeTargetStore } from '../../services/organize-target-store'
 import type { MoveOperation } from '../../types'
 import { usePermissions } from '../../hooks/use-permissions'
 import { useToast } from '../../hooks/use-toast'
@@ -27,6 +28,19 @@ export const ReorganizeForm: React.FC = () => {
   const [limit, setLimit] = useState('100')
   const [queueAsync, setQueueAsync] = useState(true)
   const op = useReviewedOperation<ReviewedReorganization>({ messageNamespace: 'asset-pilot.operations', validatePreview: requireOperations })
+
+  useEffect(() => {
+    // F9: seed the folder from a tree context action. consume() clears the request, so a plain tab remount
+    // (which re-runs this mount effect) carries nothing and never clobbers the field with a stale target.
+    const seed = (): void => {
+      const requested = organizeTargetStore.consume()
+      if (requested === null) return
+      setFolder(requested)
+      op.clear()
+    }
+    seed()
+    return organizeTargetStore.subscribe(seed)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!operate) return null
 

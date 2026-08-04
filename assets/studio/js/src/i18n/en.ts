@@ -9,6 +9,7 @@ export const en: Record<string, string> = {
   'asset-pilot.tabs.dashboard': 'Dashboard',
   'asset-pilot.tabs.rules': 'Rules',
   'asset-pilot.tabs.operations': 'Operations',
+  'asset-pilot.context-menu.organize': 'Organize with Asset Pilot',
   'asset-pilot.tabs.audit': 'Audit Log',
   'asset-pilot.tabs.unused': 'Unused Assets',
   'asset-pilot.tabs.management': 'Asset Management',
