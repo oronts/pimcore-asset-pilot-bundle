@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Maintenance;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Maintenance\OrganizeDispatchRelayTask;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
@@ -57,7 +58,10 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
             $intents->method('staleIntents')->willReturn([]);
         }
 
-        return new OrganizeDispatchRelayTask($bus, $store, $intents, $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), new NullLogger(), 50);
+        $connection = $this->createMock(Connection::class);
+        $connection->method('transactional')->willReturnCallback(static fn (\Closure $work): mixed => $work($connection));
+
+        return new OrganizeDispatchRelayTask($bus, $store, $intents, $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), $connection, new NullLogger(), 50);
     }
 
     #[Test]
@@ -128,7 +132,7 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
         ]);
         $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-dead')->willReturn(true);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, self::anything());
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, self::anything());
 
         $this->relayTask($this->createMock(MessageBusInterface::class), $store, $intents, $dispatcher)->execute();
     }
@@ -143,7 +147,7 @@ final class OrganizeDispatchRelayTaskTest extends TestCase
         ]);
         $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-done')->willReturn(false);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->expects(self::never())->method('dispatchObject');
+        $dispatcher->expects(self::never())->method('deferObject');
 
         $this->relayTask($this->createMock(MessageBusInterface::class), $store, $intents, $dispatcher)->execute();
     }

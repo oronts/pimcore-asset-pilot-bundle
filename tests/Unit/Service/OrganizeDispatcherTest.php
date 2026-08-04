@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
@@ -58,7 +59,15 @@ class OrganizeDispatcherTest extends TestCase
             $runs->method('create')->willReturn(self::RUN_ID);
         }
 
-        return new OrganizeDispatcher($bus, $this->authorization($actor), $runs, $intents ?? $this->createMock(AutomaticOrganizeIntentStoreInterface::class));
+        return new OrganizeDispatcher($bus, $this->authorization($actor), $runs, $intents ?? $this->createMock(AutomaticOrganizeIntentStoreInterface::class), $this->passthroughConnection());
+    }
+
+    private function passthroughConnection(): Connection
+    {
+        $connection = $this->createMock(Connection::class);
+        $connection->method('transactional')->willReturnCallback(static fn (\Closure $work): mixed => $work($connection));
+
+        return $connection;
     }
 
     #[Test]
@@ -163,7 +172,7 @@ class OrganizeDispatcherTest extends TestCase
             },
         );
 
-        $runId = (new OrganizeDispatcher($bus, $this->authorization(ActorContext::system()), $runs, $this->createMock(AutomaticOrganizeIntentStoreInterface::class)))->createRun(
+        $runId = (new OrganizeDispatcher($bus, $this->authorization(ActorContext::system()), $runs, $this->createMock(AutomaticOrganizeIntentStoreInterface::class), $this->passthroughConnection()))->createRun(
             [42],
             TriggerType::Manual,
             kind: OperationRunKind::Reorganize,

@@ -11,9 +11,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Automatic organize producers now bind a durable per-object coalescing intent (a new
   `asset_pilot_automatic_organize_intent` table) so concurrent saves of the same object, including two
-  inside one source transaction, fold into a single pending run instead of creating duplicate runs. A
-  maintenance backstop reclaims and rotates intents whose bound run terminated, was cancelled, or was
-  purged, so a dirty object left behind by an undispatchable or exhausted run is still re-organized.
+  inside one source transaction, fold into a single pending run instead of creating duplicate runs. The
+  intent and its pending run are written in one transaction; a save that folds in through the fast cache
+  path is recorded durably too; the drain and the maintenance backstop rotate a coalesced save by
+  atomically re-recording a fresh pending run rather than an ephemeral dispatch, so a crash, an
+  undispatchable or exhausted run, or a purged run never loses it; and an outbox write that fails inside
+  a caller-owned transaction now rolls back with the source save instead of being swallowed.
 
 ### Security
 

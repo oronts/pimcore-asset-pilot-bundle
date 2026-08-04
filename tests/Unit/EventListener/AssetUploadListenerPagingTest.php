@@ -37,7 +37,7 @@ class AssetUploadListenerPagingTest extends TestCase
             /** @param list<list<array<string, mixed>>> $pages */
             public function __construct($organizer, $bus, $guard, $logger, Connection $connection, bool $enabled, bool $async, private array $pages)
             {
-                parent::__construct($organizer, $bus, $guard, $logger, $connection, $enabled, $async);
+                parent::__construct($organizer, $bus, $guard, $logger, $connection, new \Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore((new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor()), $enabled, $async);
             }
 
             protected function fetchDependents(Dependency $dependency, int $offset, int $limit): array
@@ -124,7 +124,7 @@ class AssetUploadListenerPagingTest extends TestCase
 
     private function dependentListener(LoopGuard $guard, OrganizeDispatcher $dispatcher): object
     {
-        return new class ($this->createMock(AssetOrganizer::class), $dispatcher, $guard, new NullLogger(), $this->createMock(Connection::class)) extends AssetUploadListener {
+        return new class ($this->createMock(AssetOrganizer::class), $dispatcher, $guard, new NullLogger(), $this->createMock(Connection::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class)) extends AssetUploadListener {
             public function runDependent(array $dependency): void
             {
                 $this->processDependent($dependency);

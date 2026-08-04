@@ -8,6 +8,7 @@ use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\EventListener\DataObjectSaveListener;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -24,12 +25,14 @@ class DataObjectSaveListenerTest extends TestCase
     private AssetOrganizer $organizer;
     private OrganizeDispatcher $dispatcher;
     private LoopGuard $loopGuard;
+    private AutomaticOrganizeIntentStoreInterface $intents;
 
     protected function setUp(): void
     {
         $this->organizer = $this->createMock(AssetOrganizer::class);
         $this->dispatcher = $this->createMock(OrganizeDispatcher::class);
         $this->loopGuard = $this->createMock(LoopGuard::class);
+        $this->intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
     }
 
     private function createListener(
@@ -47,6 +50,7 @@ class DataObjectSaveListenerTest extends TestCase
             loopGuard: $this->loopGuard,
             logger: new NullLogger(),
             connection: $connection,
+            intents: $this->intents,
             enabled: $enabled,
             allowedClasses: $allowedClasses,
             asyncEnabled: $asyncEnabled,
@@ -185,8 +189,41 @@ class DataObjectSaveListenerTest extends TestCase
         $this->loopGuard->method('isProcessingObject')->with(42)->willReturn(false);
         $this->loopGuard->method('tryCoalesceIntoInFlightRun')->with(42)->willReturn(true);
         $this->dispatcher->expects(self::never())->method('deferObject');
+        $this->intents->expects(self::once())->method('markDirtyIfPresent')->with(42);
 
         $listener->onPostUpdate($this->createEvent($object));
+    }
+
+    #[Test]
+    public function propagatesTheOutboxFailureInsideACallerOwnedTransaction(): void
+    {
+        $listener = $this->createListener(asyncEnabled: true, transactionNesting: 1);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getId')->willReturn(42);
+        $this->loopGuard->method('isProcessingObject')->willReturn(false);
+        $this->loopGuard->method('tryCoalesceIntoInFlightRun')->willReturn(false);
+        $this->dispatcher->method('deferObject')->willThrowException(new \RuntimeException('outbox write failed'));
+
+        // The save has not committed yet, so the failure must roll back with it, not be swallowed.
+        $this->expectException(\RuntimeException::class);
+        $listener->onPostUpdate($this->createEvent($object));
+    }
+
+    #[Test]
+    public function swallowsTheOutboxFailureAfterTheSaveHasCommitted(): void
+    {
+        $listener = $this->createListener(asyncEnabled: true, transactionNesting: 0);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $object->method('getId')->willReturn(42);
+        $this->loopGuard->method('isProcessingObject')->willReturn(false);
+        $this->loopGuard->method('tryCoalesceIntoInFlightRun')->willReturn(false);
+        $this->dispatcher->method('deferObject')->willThrowException(new \RuntimeException('outbox write failed'));
+
+        $listener->onPostUpdate($this->createEvent($object));
+
+        $this->addToAssertionCount(1);
     }
 
     #[Test]

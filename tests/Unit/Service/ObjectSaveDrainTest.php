@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
@@ -47,14 +48,14 @@ final class ObjectSaveDrainTest extends TestCase
     }
 
     #[Test]
-    public function releasesTheOwnRunIntentAndReOrganizesWhenItCoalescedASave(): void
+    public function releasesTheOwnRunIntentAndDurablyReOrganizesWhenItCoalescedASave(): void
     {
         $actor = ActorContext::user(7);
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('isObjectDirty')->willReturn(false);
-        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, $actor);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, $actor);
+        $dispatcher->expects(self::never())->method('dispatchObject');
         $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
         $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-1')->willReturn(true);
 
@@ -66,8 +67,8 @@ final class ObjectSaveDrainTest extends TestCase
     {
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('isObjectDirty')->willReturn(false);
-        $loopGuard->expects(self::never())->method('clearObjectDirty');
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::never())->method('deferObject');
         $dispatcher->expects(self::never())->method('dispatchObject');
         $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
         $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-1')->willReturn(false);
@@ -121,7 +122,8 @@ final class ObjectSaveDrainTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->method('error')->willThrowException(new \RuntimeException('logger down'));
 
-        (new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(AutomaticOrganizeIntentStoreInterface::class), $logger))->drain(42, TriggerType::ObjectSave, ActorContext::system());
+        (new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(AutomaticOrganizeIntentStoreInterface::class), $this->passthroughConnection(), $logger))
+            ->drain(42, TriggerType::ObjectSave, ActorContext::system());
 
         $this->addToAssertionCount(1);
     }
@@ -132,7 +134,16 @@ final class ObjectSaveDrainTest extends TestCase
             $loopGuard,
             $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class),
             $intents ?? $this->createMock(AutomaticOrganizeIntentStoreInterface::class),
+            $this->passthroughConnection(),
             new NullLogger(),
         );
+    }
+
+    private function passthroughConnection(): Connection
+    {
+        $connection = $this->createMock(Connection::class);
+        $connection->method('transactional')->willReturnCallback(static fn (\Closure $work): mixed => $work($connection));
+
+        return $connection;
     }
 }

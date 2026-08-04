@@ -95,7 +95,7 @@ class DuplicateReferenceRepointerTest extends TestCase
                 LoopGuard $loopGuard,
                 OrganizeDispatcherInterface $dispatcher,
             ) {
-                parent::__construct($loopGuard, new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), $authorization, new ObjectSaveDrain($loopGuard, $dispatcher, new \Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore((new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor()), new NullLogger()));
+                parent::__construct($loopGuard, new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), $authorization, new ObjectSaveDrain($loopGuard, $dispatcher, new \Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore((new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor()), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), new NullLogger()));
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -412,7 +412,7 @@ class DuplicateReferenceRepointerTest extends TestCase
             new NullLogger(),
             $connection,
             $this->createMock(ElementAuthorization::class),
-            new ObjectSaveDrain(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), new NullLogger()),
+            new ObjectSaveDrain(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger()),
         );
 
         $method = new \ReflectionMethod(DuplicateReferenceRepointer::class, 'stillReferencesQuery');

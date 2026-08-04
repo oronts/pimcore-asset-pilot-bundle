@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\EventListener;
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Pimcore\Event\Model\DataObjectEvent;
@@ -21,6 +22,7 @@ class DataObjectSaveListener
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly Connection $connection,
+        protected readonly AutomaticOrganizeIntentStoreInterface $intents,
         protected readonly bool $enabled = true,
         protected readonly array $allowedClasses = [],
         protected readonly bool $asyncEnabled = true,
@@ -103,6 +105,9 @@ class DataObjectSaveListener
     private function dispatchAsync(int $objectId, string $className, TriggerType $triggerType): void
     {
         if ($this->loopGuard->tryCoalesceIntoInFlightRun($objectId)) {
+            // Record the coalesce durably too, so a save folded in through the cache fast path is still
+            // re-organized after the run drains rather than lost if the run crashes first.
+            $this->intents->markDirtyIfPresent($objectId);
             $this->logger->debug('DataObjectSaveListener: {class}:{id} coalesced into the in-flight run', [
                 'class' => $className,
                 'id' => $objectId,
@@ -112,8 +117,7 @@ class DataObjectSaveListener
         }
 
         try {
-            // Record the organize intent as a pending-dispatch run in the ambient transaction; the relay
-            // publishes it after commit. A failure here must not fail the already-committed save.
+            // Record the organize intent as a pending-dispatch run; the relay publishes it after commit.
             $this->dispatcher->deferObject($objectId, $triggerType);
         } catch (\Throwable $e) {
             $this->logger->error('DataObjectSaveListener: failed to record async organize for {class}:{id}: {error}', [
@@ -122,6 +126,11 @@ class DataObjectSaveListener
                 'error' => $e->getMessage(),
                 'exception' => $e,
             ]);
+            // Inside a caller-owned transaction the save is not yet committed: surface the failure so it rolls
+            // back with the source write. After commit (nesting 0) it must stay best-effort and not fail the save.
+            if ($this->connection->getTransactionNestingLevel() > 0) {
+                throw $e;
+            }
 
             return;
         }

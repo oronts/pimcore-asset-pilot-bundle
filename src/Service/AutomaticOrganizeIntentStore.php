@@ -23,8 +23,8 @@ class AutomaticOrganizeIntentStore implements AutomaticOrganizeIntentStoreInterf
     {
         $now = $this->now();
         $upsert = $this->connection->getDatabasePlatform() instanceof SQLitePlatform
-            ? 'ON CONFLICT(id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at'
-            : 'ON DUPLICATE KEY UPDATE dirty = 1, updated_at = VALUES(updated_at)';
+            ? 'ON CONFLICT(id) DO UPDATE SET dirty = 1, updated_at = :touched'
+            : 'ON DUPLICATE KEY UPDATE dirty = 1, updated_at = :touched';
         $this->connection->executeStatement(
             'INSERT INTO ' . Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT
             . ' (id, run_id, trigger_type, actor_type, actor_user_id, dirty, created_at, updated_at)'
@@ -36,6 +36,7 @@ class AutomaticOrganizeIntentStore implements AutomaticOrganizeIntentStoreInterf
                 'actor_type' => $actor->type->value,
                 'actor_user_id' => $actor->userId,
                 'now' => $now,
+                'touched' => $now,
             ],
             ['actor_user_id' => ParameterType::INTEGER],
         );
@@ -58,6 +59,14 @@ class AutomaticOrganizeIntentStore implements AutomaticOrganizeIntentStoreInterf
         }
 
         return $this->connection->delete(Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT, ['id' => $objectId, 'run_id' => $runId, 'dirty' => 1]) === 1;
+    }
+
+    public function markDirtyIfPresent(int $objectId): void
+    {
+        $this->connection->executeStatement(
+            'UPDATE ' . Installer::TABLE_AUTOMATIC_ORGANIZE_INTENT . ' SET dirty = 1, updated_at = :now WHERE id = :id',
+            ['now' => $this->now(), 'id' => $objectId],
+        );
     }
 
     /** @return list<AutomaticOrganizeIntent> */

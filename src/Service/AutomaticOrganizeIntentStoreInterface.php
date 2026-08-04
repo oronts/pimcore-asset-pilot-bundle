@@ -26,6 +26,13 @@ interface AutomaticOrganizeIntentStoreInterface
     public function releaseIfOwnedBy(int $objectId, string $runId): bool;
 
     /**
+     * Durably mark the object's live intent dirty so a save that coalesced through the fast cache path (not a
+     * fresh deferObject) is still re-organized after the run drains, even if the run crashes first. A no-op
+     * when no intent exists (the object has no in-flight automatic run to fold into).
+     */
+    public function markDirtyIfPresent(int $objectId): void;
+
+    /**
      * Intents whose bound run has reached a terminal state or no longer exists, so the maintenance backstop
      * can reclaim a release the normal terminal paths missed (rotating any that are dirty).
      *

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -21,6 +22,7 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
         private readonly ElementAuthorizationInterface $authorization,
         private readonly OperationRunStoreInterface $runs,
         private readonly AutomaticOrganizeIntentStoreInterface $intents,
+        private readonly Connection $connection,
     ) {}
 
     public function dispatchObject(
@@ -128,16 +130,16 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
     public function deferObject(int $objectId, TriggerType $triggerType, ?ActorContext $actor = null, ?string $expectedFingerprint = null): string
     {
         $actor ??= $this->authorization->currentActor();
-        // Reserve one durable intent per object first: only the winning save creates the pending run, so
-        // concurrent saves (even inside one source transaction) coalesce into it instead of racing to
-        // publish duplicate runs. The reservation commits and rolls back atomically with the source save.
-        $candidateRunId = bin2hex(random_bytes(16));
-        $binding = $this->intents->bindOrCoalesce($objectId, $candidateRunId, $triggerType, $actor);
-        if (!$binding->isNew) {
-            return $binding->runId;
-        }
 
-        try {
+        // Bind the intent and record its pending run atomically so the relay never sees a committed intent
+        // whose run does not exist yet (and reclaim it), and a rolled-back reservation orphans neither.
+        return $this->connection->transactional(function () use ($objectId, $triggerType, $actor, $expectedFingerprint): string {
+            $candidateRunId = bin2hex(random_bytes(16));
+            $binding = $this->intents->bindOrCoalesce($objectId, $candidateRunId, $triggerType, $actor);
+            if (!$binding->isNew) {
+                return $binding->runId;
+            }
+
             return $this->createRun(
                 [$objectId],
                 $triggerType,
@@ -146,11 +148,7 @@ class OrganizeDispatcher implements OrganizeDispatcherInterface
                 initialStatus: OperationRunStatus::PendingDispatch,
                 runId: $candidateRunId,
             );
-        } catch (\Throwable $e) {
-            $this->intents->releaseIfOwnedBy($objectId, $candidateRunId);
-
-            throw $e;
-        }
+        });
     }
 
     private function failOwnedRun(string $runId, bool $ownsRun): void

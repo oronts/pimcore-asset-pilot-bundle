@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Maintenance;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
@@ -33,6 +34,7 @@ final class OrganizeDispatchRelayTask implements TaskInterface
         private readonly OperationRunStoreInterface $runs,
         private readonly AutomaticOrganizeIntentStoreInterface $intents,
         private readonly OrganizeDispatcherInterface $dispatcher,
+        private readonly Connection $connection,
         private readonly LoggerInterface $logger,
         private readonly int $batchSize,
     ) {}
@@ -84,9 +86,11 @@ final class OrganizeDispatchRelayTask implements TaskInterface
     {
         foreach ($this->intents->staleIntents($this->batchSize) as $intent) {
             try {
-                if ($this->intents->releaseIfOwnedBy($intent->objectId, $intent->runId)) {
-                    $this->dispatcher->dispatchObject($intent->objectId, $intent->trigger, $intent->actor);
-                }
+                $this->connection->transactional(function () use ($intent): void {
+                    if ($this->intents->releaseIfOwnedBy($intent->objectId, $intent->runId)) {
+                        $this->dispatcher->deferObject($intent->objectId, $intent->trigger, $intent->actor);
+                    }
+                });
             } catch (\Throwable $e) {
                 $this->logger->error('Asset Pilot: could not reclaim a stale automatic-organize intent for object {id}: {error}', [
                     'id' => $intent->objectId,

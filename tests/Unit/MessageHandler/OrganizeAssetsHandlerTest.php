@@ -54,7 +54,7 @@ class OrganizeAssetsHandlerTest extends TestCase
             $loopGuard->method('acquireOperationRunItem')->willReturn(true);
         }
 
-        $drain = new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), new NullLogger());
+        $drain = new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger());
 
         return new class ($organizer, $dispatcher, $authorization, $actors, $loopGuard, new NullLogger(), $runs ?? $this->createMock(OperationRunStoreInterface::class), new OrganizePlanFingerprint(), $drain, $object, $reloadedObject ?? $object) extends OrganizeAssetsHandler {
             public function __construct(AssetOrganizer $organizer, OrganizeDispatcher $dispatcher, ElementAuthorization $authorization, ActorContextStore $actors, LoopGuard $loopGuard, NullLogger $logger, OperationRunStoreInterface $runs, OrganizePlanFingerprint $fingerprints, ObjectSaveDrainInterface $drain, private readonly AbstractObject $object, private readonly AbstractObject $reloadedObject)

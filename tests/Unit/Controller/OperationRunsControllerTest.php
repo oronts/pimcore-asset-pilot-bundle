@@ -295,7 +295,7 @@ final class OperationRunsControllerTest extends TestCase
             $authorization,
             $urls,
             new \Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter(),
-            new ObjectSaveDrain($loopGuard ?? $this->createMock(LoopGuard::class), $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), new NullLogger()),
+            new ObjectSaveDrain($loopGuard ?? $this->createMock(LoopGuard::class), $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger()),
         );
     }
 

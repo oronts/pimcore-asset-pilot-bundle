@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\EventListener;
 use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Pimcore\Event\Model\AssetEvent;
@@ -25,6 +26,7 @@ class AssetUploadListener
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
         protected readonly Connection $connection,
+        protected readonly AutomaticOrganizeIntentStoreInterface $intents,
         protected readonly bool $enabled = true,
         protected readonly bool $asyncEnabled = true,
     ) {}
@@ -140,6 +142,9 @@ class AssetUploadListener
 
         if ($this->asyncEnabled) {
             if ($this->loopGuard->tryCoalesceIntoInFlightRun($objectId)) {
+                // Record the coalesce durably too, so a save folded in through the cache fast path survives a
+                // crash before the run drains rather than being lost with the ephemeral marker.
+                $this->intents->markDirtyIfPresent($objectId);
                 $this->logger->debug('AssetUploadListener: object {id} coalesced into the in-flight run', [
                     'id' => $objectId,
                 ]);
@@ -147,8 +152,7 @@ class AssetUploadListener
             }
 
             try {
-                // Record the organize intent as a pending-dispatch run inside the ambient transaction; the
-                // relay publishes it after commit. Failing to record it must not fail the committed save.
+                // Record the organize intent as a pending-dispatch run; the relay publishes it after commit.
                 $this->dispatcher->deferObject($objectId, TriggerType::AssetUpload);
             } catch (\Throwable $e) {
                 $this->logger->error('AssetUploadListener: failed to record async organize for object {id}: {error}', [
@@ -156,6 +160,11 @@ class AssetUploadListener
                     'error' => $e->getMessage(),
                     'exception' => $e,
                 ]);
+                // A caller-owned transaction has not committed the save yet: surface the failure so it rolls
+                // back together. After commit (nesting 0) it stays best-effort and never fails the save.
+                if ($this->connection->getTransactionNestingLevel() > 0) {
+                    throw $e;
+                }
 
                 return;
             }
