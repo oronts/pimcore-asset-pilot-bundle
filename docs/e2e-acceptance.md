@@ -7,6 +7,39 @@ real Pimcore, a real Messenger consumer, a real browser, or multiple users. This
 deployment-level acceptance matrix a release should pass on top of those unit gates, and points at the
 browser specs that help exercise it.
 
+## Live acceptance run — 2026-08-04
+
+Server-side and durable-pipeline acceptance against the reference test-project (Pimcore 12.3.11,
+PHP 8.4, MariaDB), commit `507932d`, Studio generation `2.0.0-04b21628-de90-44ea-9a8a-fcec3d02c722`:
+
+- All ten Docker services up; Doctrine migrations at the latest version (fifteen owned tables incl.
+  `asset_pilot_automatic_organize_intent`); `assets:install` deployed the rebuilt remote.
+- `asset-pilot:health` reports OK on every check with both supervised consumers (`asset_pilot`,
+  `pimcore_maintenance`) heartbeating, `async_transport` OK, `shared_cache` cross-worker visibility
+  proven, and `operation_run_backlog` clear; `asset-pilot:validate-config` passes 28/0/0.
+- Durable coalescing lifecycle proven end to end on the automatic producer path: a real data-object save
+  recorded one `pending_dispatch` run plus a bound intent; a second rapid save of the same object
+  coalesced into that intent (`dirty = 1`) and created no second run (run count delta 1, not 2); the
+  maintenance relay published it, a worker organized it, and the terminal drain released and rotated the
+  coalesced save until the intent table converged to zero with every run terminal and no leak.
+- Real mutation proven: fresh unorganized fixtures (`app:asset-pilot:e2e setup`) had their assets at
+  `/AssetPilotE2E/source/...`; a signed-token async `--apply` (run `e1324b3c...`, status `completed`,
+  1/1 succeeded) moved both assets to their rule targets under `/AssetPilotE2E/organized/images` and
+  `/organized/print`, with `asset_pilot_audit_log` recording the from/to paths and rule; fixtures cleaned.
+- Authorization enforced live: an unauthenticated `GET /pimcore-studio/api/asset-pilot/rules` returns
+  `401`; the REST controllers carry 58 `#[IsGranted(AssetPilotPermission::*)]` guards.
+- The rebuilt Studio remote is served: `assets:install` deployed it and
+  `/bundles/orontsassetpilot/studio/build/active.json` reports buildId `2.0.0-04b21628-...` with its
+  `remoteEntry.js` returning `HTTP 200` (323 KB).
+- CLI flow matrix exercised (preview/read-only): organize (preview + signed-token async apply),
+  normalize-filenames, sweep-empty-folders, find-duplicates, verify-locations, check-integrity,
+  cleanup-unused (filter guard), and rule-overlap all functional against live fixture data.
+
+The browser Playwright + axe slice is not re-run here (`@playwright/test` is not a local dependency of
+`assets/studio`; the CI `e2e.yml` installs it at run time). The current generation is deployed and ready;
+run the Playwright suite against `2.0.0-04b21628-...` and record its result before describing this commit
+as browser-accepted.
+
 > `.github/workflows/e2e.yml` runs real steps rather than `TODO(operator)` echo stubs: it installs a
 > Pimcore skeleton with the bundle, registers and installs Studio + Asset Pilot, migrates, seeds the
 > Operate and View users on disjoint asset workspaces (`.github/e2e/SeedAcceptanceUsersCommand.php`, run as
