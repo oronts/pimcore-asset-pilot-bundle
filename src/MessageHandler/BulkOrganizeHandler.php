@@ -7,7 +7,6 @@ namespace Oronts\AssetPilotBundle\MessageHandler;
 use Oronts\AssetPilotBundle\Enum\BulkObjectStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
 use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
-use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Message\BulkOrganizeMessage;
 use Oronts\AssetPilotBundle\Model\ActorContext;
 use Oronts\AssetPilotBundle\Model\BulkObjectResult;
@@ -15,6 +14,7 @@ use Oronts\AssetPilotBundle\Model\BulkOrganizeReport;
 use Oronts\AssetPilotBundle\Security\ActorContextStore;
 use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
 use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
@@ -36,6 +36,7 @@ class BulkOrganizeHandler
         protected readonly LoggerInterface $logger,
         protected readonly OperationRunStoreInterface $runs,
         protected readonly OrganizePlanFingerprint $planFingerprints,
+        protected readonly ObjectSaveDrainInterface $drain,
     ) {}
 
     public function __invoke(BulkOrganizeMessage $message): void
@@ -212,21 +213,9 @@ class BulkOrganizeHandler
     private function requeueDirtyObject(BulkOrganizeMessage $message, ActorContext $actor, int $objectId): void
     {
         // A concurrent save that coalesced into this run (including an immutable-plan one) needs a fresh
-        // non-fingerprinted organize, so drain the dirty flag regardless of expectedFingerprints.
-        if (!$this->loopGuard->isObjectDirty($objectId)) {
-            return;
-        }
-
-        try {
-            $this->dispatcher->deferObject(
-                $objectId,
-                $message->triggerType,
-                $actor,
-            );
-        } catch (\Throwable $exception) {
-            throw new RetryableDispatchException('The latest object state could not be queued.', previous: $exception);
-        }
-        $this->loopGuard->clearObjectDirty($objectId);
+        // non-fingerprinted organize. The shared drain is the single owner of dirty-flag release, durable
+        // re-dispatch and clearing; a bulk item holds no per-object intent, so drain with a null run id.
+        $this->drain->drain($objectId, $message->triggerType, $actor);
     }
 
     private function requeueUntrackedDirtyObjects(BulkOrganizeMessage $message, ActorContext $actor): void
