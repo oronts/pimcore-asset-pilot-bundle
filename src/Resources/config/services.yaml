@@ -399,6 +399,11 @@ services:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    Oronts\AssetPilotBundle\Service\CsvDistributionService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+            $excludeFolders: '%oronts_asset_pilot.protection.exclude_folders%'
+
     # -- Quarantine -------------------------------------------------------------
 
     Oronts\AssetPilotBundle\Service\QuarantineService:

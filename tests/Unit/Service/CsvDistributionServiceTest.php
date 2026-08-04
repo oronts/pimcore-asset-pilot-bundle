@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 use Oronts\AssetPilotBundle\Audit\AuditWriterInterface;
 use Oronts\AssetPilotBundle\Enum\CsvDistributionOutcome;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Service\AssetProtection;
 use Oronts\AssetPilotBundle\Service\CsvDistributionService;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\LoopGuardedAssetSaver;
@@ -14,6 +15,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 #[CoversClass(CsvDistributionService::class)]
 final class CsvDistributionServiceTest extends TestCase
@@ -133,23 +136,90 @@ final class CsvDistributionServiceTest extends TestCase
         $this->service()->distribute('/does/not/exist.csv', 'asset', 'target', dryRun: true);
     }
 
+    #[Test]
+    public function stripsAUtf8BomFromTheHeaderSoAnExcelExportStillResolves(): void
+    {
+        $csv = $this->csv("\u{FEFF}asset,target\n12,/Photos\n");
+        $report = $this->service(
+            resolveAsset: fn (string $ref): ?Asset => $this->image(12, '/Uploads/a.jpg', '/Uploads'),
+            resolveFolder: fn (string $ref): ?Asset\Folder => $this->folder('/Photos'),
+        )->distribute($csv, 'asset', 'target', dryRun: true);
+
+        self::assertSame(1, $report->countOf(CsvDistributionOutcome::Planned));
+    }
+
+    #[Test]
+    public function skipsALockedAssetInBothPreviewAndApply(): void
+    {
+        $csv = $this->csv("asset,target\n12,/Photos\n");
+        $moved = [];
+        $report = $this->service(
+            resolveAsset: fn (string $ref): ?Asset => $this->image(12, '/Uploads/a.jpg', '/Uploads'),
+            resolveFolder: fn (string $ref): ?Asset\Folder => $this->folder('/Photos'),
+            onMove: static function () use (&$moved): void {
+                $moved[] = true;
+            },
+            isLocked: static fn (): bool => true,
+        )->distribute($csv, 'asset', 'target', dryRun: false);
+
+        self::assertSame(1, $report->countOf(CsvDistributionOutcome::Skipped));
+        self::assertStringContainsString('locked', $report->results[0]->message);
+        self::assertSame([], $moved, 'a locked asset is never moved');
+    }
+
+    #[Test]
+    public function skipsAnAssetInAnExcludedFolder(): void
+    {
+        $csv = $this->csv("asset,target\n12,/Photos\n");
+        $report = $this->service(
+            resolveAsset: fn (string $ref): ?Asset => $this->image(12, '/Protected/a.jpg', '/Protected'),
+            resolveFolder: fn (string $ref): ?Asset\Folder => $this->folder('/Photos'),
+            excludeFolders: ['/Protected'],
+        )->distribute($csv, 'asset', 'target', dryRun: true);
+
+        self::assertSame(1, $report->countOf(CsvDistributionOutcome::Skipped));
+        self::assertStringContainsString('excluded', $report->results[0]->message);
+    }
+
+    #[Test]
+    public function keepsTheMoveAndRunGoingWhenTheAuditWriteFails(): void
+    {
+        $csv = $this->csv("asset,target\n12,/Photos\n13,/Photos\n");
+        $audit = $this->createMock(AuditWriterInterface::class);
+        $audit->method('log')->willThrowException(new \RuntimeException('audit db down'));
+
+        $report = $this->service(
+            resolveAsset: fn (string $ref): ?Asset => $this->image((int) $ref, '/Uploads/' . $ref . '.jpg', '/Uploads'),
+            resolveFolder: fn (string $ref): ?Asset\Folder => $this->folder('/Photos'),
+            audit: $audit,
+        )->distribute($csv, 'asset', 'target', dryRun: false);
+
+        self::assertSame(2, $report->countOf(CsvDistributionOutcome::Moved), 'a failed audit write never aborts the run or downgrades a completed move');
+    }
+
     private function service(
         ?callable $resolveAsset = null,
         ?callable $resolveFolder = null,
         ?callable $onMove = null,
         ?AuditWriterInterface $audit = null,
+        ?callable $isLocked = null,
+        array $excludeFolders = [],
     ): CsvDistributionService {
         $saver = new LoopGuardedAssetSaver($this->createMock(LoopGuard::class));
 
-        return new class ($saver, $audit ?? $this->createMock(AuditWriterInterface::class), $resolveAsset, $resolveFolder, $onMove) extends CsvDistributionService {
+        return new class ($saver, $audit ?? $this->createMock(AuditWriterInterface::class), new NullLogger(), $excludeFolders, $resolveAsset, $resolveFolder, $onMove, $isLocked) extends CsvDistributionService {
+            /** @param list<string> $excludeFolders */
             public function __construct(
                 LoopGuardedAssetSaver $saver,
                 AuditWriterInterface $audit,
+                LoggerInterface $logger,
+                array $excludeFolders,
                 private readonly mixed $resolveAssetFn,
                 private readonly mixed $resolveFolderFn,
                 private readonly mixed $onMoveFn,
+                private readonly mixed $isLockedFn,
             ) {
-                parent::__construct($saver, $audit);
+                parent::__construct($saver, $audit, $logger, AssetProtection::DEFAULT_LOCK_PROPERTY, $excludeFolders);
             }
 
             protected function resolveAsset(string $reference): ?Asset
@@ -167,6 +237,11 @@ final class CsvDistributionServiceTest extends TestCase
                 if ($this->onMoveFn !== null) {
                     ($this->onMoveFn)($asset, $folder);
                 }
+            }
+
+            protected function assetIsLocked(Asset $asset): bool
+            {
+                return $this->isLockedFn !== null && ($this->isLockedFn)($asset);
             }
         };
     }

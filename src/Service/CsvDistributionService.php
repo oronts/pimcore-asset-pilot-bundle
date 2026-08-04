@@ -12,12 +12,17 @@ use Oronts\AssetPilotBundle\Model\CsvDistributionReport;
 use Oronts\AssetPilotBundle\Model\CsvDistributionResult;
 use Oronts\AssetPilotBundle\Model\MoveOperation;
 use Pimcore\Model\Asset;
+use Psr\Log\LoggerInterface;
 
 class CsvDistributionService implements CsvDistributionServiceInterface
 {
+    /** @param list<string> $excludeFolders */
     public function __construct(
         protected readonly LoopGuardedAssetSaver $assetSaver,
         protected readonly AuditWriterInterface $auditLog,
+        protected readonly LoggerInterface $logger,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
+        protected readonly array $excludeFolders = [],
     ) {}
 
     public function distribute(string $csvPath, string $assetColumn, string $targetColumn, bool $dryRun): CsvDistributionReport
@@ -49,7 +54,16 @@ class CsvDistributionService implements CsvDistributionServiceInterface
         $assetId = (int) $asset->getId();
         $fromPath = (string) $asset->getRealFullPath();
         $targetFolderPath = rtrim((string) $folder->getRealFullPath(), '/');
-        $toPath = ($targetFolderPath === '' ? '' : $targetFolderPath) . '/' . $asset->getFilename();
+        $toPath = $targetFolderPath . '/' . $asset->getFilename();
+
+        // Honor the same lock and excluded-folder protections every other destructive move path enforces,
+        // in both preview and apply so the preview never promises a move the apply refuses.
+        if ($this->assetIsLocked($asset)) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Skipped, $assetId, $fromPath, $toPath, 'locked against automated moves');
+        }
+        if ($this->isInExcludedFolder($fromPath) || $this->isInExcludedFolder($toPath)) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Skipped, $assetId, $fromPath, $toPath, 'source or target is a protected excluded folder');
+        }
 
         if ($fromPath === $toPath) {
             return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Skipped, $assetId, $fromPath, $toPath, 'already in the target folder');
@@ -65,22 +79,18 @@ class CsvDistributionService implements CsvDistributionServiceInterface
             return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Invalid, $assetId, $fromPath, $toPath, $exception->getMessage());
         }
 
-        $this->auditLog->log(new MoveOperation(
-            $assetId,
-            $fromPath,
-            $toPath,
-            0,
-            '',
-            'csv_distribution',
-            OperationStatus::Completed,
-            TriggerType::Manual,
-        ));
+        $this->auditMove($assetId, $fromPath, $toPath);
 
         return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Moved, $assetId, $fromPath, $toPath);
     }
 
-    /** @return list<array{0: int, 1: string, 2: string}> */
-    protected function readRows(string $csvPath, string $assetColumn, string $targetColumn): array
+    /**
+     * Stream the CSV rows so a multi-million-row mapping is not buffered in full. Throws only when the
+     * file or its header is unusable; individual data rows never throw here.
+     *
+     * @return \Generator<int, array{0: int, 1: string, 2: string}>
+     */
+    protected function readRows(string $csvPath, string $assetColumn, string $targetColumn): \Generator
     {
         if (!is_file($csvPath) || !is_readable($csvPath)) {
             throw new \RuntimeException(sprintf('The CSV file "%s" does not exist or is not readable.', $csvPath));
@@ -97,27 +107,28 @@ class CsvDistributionService implements CsvDistributionServiceInterface
                 throw new \RuntimeException('The CSV file is empty; a header row naming the asset and target columns is required.');
             }
             $header = array_map(static fn (mixed $value): string => trim((string) $value), $header);
+            if (isset($header[0])) {
+                // Strip a UTF-8 BOM so an Excel "CSV UTF-8" export still resolves its first column.
+                $header[0] = ltrim($header[0], "\u{FEFF}");
+            }
             $assetIndex = array_search($assetColumn, $header, true);
             $targetIndex = array_search($targetColumn, $header, true);
             if ($assetIndex === false || $targetIndex === false) {
                 throw new \RuntimeException(sprintf('The CSV header must contain the "%s" and "%s" columns.', $assetColumn, $targetColumn));
             }
 
-            $rows = [];
             $rowNumber = 1;
             while (($record = fgetcsv($handle, escape: '')) !== false) {
                 ++$rowNumber;
                 if ($record === [null]) {
                     continue;
                 }
-                $rows[] = [
+                yield [
                     $rowNumber,
                     trim((string) ($record[$assetIndex] ?? '')),
                     trim((string) ($record[$targetIndex] ?? '')),
                 ];
             }
-
-            return $rows;
         } finally {
             fclose($handle);
         }
@@ -150,5 +161,44 @@ class CsvDistributionService implements CsvDistributionServiceInterface
             },
             ['versionNote' => 'Asset Pilot: distributed to ' . $targetPath . ' from CSV mapping'],
         );
+    }
+
+    /** Best-effort: a durable move must not be rolled back or the run aborted because the audit write failed. */
+    protected function auditMove(int $assetId, string $fromPath, string $toPath): void
+    {
+        try {
+            $this->auditLog->log(new MoveOperation(
+                $assetId,
+                $fromPath,
+                $toPath,
+                0,
+                '',
+                'csv_distribution',
+                OperationStatus::Completed,
+                TriggerType::Manual,
+            ));
+        } catch (\Throwable $exception) {
+            $this->logger->error('Asset Pilot: moved asset {id} from CSV but could not write its audit record: {error}', [
+                'id' => $assetId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    protected function assetIsLocked(Asset $asset): bool
+    {
+        return AssetProtection::isLocked($asset, $this->lockProperty);
+    }
+
+    protected function isInExcludedFolder(string $path): bool
+    {
+        foreach ($this->excludeFolders as $excluded) {
+            $excluded = rtrim($excluded, '/');
+            if ($excluded !== '' && ($path === $excluded || str_starts_with($path, $excluded . '/'))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
