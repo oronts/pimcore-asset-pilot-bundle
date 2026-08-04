@@ -98,6 +98,7 @@ services:
     Oronts\AssetPilotBundle\Service\OperationDeliveryProcessorInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryProcessor'
     Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface: '@Oronts\AssetPilotBundle\Service\OrganizeDispatcher'
     Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolverInterface: '@Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolver'
+    Oronts\AssetPilotBundle\Service\CsvDistributionServiceInterface: '@Oronts\AssetPilotBundle\Service\CsvDistributionService'
     Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface: '@Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore'
     Oronts\AssetPilotBundle\Service\DependencyProjectionInterface: '@Oronts\AssetPilotBundle\Service\DbalDependencyProjection'
     Oronts\AssetPilotBundle\Service\DependencyProjectionFreshnessInterface: '@Oronts\AssetPilotBundle\Service\DbalDependencyProjectionFreshness'

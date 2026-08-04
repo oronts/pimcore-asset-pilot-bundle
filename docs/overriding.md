@@ -87,6 +87,7 @@ element lookup, a render helper), never a safety decision.
 | `OrganizeDispatcherInterface` | `OrganizeDispatcher` |
 | `AutomaticOrganizeIntentStoreInterface` | `AutomaticOrganizeIntentStore` |
 | `AssetConverterResolverInterface` | `AssetConverterResolver` |
+| `CsvDistributionServiceInterface` | `CsvDistributionService` |
 | `AssetZipServiceInterface` | `AssetZipService` |
 | `ApplyPlanServiceInterface` | `ApplyPlanService` |
 | `RulePreviewPlanServiceInterface` | `RulePreviewPlanService` |

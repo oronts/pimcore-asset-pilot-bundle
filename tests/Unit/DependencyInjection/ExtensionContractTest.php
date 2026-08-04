@@ -79,6 +79,8 @@ use Oronts\AssetPilotBundle\Service\ContentUsageScanner;
 use Oronts\AssetPilotBundle\Service\ContentUsageScannerInterface;
 use Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolver;
 use Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolverInterface;
+use Oronts\AssetPilotBundle\Service\CsvDistributionService;
+use Oronts\AssetPilotBundle\Service\CsvDistributionServiceInterface;
 use Oronts\AssetPilotBundle\Service\DbalApplyPlanClaimStore;
 use Oronts\AssetPilotBundle\Service\DbalDependencyProjection;
 use Oronts\AssetPilotBundle\Service\DbalDependencyProjectionFreshness;
@@ -440,6 +442,7 @@ final class ExtensionContractTest extends TestCase
             OrganizeDispatcherInterface::class => OrganizeDispatcher::class,
             AutomaticOrganizeIntentStoreInterface::class => AutomaticOrganizeIntentStore::class,
             AssetConverterResolverInterface::class => AssetConverterResolver::class,
+            CsvDistributionServiceInterface::class => CsvDistributionService::class,
             AssetZipServiceInterface::class => AssetZipService::class,
             ApplyPlanServiceInterface::class => ApplyPlanService::class,
             RulePreviewPlanServiceInterface::class => RulePreviewPlanService::class,

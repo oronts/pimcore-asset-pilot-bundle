@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- CSV asset distribution (F23). A new `asset-pilot:distribute-from-csv <file>` command moves existing
+  assets into target folders from a CSV mapping (configurable `--asset-column`/`--target-column`, an
+  asset id or path, a target folder id or path), for one-off imports and migrations that place assets by
+  an external plan rather than by rules. It previews by default and moves only with `--apply`; every row
+  is reported (planned, moved, skipped-already-there, unknown asset, missing target, or invalid) so one
+  bad row never aborts the run, each move is guarded and audited, and the behavior is overridable via
+  `CsvDistributionServiceInterface`.
 - Asset format conversion (F17). A new `convert_format` rule action re-encodes an image asset to a
   target format (png, jpeg, gif, webp) after it is organized, through a pluggable converter seam:
   implement `AssetConverterInterface` and tag it `oronts_asset_pilot.asset_converter` to add Imagick,

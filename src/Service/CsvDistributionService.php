@@ -1,0 +1,154 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Oronts\AssetPilotBundle\Service;
+
+use Oronts\AssetPilotBundle\Audit\AuditWriterInterface;
+use Oronts\AssetPilotBundle\Enum\CsvDistributionOutcome;
+use Oronts\AssetPilotBundle\Enum\OperationStatus;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Model\CsvDistributionReport;
+use Oronts\AssetPilotBundle\Model\CsvDistributionResult;
+use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Pimcore\Model\Asset;
+
+class CsvDistributionService implements CsvDistributionServiceInterface
+{
+    public function __construct(
+        protected readonly LoopGuardedAssetSaver $assetSaver,
+        protected readonly AuditWriterInterface $auditLog,
+    ) {}
+
+    public function distribute(string $csvPath, string $assetColumn, string $targetColumn, bool $dryRun): CsvDistributionReport
+    {
+        $results = [];
+        foreach ($this->readRows($csvPath, $assetColumn, $targetColumn) as [$rowNumber, $assetReference, $targetReference]) {
+            $results[] = $this->processRow($rowNumber, $assetReference, $targetReference, $dryRun);
+        }
+
+        return new CsvDistributionReport($results, $dryRun);
+    }
+
+    protected function processRow(int $rowNumber, string $assetReference, string $targetReference, bool $dryRun): CsvDistributionResult
+    {
+        if ($assetReference === '' || $targetReference === '') {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Invalid, message: 'both an asset and a target column value are required');
+        }
+
+        $asset = $this->resolveAsset($assetReference);
+        if (!$asset instanceof Asset || $asset instanceof Asset\Folder) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::AssetNotFound, message: 'no asset matched this reference');
+        }
+
+        $folder = $this->resolveFolder($targetReference);
+        if (!$folder instanceof Asset\Folder) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::TargetNotFound, (int) $asset->getId(), message: 'the target folder does not exist');
+        }
+
+        $assetId = (int) $asset->getId();
+        $fromPath = (string) $asset->getRealFullPath();
+        $targetFolderPath = rtrim((string) $folder->getRealFullPath(), '/');
+        $toPath = ($targetFolderPath === '' ? '' : $targetFolderPath) . '/' . $asset->getFilename();
+
+        if ($fromPath === $toPath) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Skipped, $assetId, $fromPath, $toPath, 'already in the target folder');
+        }
+
+        if ($dryRun) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Planned, $assetId, $fromPath, $toPath);
+        }
+
+        try {
+            $this->move($asset, $folder);
+        } catch (\Throwable $exception) {
+            return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Invalid, $assetId, $fromPath, $toPath, $exception->getMessage());
+        }
+
+        $this->auditLog->log(new MoveOperation(
+            $assetId,
+            $fromPath,
+            $toPath,
+            0,
+            '',
+            'csv_distribution',
+            OperationStatus::Completed,
+            TriggerType::Manual,
+        ));
+
+        return new CsvDistributionResult($rowNumber, $assetReference, $targetReference, CsvDistributionOutcome::Moved, $assetId, $fromPath, $toPath);
+    }
+
+    /** @return list<array{0: int, 1: string, 2: string}> */
+    protected function readRows(string $csvPath, string $assetColumn, string $targetColumn): array
+    {
+        if (!is_file($csvPath) || !is_readable($csvPath)) {
+            throw new \RuntimeException(sprintf('The CSV file "%s" does not exist or is not readable.', $csvPath));
+        }
+
+        $handle = fopen($csvPath, 'r');
+        if ($handle === false) {
+            throw new \RuntimeException(sprintf('The CSV file "%s" could not be opened.', $csvPath));
+        }
+
+        try {
+            $header = fgetcsv($handle, escape: '');
+            if (!is_array($header)) {
+                throw new \RuntimeException('The CSV file is empty; a header row naming the asset and target columns is required.');
+            }
+            $header = array_map(static fn (mixed $value): string => trim((string) $value), $header);
+            $assetIndex = array_search($assetColumn, $header, true);
+            $targetIndex = array_search($targetColumn, $header, true);
+            if ($assetIndex === false || $targetIndex === false) {
+                throw new \RuntimeException(sprintf('The CSV header must contain the "%s" and "%s" columns.', $assetColumn, $targetColumn));
+            }
+
+            $rows = [];
+            $rowNumber = 1;
+            while (($record = fgetcsv($handle, escape: '')) !== false) {
+                ++$rowNumber;
+                if ($record === [null]) {
+                    continue;
+                }
+                $rows[] = [
+                    $rowNumber,
+                    trim((string) ($record[$assetIndex] ?? '')),
+                    trim((string) ($record[$targetIndex] ?? '')),
+                ];
+            }
+
+            return $rows;
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    /** A numeric reference resolves by id, anything else by path. */
+    protected function resolveAsset(string $reference): ?Asset
+    {
+        if (ctype_digit($reference)) {
+            return Asset::getById((int) $reference);
+        }
+
+        return Asset::getByPath($reference);
+    }
+
+    protected function resolveFolder(string $reference): ?Asset\Folder
+    {
+        $folder = ctype_digit($reference) ? Asset::getById((int) $reference) : Asset::getByPath($reference);
+
+        return $folder instanceof Asset\Folder ? $folder : null;
+    }
+
+    protected function move(Asset $asset, Asset\Folder $folder): void
+    {
+        $targetPath = (string) $folder->getRealFullPath();
+        $this->assetSaver->save(
+            $asset,
+            static function (Asset $mutable) use ($folder): void {
+                $mutable->setParent($folder);
+            },
+            ['versionNote' => 'Asset Pilot: distributed to ' . $targetPath . ' from CSV mapping'],
+        );
+    }
+}

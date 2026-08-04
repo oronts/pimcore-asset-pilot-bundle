@@ -327,6 +327,29 @@ to the exact sorted ids, selector and per-asset proposed filename or rejection d
 requires the same selector plus `--apply --plan-token=...`; selection or descriptor drift, expiry
 and token reuse are rejected before any rename.
 
+### Distribute From CSV
+
+```bash
+# Preview the moves a CSV mapping would make (default columns: asset, target)
+bin/console asset-pilot:distribute-from-csv mapping.csv
+
+# Move the assets after reviewing the preview
+bin/console asset-pilot:distribute-from-csv mapping.csv --apply
+
+# Custom column names; an asset id or path, a target folder id or path
+bin/console asset-pilot:distribute-from-csv plan.csv --asset-column=sku_asset --target-column=folder --apply
+```
+
+Moves existing assets into target folders from a CSV mapping (F23), for one-off imports and migrations
+that place assets by an external plan rather than by rules. The CSV needs a header row; the `--asset-column`
+(default `asset`) value resolves an asset by numeric id or path, and the `--target-column` (default
+`target`) value resolves the destination folder by id or path. Previews by default and moves only with
+`--apply`. Every row is reported independently, so one bad row never aborts the run: a resolved move is
+`planned` then `moved`, an asset already directly under the target is `skipped`, and an unknown asset,
+a missing target folder, a blank row, or a move that fails (for example a name collision in the target)
+is reported as a problem to fix and returns a non-zero exit. Each move is LoopGuard-wrapped so it does not
+re-enter the organize pipeline, and is written to the audit log under the `csv_distribution` rule name.
+
 ### Sweep Empty Folders
 
 ```bash
