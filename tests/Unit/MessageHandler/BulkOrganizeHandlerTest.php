@@ -154,7 +154,7 @@ class BulkOrganizeHandlerTest extends TestCase
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->method('organizeBulkDetailed')->willReturn(new BulkOrganizeReport([], []));
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+        $dispatcher->expects(self::once())->method('deferObject')->with(
             2,
             TriggerType::BulkOperation,
             self::callback(static fn (ActorContext $actor): bool => $actor->type === ActorType::System),
@@ -193,7 +193,7 @@ class BulkOrganizeHandlerTest extends TestCase
             },
         );
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+        $dispatcher->expects(self::once())->method('deferObject')->with(
             2,
             TriggerType::BulkOperation,
             self::callback(static fn (ActorContext $actor): bool => $actor->type === ActorType::System),
@@ -232,7 +232,7 @@ class BulkOrganizeHandlerTest extends TestCase
         $organizer->method('dryRun')->willReturn([]);
         $organizer->expects(self::never())->method('organizeBulkDetailed');
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(2, TriggerType::BulkOperation, self::anything());
+        $dispatcher->expects(self::once())->method('deferObject')->with(2, TriggerType::BulkOperation, self::anything());
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireOperationRunItem')->willReturn(true);
         $loopGuard->method('isObjectDirty')->with(2)->willReturn(true);
@@ -331,7 +331,7 @@ class BulkOrganizeHandlerTest extends TestCase
             );
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
         $dispatcher->expects(self::once())
-            ->method('dispatchObject')
+            ->method('deferObject')
             ->willThrowException(new \RuntimeException('broker unavailable'));
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireOperationRunItem')->willReturn(true);

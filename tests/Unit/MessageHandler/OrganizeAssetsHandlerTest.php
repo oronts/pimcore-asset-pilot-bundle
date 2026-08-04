@@ -9,7 +9,6 @@ use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
 use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\MessageHandler\OrganizeAssetsHandler;
@@ -45,6 +44,7 @@ class OrganizeAssetsHandlerTest extends TestCase
         ?AbstractObject $reloadedObject = null,
         ?LoopGuard $loopGuard = null,
         ?OperationRunStoreInterface $runs = null,
+        ?ObjectSaveDrainInterface $drain = null,
     ): OrganizeAssetsHandler {
         $provider = $this->createMock(ActorContextProvider::class);
         $provider->method('current')->willReturn(ActorContext::system());
@@ -54,12 +54,12 @@ class OrganizeAssetsHandlerTest extends TestCase
             $loopGuard->method('acquireOperationRunItem')->willReturn(true);
         }
 
-        $drain = new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger());
+        $drain ??= new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger());
 
-        return new class ($organizer, $dispatcher, $authorization, $actors, $loopGuard, new NullLogger(), $runs ?? $this->createMock(OperationRunStoreInterface::class), new OrganizePlanFingerprint(), $drain, $object, $reloadedObject ?? $object) extends OrganizeAssetsHandler {
-            public function __construct(AssetOrganizer $organizer, OrganizeDispatcher $dispatcher, ElementAuthorization $authorization, ActorContextStore $actors, LoopGuard $loopGuard, NullLogger $logger, OperationRunStoreInterface $runs, OrganizePlanFingerprint $fingerprints, ObjectSaveDrainInterface $drain, private readonly AbstractObject $object, private readonly AbstractObject $reloadedObject)
+        return new class ($organizer, $authorization, $actors, $loopGuard, new NullLogger(), $runs ?? $this->createMock(OperationRunStoreInterface::class), new OrganizePlanFingerprint(), $drain, $object, $reloadedObject ?? $object) extends OrganizeAssetsHandler {
+            public function __construct(AssetOrganizer $organizer, ElementAuthorization $authorization, ActorContextStore $actors, LoopGuard $loopGuard, NullLogger $logger, OperationRunStoreInterface $runs, OrganizePlanFingerprint $fingerprints, ObjectSaveDrainInterface $drain, private readonly AbstractObject $object, private readonly AbstractObject $reloadedObject)
             {
-                parent::__construct($organizer, $dispatcher, $authorization, $actors, $loopGuard, $logger, $runs, $fingerprints, $drain);
+                parent::__construct($organizer, $authorization, $actors, $loopGuard, $logger, $runs, $fingerprints, $drain);
             }
 
             protected function loadObject(int $objectId): ?AbstractObject
@@ -75,47 +75,40 @@ class OrganizeAssetsHandlerTest extends TestCase
     }
 
     #[Test]
-    public function requeuesLatestStateWhenReceivedMessageIsStale(): void
+    public function guaranteesAReplacementOrganizeForAnUntrackedStaleMessage(): void
     {
         $object = $this->createMock(Concrete::class);
         $object->method('getModificationDate')->willReturn(200);
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::never())->method('organize');
-        $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
-            42,
-            TriggerType::ObjectSave,
-            self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),
-        );
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('isAllowed')->willReturn(true);
+        $drain = $this->createMock(ObjectSaveDrainInterface::class);
+        $drain->expects(self::once())->method('rotateStaleReplacement')->with(
+            42,
+            TriggerType::ObjectSave,
+            self::callback(static fn (ActorContext $a): bool => $a->userId === 7),
+            null,
+        );
 
-        ($this->handler($object, $organizer, $dispatcher, $authorization))(
+        ($this->handler($object, $organizer, $this->createMock(OrganizeDispatcher::class), $authorization, drain: $drain))(
             new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7),
         );
     }
 
     #[Test]
-    public function aStaleTrackedMessageDoesNotDoubleDispatchWhenAConcurrentSaveIsDirty(): void
+    public function guaranteesExactlyOneReplacementForATrackedStaleMessage(): void
     {
-        // The stale re-dispatch already covers the latest state; the terminal drain must not send a second organize.
         $object = $this->createMock(Concrete::class);
         $object->method('getModificationDate')->willReturn(200);
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::never())->method('organizeWithHeartbeat');
-        $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, self::anything());
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('isAllowed')->willReturn(true);
-        $dirty = true;
+        $drain = $this->createMock(ObjectSaveDrainInterface::class);
+        $drain->expects(self::once())->method('rotateStaleReplacement')->with(42, TriggerType::ObjectSave, self::anything(), 'run-1');
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('acquireOperationRunItem')->willReturn(true);
-        $loopGuard->method('isObjectDirty')->willReturnCallback(static function () use (&$dirty): bool {
-            return $dirty;
-        });
-        $loopGuard->method('clearObjectDirty')->willReturnCallback(static function () use (&$dirty): void {
-            $dirty = false;
-        });
         $runs = $this->createMock(OperationRunStoreInterface::class);
         $runs->method('isCancellationRequested')->willReturn(false);
         $runs->method('resume')->willReturn(true);
@@ -123,40 +116,10 @@ class OrganizeAssetsHandlerTest extends TestCase
         $runs->method('completeItem')->willReturn(true);
         $runs->method('finish')->willReturn(OperationRunStatus::Completed);
 
-        ($this->handler($object, $organizer, $dispatcher, $authorization, loopGuard: $loopGuard, runs: $runs))(
+        ($this->handler($object, $organizer, $this->createMock(OrganizeDispatcher::class), $authorization, loopGuard: $loopGuard, runs: $runs, drain: $drain))(
             new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7, 'run-1'),
         );
     }
-
-    #[Test]
-    public function staleReplacementDispatchFailureLeavesTheRunItemResumable(): void
-    {
-        $object = $this->createMock(Concrete::class);
-        $object->method('getModificationDate')->willReturn(200);
-        $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->expects(self::never())->method('organizeWithHeartbeat');
-        $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())
-            ->method('dispatchObject')
-            ->with(42, TriggerType::ObjectSave, ActorContext::user(7))
-            ->willThrowException(new \RuntimeException('broker unavailable'));
-        $authorization = $this->createMock(ElementAuthorization::class);
-        $authorization->method('isAllowed')->willReturn(true);
-        $runs = $this->createMock(OperationRunStoreInterface::class);
-        $runs->method('isCancellationRequested')->willReturn(false);
-        $runs->method('resume')->willReturn(true);
-        $runs->method('resumeItem')->willReturn(true);
-        $runs->expects(self::never())->method('completeItem');
-        $runs->expects(self::never())->method('finish');
-        $runs->expects(self::never())->method('fail');
-
-        $this->expectException(RetryableDispatchException::class);
-
-        ($this->handler($object, $organizer, $dispatcher, $authorization, runs: $runs))(
-            new OrganizeAssetsMessage(42, TriggerType::ObjectSave, 100, ActorType::User, 7, 'run-1'),
-        );
-    }
-
 
     #[Test]
     public function dropsMessageWhenActorLostWorkspacePermission(): void
@@ -180,7 +143,7 @@ class OrganizeAssetsHandlerTest extends TestCase
         $organizer = $this->createMock(AssetOrganizer::class);
         $organizer->expects(self::once())->method('organize')->willReturn([]);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+        $dispatcher->expects(self::once())->method('deferObject')->with(
             42,
             TriggerType::ObjectSave,
             self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),
@@ -256,7 +219,7 @@ class OrganizeAssetsHandlerTest extends TestCase
         $loopGuard->expects(self::once())->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+        $dispatcher->expects(self::once())->method('deferObject')->with(
             42,
             TriggerType::ObjectSave,
             self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),
@@ -283,7 +246,7 @@ class OrganizeAssetsHandlerTest extends TestCase
         $authorization = $this->createMock(ElementAuthorization::class);
         $authorization->method('isAllowed')->willReturn(false);
         $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+        $dispatcher->expects(self::once())->method('deferObject')->with(
             42,
             TriggerType::ObjectSave,
             self::callback(static fn (ActorContext $actor): bool => $actor->userId === 7),

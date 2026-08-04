@@ -8,7 +8,6 @@ use Oronts\AssetPilotBundle\Enum\OperationRunItemStatus;
 use Oronts\AssetPilotBundle\Enum\OperationStatus;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Exception\LostRunItemOwnershipException;
-use Oronts\AssetPilotBundle\Exception\RetryableDispatchException;
 use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
 use Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage;
 use Oronts\AssetPilotBundle\Model\ActorContext;
@@ -18,7 +17,6 @@ use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
 use Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface;
 use Oronts\AssetPilotBundle\Service\OperationRunStoreInterface;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Oronts\AssetPilotBundle\Service\OrganizePlanFingerprint;
 use Oronts\AssetPilotBundle\Service\RetryableInfrastructureFailure;
 use Pimcore\Model\DataObject\AbstractObject;
@@ -33,7 +31,6 @@ class OrganizeAssetsHandler
     use PulsesRunItemLease;
     public function __construct(
         protected readonly AssetOrganizerInterface $organizer,
-        protected readonly OrganizeDispatcherInterface $dispatcher,
         protected readonly ElementAuthorizationInterface $authorization,
         protected readonly ActorContextStore $actors,
         protected readonly LoopGuard $loopGuard,
@@ -90,7 +87,7 @@ class OrganizeAssetsHandler
             return;
         }
 
-        if ($this->skipStaleMessage($message, $object, $actor)) {
+        if ($this->skipStaleMessage($message, $object)) {
             return;
         }
 
@@ -145,7 +142,7 @@ class OrganizeAssetsHandler
         $this->completeRunItem($message, OperationRunItemStatus::Skipped, 'Object changed after preview; the immutable plan was not applied.');
     }
 
-    private function skipStaleMessage(OrganizeAssetsMessage $message, AbstractObject $object, ActorContext $actor): bool
+    private function skipStaleMessage(OrganizeAssetsMessage $message, AbstractObject $object): bool
     {
         if ($message->expectedFingerprint !== null || $message->dispatchedAt <= 0 || !$object instanceof Concrete) {
             return false;
@@ -161,13 +158,14 @@ class OrganizeAssetsHandler
             'dispatched' => date('Y-m-d H:i:s', $message->dispatchedAt),
             'modified' => date('Y-m-d H:i:s', $modifiedAt),
         ]);
-        try {
-            $this->dispatcher->dispatchObject($message->objectId, $message->triggerType, $actor);
-        } catch (\Throwable $exception) {
-            throw new RetryableDispatchException('The latest object state could not be queued.', previous: $exception);
-        }
-        // This re-dispatch already covers the latest state, so clear dirty to stop the terminal drain re-dispatching.
-        $this->loopGuard->clearObjectDirty($message->objectId);
+        // The object changed after dispatch, so guarantee exactly one replacement organize of the latest state
+        // (releasing this run's intent so the backstop does not also rotate it) rather than the conditional drain.
+        $this->drain->rotateStaleReplacement(
+            $message->objectId,
+            $message->triggerType,
+            new ActorContext($message->actorType, $message->actorUserId),
+            $message->runId,
+        );
 
         $this->completeRunItem($message, OperationRunItemStatus::Skipped, 'Object changed after this run was dispatched.');
 

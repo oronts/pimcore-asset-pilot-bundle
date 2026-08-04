@@ -156,8 +156,8 @@ final class OperationRunsControllerTest extends TestCase
         $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        // The re-dispatch must run under the run's original actor (user 7 in the fixture), not the operator (99).
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(
+        // The re-organize must run under the run's original actor (user 7 in the fixture), not the operator (99).
+        $dispatcher->expects(self::once())->method('deferObject')->with(
             42,
             TriggerType::ObjectSave,
             self::callback(static fn (ActorContext $a): bool => $a->userId === 7),

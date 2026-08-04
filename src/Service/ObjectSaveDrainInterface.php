@@ -25,4 +25,13 @@ interface ObjectSaveDrainInterface
      * caller is never turned into a retry loop and a later save still recovers the object.
      */
     public function drain(int $objectId, TriggerType $trigger, ActorContext $actor, ?string $runId = null): void;
+
+    /**
+     * Guarantee exactly one replacement organize for a message found stale (its object changed after dispatch):
+     * release this run's intent so the backstop does not also rotate it, then record one fresh non-fingerprinted
+     * organize of the latest state, coalescing into any newer pending run. Unlike drain(), this is unconditional
+     * because the stale check already proved the object changed, so it never silently drops the replacement.
+     * Best-effort/never-throw: a failure rolls the release back, leaving the intent for the maintenance backstop.
+     */
+    public function rotateStaleReplacement(int $objectId, TriggerType $trigger, ActorContext $actor, ?string $runId): void;
 }

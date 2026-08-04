@@ -307,7 +307,7 @@ class DuplicateReferenceRepointerTest extends TestCase
         $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, self::anything());
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, self::anything());
 
         $this->repointer(
             [['id' => 42, 'type' => 'object']],

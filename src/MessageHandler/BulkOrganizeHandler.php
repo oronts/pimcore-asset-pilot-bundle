@@ -218,7 +218,7 @@ class BulkOrganizeHandler
         }
 
         try {
-            $this->dispatcher->dispatchObject(
+            $this->dispatcher->deferObject(
                 $objectId,
                 $message->triggerType,
                 $actor,

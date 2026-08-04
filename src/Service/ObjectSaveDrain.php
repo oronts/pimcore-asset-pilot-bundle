@@ -35,17 +35,39 @@ final class ObjectSaveDrain implements ObjectSaveDrainInterface
                     return true;
                 });
             }
-            // The bulk/sync cache dirty flag is one signal with the intent: the durable rotation already
-            // re-organizes the latest state, so only dispatch here when it did not fire.
+            // A cache-only follow-up (bulk/sync run, or a save the rotation didn't cover) is re-organized
+            // durably, not via an ephemeral dispatch, so it survives a crash before the worker picks it up.
             if ($this->loopGuard->isObjectDirty($objectId)) {
                 if (!$rotated) {
-                    $this->dispatcher->dispatchObject($objectId, $trigger, $actor);
+                    $this->dispatcher->deferObject($objectId, $trigger, $actor);
                 }
                 $this->loopGuard->clearObjectDirty($objectId);
             }
         } catch (\Throwable $e) {
             try {
                 $this->logger->error('Asset Pilot: could not queue an organize to drain a coalesced save for object {id}: {error}', [
+                    'id' => $objectId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+            } catch (\Throwable) {
+                // A broken logger must not defeat the best-effort, never-throw contract.
+            }
+        }
+    }
+
+    public function rotateStaleReplacement(int $objectId, TriggerType $trigger, ActorContext $actor, ?string $runId): void
+    {
+        try {
+            $this->connection->transactional(function () use ($objectId, $trigger, $actor, $runId): void {
+                if ($runId !== null) {
+                    $this->intents->releaseIfOwnedBy($objectId, $runId);
+                }
+                $this->dispatcher->deferObject($objectId, $trigger, $actor);
+            });
+        } catch (\Throwable $e) {
+            try {
+                $this->logger->error('Asset Pilot: could not queue a stale-message replacement organize for object {id}: {error}', [
                     'id' => $objectId,
                     'error' => $e->getMessage(),
                     'exception' => $e,

@@ -21,14 +21,15 @@ use Psr\Log\NullLogger;
 final class ObjectSaveDrainTest extends TestCase
 {
     #[Test]
-    public function reDispatchesAndClearsTheBulkSyncDirtyFlagWhenDirty(): void
+    public function durablyReOrganizesAndClearsTheBulkSyncDirtyFlagWhenDirty(): void
     {
         $actor = ActorContext::user(7);
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
         $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->expects(self::once())->method('dispatchObject')->with(42, TriggerType::ObjectSave, $actor);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, $actor);
+        $dispatcher->expects(self::never())->method('dispatchObject');
 
         $this->drain($loopGuard, $dispatcher)->drain(42, TriggerType::ObjectSave, $actor);
     }
@@ -119,7 +120,7 @@ final class ObjectSaveDrainTest extends TestCase
         $loopGuard->method('isObjectDirty')->willReturn(true);
         $loopGuard->expects(self::never())->method('clearObjectDirty');
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->method('dispatchObject')->willThrowException(new \RuntimeException('broker down'));
+        $dispatcher->method('deferObject')->willThrowException(new \RuntimeException('broker down'));
 
         $this->drain($loopGuard, $dispatcher)->drain(42, TriggerType::ObjectSave, ActorContext::system());
 
@@ -132,12 +133,48 @@ final class ObjectSaveDrainTest extends TestCase
         $loopGuard = $this->createMock(LoopGuard::class);
         $loopGuard->method('isObjectDirty')->willReturn(true);
         $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
-        $dispatcher->method('dispatchObject')->willThrowException(new \RuntimeException('broker down'));
+        $dispatcher->method('deferObject')->willThrowException(new \RuntimeException('broker down'));
         $logger = $this->createMock(LoggerInterface::class);
         $logger->method('error')->willThrowException(new \RuntimeException('logger down'));
 
         (new ObjectSaveDrain($loopGuard, $dispatcher, $this->createMock(AutomaticOrganizeIntentStoreInterface::class), $this->passthroughConnection(), $logger))
             ->drain(42, TriggerType::ObjectSave, ActorContext::system());
+
+        $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function rotateStaleReplacementReleasesTheRunIntentAndGuaranteesExactlyOneReplacement(): void
+    {
+        $actor = ActorContext::user(7);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, $actor);
+        $dispatcher->expects(self::never())->method('dispatchObject');
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->expects(self::once())->method('releaseIfOwnedBy')->with(42, 'run-1')->willReturn(true);
+
+        $this->drain($this->createMock(LoopGuard::class), $dispatcher, $intents)->rotateStaleReplacement(42, TriggerType::ObjectSave, $actor, 'run-1');
+    }
+
+    #[Test]
+    public function rotateStaleReplacementForAnUntrackedMessageDefersWithoutTouchingAnyIntent(): void
+    {
+        $actor = ActorContext::system();
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, $actor);
+        $intents = $this->createMock(AutomaticOrganizeIntentStoreInterface::class);
+        $intents->expects(self::never())->method('releaseIfOwnedBy');
+
+        $this->drain($this->createMock(LoopGuard::class), $dispatcher, $intents)->rotateStaleReplacement(42, TriggerType::ObjectSave, $actor, null);
+    }
+
+    #[Test]
+    public function rotateStaleReplacementNeverThrowsWhenTheDeferFails(): void
+    {
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->method('deferObject')->willThrowException(new \RuntimeException('broker down'));
+
+        $this->drain($this->createMock(LoopGuard::class), $dispatcher)->rotateStaleReplacement(42, TriggerType::ObjectSave, ActorContext::system(), 'run-1');
 
         $this->addToAssertionCount(1);
     }
