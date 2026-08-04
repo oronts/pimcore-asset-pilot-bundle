@@ -38,6 +38,11 @@ class ConvertFormatAction implements RuleActionInterface, RuleActionConfigValida
         if ($format === '') {
             throw new \InvalidArgumentException('The convert_format action requires a "format".');
         }
+        // Re-enforce the whitelist at prepare time (not only in validateConfig) so a persisted rule can
+        // never carry an unsanitized token into the filename the payload later drives.
+        if (preg_match('/^[a-z0-9]{2,8}$/', $format) !== 1) {
+            throw new \InvalidArgumentException('The convert_format action "format" must be a short alphanumeric image format such as png, jpeg, gif, or webp.');
+        }
 
         $options = is_array($config['options'] ?? null) ? $config['options'] : [];
         if (array_key_exists('quality', $config)) {
@@ -71,7 +76,19 @@ class ConvertFormatAction implements RuleActionInterface, RuleActionConfigValida
 
         $delivery->heartbeat();
         $options = is_array($payload['options'] ?? null) ? $payload['options'] : [];
-        $encoded = $converter->convert($asset, $format, $options);
+        try {
+            $encoded = $converter->convert($asset, $format, $options);
+        } catch (\Throwable $exception) {
+            // A custom converter (Imagick, vips, external binary) may throw on a corrupt or unreadable
+            // source. Contain it so a conversion never fails the organize, exactly as a null return does.
+            $this->logger->warning('Asset Pilot: converter threw re-encoding asset {id} to {format} ({error}); leaving it unchanged', [
+                'id' => $asset->getId(),
+                'format' => $format,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return;
+        }
         if ($encoded === null) {
             $this->logger->warning('Asset Pilot: converter could not re-encode asset {id} to {format}; leaving it unchanged', [
                 'id' => $asset->getId(),
@@ -82,10 +99,31 @@ class ConvertFormatAction implements RuleActionInterface, RuleActionConfigValida
         }
 
         $newFilename = $this->retargetExtension((string) $asset->getFilename(), FormatName::extension($format));
+        if (!$this->targetFilenameIsFree($asset, $newFilename)) {
+            // A different sibling already owns the retargeted key; renaming would make Pimcore throw a
+            // duplicate-path error and fail the organize, so skip rather than clobber or crash.
+            $this->logger->warning('Asset Pilot: cannot convert asset {id}; another asset already occupies {name} in the same folder', [
+                'id' => $asset->getId(),
+                'name' => $newFilename,
+            ]);
+
+            return;
+        }
+
         $this->assetSaver->save($asset, static function (Asset $target) use ($encoded, $newFilename): void {
             $target->setData($encoded);
             $target->setFilename($newFilename);
         });
+    }
+
+    /** Whether $filename is free in the asset's folder (nothing there, or only this asset itself). */
+    protected function targetFilenameIsFree(Asset $asset, string $filename): bool
+    {
+        $parent = $asset->getParent();
+        $parentPath = $parent instanceof Asset ? rtrim((string) $parent->getRealFullPath(), '/') : '';
+        $existing = Asset::getByPath($parentPath . '/' . $filename);
+
+        return !$existing instanceof Asset || (int) $existing->getId() === (int) $asset->getId();
     }
 
     public function validateConfig(array $config): array

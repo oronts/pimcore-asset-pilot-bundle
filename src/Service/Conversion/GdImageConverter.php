@@ -17,7 +17,11 @@ class GdImageConverter implements AssetConverterInterface
 
     public function supports(string $targetFormat): bool
     {
-        return in_array(FormatName::normalize($targetFormat), self::SUPPORTED, true);
+        $format = FormatName::normalize($targetFormat);
+
+        // Claim a format only when this GD build can actually encode it, so a partial GD (no WebP, say)
+        // never shadows a consumer-registered Imagick/vips converter that can.
+        return in_array($format, self::SUPPORTED, true) && $this->formatAvailable($format);
     }
 
     public function isAvailable(): bool

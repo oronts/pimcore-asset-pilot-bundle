@@ -117,16 +117,65 @@ final class ConvertFormatActionTest extends TestCase
         $this->action($resolver, $saver)->applyPrepared($this->image('a.png'), ['format' => 'jpeg'], $this->delivery());
     }
 
+    #[Test]
+    public function degradesWhenACustomConverterThrows(): void
+    {
+        $converter = $this->createMock(AssetConverterInterface::class);
+        $converter->method('convert')->willThrowException(new \RuntimeException('corrupt source'));
+        $resolver = $this->createMock(AssetConverterResolverInterface::class);
+        $resolver->method('resolve')->willReturn($converter);
+        $saver = $this->createMock(LoopGuardedAssetSaver::class);
+        $saver->expects(self::never())->method('save');
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning');
+
+        $this->action($resolver, $saver, $logger)->applyPrepared($this->image('a.png'), ['format' => 'jpeg'], $this->delivery());
+    }
+
+    #[Test]
+    public function skipsWhenTheRetargetedFilenameIsTakenByAnotherAsset(): void
+    {
+        $converter = $this->createMock(AssetConverterInterface::class);
+        $converter->method('convert')->willReturn('jpeg-bytes');
+        $resolver = $this->createMock(AssetConverterResolverInterface::class);
+        $resolver->method('resolve')->willReturn($converter);
+        $saver = $this->createMock(LoopGuardedAssetSaver::class);
+        $saver->expects(self::never())->method('save');
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning');
+
+        $action = new class ($resolver, $saver, $logger) extends ConvertFormatAction {
+            protected function targetFilenameIsFree(Asset $asset, string $filename): bool
+            {
+                return false;
+            }
+        };
+
+        $action->applyPrepared($this->image('a.png'), ['format' => 'jpeg'], $this->delivery());
+    }
+
+    #[Test]
+    public function prepareRejectsAMalformedFormatToken(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->action()->prepare($this->image('a.png'), $this->createMock(AbstractObject::class), ['format' => '../evil']);
+    }
+
     private function action(
         ?AssetConverterResolverInterface $resolver = null,
         ?LoopGuardedAssetSaver $saver = null,
         ?LoggerInterface $logger = null,
     ): ConvertFormatAction {
-        return new ConvertFormatAction(
+        return new class (
             $resolver ?? $this->createMock(AssetConverterResolverInterface::class),
             $saver ?? new LoopGuardedAssetSaver($this->createMock(LoopGuard::class)),
             $logger ?? new NullLogger(),
-        );
+        ) extends ConvertFormatAction {
+            protected function targetFilenameIsFree(Asset $asset, string $filename): bool
+            {
+                return true;
+            }
+        };
     }
 
     private function image(string $filename): Asset\Image
