@@ -197,6 +197,50 @@ final class CsvDistributionServiceTest extends TestCase
         self::assertSame(2, $report->countOf(CsvDistributionOutcome::Moved), 'a failed audit write never aborts the run or downgrades a completed move');
     }
 
+    #[Test]
+    public function keepsTheRunGoingEvenWhenTheRecoveryLoggerAlsoThrows(): void
+    {
+        $csv = $this->csv("asset,target\n12,/Photos\n13,/Photos\n");
+        $audit = $this->createMock(AuditWriterInterface::class);
+        $audit->method('log')->willThrowException(new \RuntimeException('audit db down'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->method('error')->willThrowException(new \RuntimeException('logger disk full'));
+
+        $report = $this->service(
+            resolveAsset: fn (string $ref): ?Asset => $this->image((int) $ref, '/Uploads/' . $ref . '.jpg', '/Uploads'),
+            resolveFolder: fn (string $ref): ?Asset\Folder => $this->folder('/Photos'),
+            audit: $audit,
+            logger: $logger,
+        )->distribute($csv, 'asset', 'target', dryRun: false);
+
+        self::assertSame(2, $report->countOf(CsvDistributionOutcome::Moved), 'a broken logger must not defeat the best-effort audit contract or abort the run');
+    }
+
+    #[Test]
+    public function honorsARealAssetProtectionLockWithoutOverridingTheSeam(): void
+    {
+        $csv = $this->csv("asset,target\n12,/Photos\n");
+        $locked = $this->createMock(Asset\Image::class);
+        $locked->method('getId')->willReturn(12);
+        $locked->method('getRealFullPath')->willReturn('/Uploads/a.jpg');
+        $locked->method('getFilename')->willReturn('a.jpg');
+        $locked->method('hasProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+        $locked->method('getProperty')->with(AssetProtection::DEFAULT_LOCK_PROPERTY)->willReturn(true);
+        $moved = [];
+
+        $report = $this->service(
+            resolveAsset: fn (string $ref): ?Asset => $locked,
+            resolveFolder: fn (string $ref): ?Asset\Folder => $this->folder('/Photos'),
+            onMove: static function () use (&$moved): void {
+                $moved[] = true;
+            },
+        )->distribute($csv, 'asset', 'target', dryRun: false);
+
+        self::assertSame(1, $report->countOf(CsvDistributionOutcome::Skipped));
+        self::assertStringContainsString('locked', $report->results[0]->message);
+        self::assertSame([], $moved, 'the real AssetProtection wiring skips a locked asset with no seam override');
+    }
+
     private function service(
         ?callable $resolveAsset = null,
         ?callable $resolveFolder = null,
@@ -204,10 +248,11 @@ final class CsvDistributionServiceTest extends TestCase
         ?AuditWriterInterface $audit = null,
         ?callable $isLocked = null,
         array $excludeFolders = [],
+        ?LoggerInterface $logger = null,
     ): CsvDistributionService {
         $saver = new LoopGuardedAssetSaver($this->createMock(LoopGuard::class));
 
-        return new class ($saver, $audit ?? $this->createMock(AuditWriterInterface::class), new NullLogger(), $excludeFolders, $resolveAsset, $resolveFolder, $onMove, $isLocked) extends CsvDistributionService {
+        return new class ($saver, $audit ?? $this->createMock(AuditWriterInterface::class), $logger ?? new NullLogger(), $excludeFolders, $resolveAsset, $resolveFolder, $onMove, $isLocked) extends CsvDistributionService {
             /** @param list<string> $excludeFolders */
             public function __construct(
                 LoopGuardedAssetSaver $saver,
@@ -241,7 +286,7 @@ final class CsvDistributionServiceTest extends TestCase
 
             protected function assetIsLocked(Asset $asset): bool
             {
-                return $this->isLockedFn !== null && ($this->isLockedFn)($asset);
+                return $this->isLockedFn !== null ? (bool) ($this->isLockedFn)($asset) : parent::assetIsLocked($asset);
             }
         };
     }

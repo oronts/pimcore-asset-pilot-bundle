@@ -107,9 +107,11 @@ class CsvDistributionService implements CsvDistributionServiceInterface
                 throw new \RuntimeException('The CSV file is empty; a header row naming the asset and target columns is required.');
             }
             $header = array_map(static fn (mixed $value): string => trim((string) $value), $header);
-            if (isset($header[0])) {
-                // Strip a UTF-8 BOM so an Excel "CSV UTF-8" export still resolves its first column.
-                $header[0] = ltrim($header[0], "\u{FEFF}");
+            if (isset($header[0]) && str_starts_with($header[0], "\u{FEFF}")) {
+                // Strip a UTF-8 BOM as a whole 3-byte unit (not an ltrim byte mask, which would corrupt a
+                // first column name that merely begins with an 0xEF/0xBB/0xBF byte) so an Excel "CSV UTF-8"
+                // export still resolves its first column.
+                $header[0] = substr($header[0], 3);
             }
             $assetIndex = array_search($assetColumn, $header, true);
             $targetIndex = array_search($targetColumn, $header, true);
@@ -178,10 +180,15 @@ class CsvDistributionService implements CsvDistributionServiceInterface
                 TriggerType::Manual,
             ));
         } catch (\Throwable $exception) {
-            $this->logger->error('Asset Pilot: moved asset {id} from CSV but could not write its audit record: {error}', [
-                'id' => $assetId,
-                'error' => $exception->getMessage(),
-            ]);
+            try {
+                $this->logger->error('Asset Pilot: moved asset {id} from CSV but could not write its audit record: {error}', [
+                    'id' => $assetId,
+                    'error' => $exception->getMessage(),
+                ]);
+            } catch (\Throwable) {
+                // A broken logger must not defeat the best-effort, never-throw contract: the asset is already
+                // moved, so neither the audit failure nor a failing logger may abort the run or lose the row.
+            }
         }
     }
 
