@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Asset format conversion (F17). A new `convert_format` rule action re-encodes an image asset to a
+  target format (png, jpeg, gif, webp) after it is organized, through a pluggable converter seam:
+  implement `AssetConverterInterface` and tag it `oronts_asset_pilot.asset_converter` to add Imagick,
+  vips, or external-binary encoders. The bundle ships a GD-backed default. The action is best-effort by
+  contract: a non-image asset, an asset already in the target format, a missing binary, or a converter
+  that cannot decode the source all skip without failing the organize. The resolver is exposed as the
+  overridable `AssetConverterResolverInterface`.
+
 ### Changed
 
 - Automatic organize producers now bind a durable per-object coalescing intent (a new

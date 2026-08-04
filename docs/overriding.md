@@ -86,6 +86,7 @@ element lookup, a render helper), never a safety decision.
 | `MovePlannerInterface` | `MovePlanner` |
 | `OrganizeDispatcherInterface` | `OrganizeDispatcher` |
 | `AutomaticOrganizeIntentStoreInterface` | `AutomaticOrganizeIntentStore` |
+| `AssetConverterResolverInterface` | `AssetConverterResolver` |
 | `AssetZipServiceInterface` | `AssetZipService` |
 | `ApplyPlanServiceInterface` | `ApplyPlanService` |
 | `RulePreviewPlanServiceInterface` | `RulePreviewPlanService` |
@@ -122,6 +123,15 @@ decorate the checker when tenants need different rollout policy, filtering, or o
 services remain additive transports. Each transport receives one immutable `Notification` with an
 extensible kind, typed severity, presentation text, and safe scalar context. Decorators can enrich,
 filter, or observe notifications without parsing prose or replacing transport discovery.
+
+`AssetConverterResolverInterface` owns which converter re-encodes an image for the `convert_format` rule
+action; tagged `AssetConverterInterface` services are the additive seam. Implement `AssetConverterInterface`
+(a `supports()`/`isAvailable()`/`convert()` trio) and tag it `oronts_asset_pilot.asset_converter` to add a
+format (Imagick, vips, an external-binary encoder, DPI/color transforms); it is auto-tagged when the
+container autoconfigures. The bundle ships a GD-backed default for png/jpeg/gif/webp. Resolution is
+best-effort by contract: when no available converter supports the requested format the action logs and
+leaves the asset unchanged, so a missing binary never fails an organize. Replace or decorate the resolver
+to change converter ordering, cache availability, or force a converter per format.
 
 
 `DuplicateMergeServiceInterface::preview()` is the read-only capability. `merge()` is the apply

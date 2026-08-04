@@ -97,6 +97,7 @@ services:
     Oronts\AssetPilotBundle\Service\OperationDeliveryStoreInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryStore'
     Oronts\AssetPilotBundle\Service\OperationDeliveryProcessorInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryProcessor'
     Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface: '@Oronts\AssetPilotBundle\Service\OrganizeDispatcher'
+    Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolverInterface: '@Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolver'
     Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface: '@Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore'
     Oronts\AssetPilotBundle\Service\DependencyProjectionInterface: '@Oronts\AssetPilotBundle\Service\DbalDependencyProjection'
     Oronts\AssetPilotBundle\Service\DependencyProjectionFreshnessInterface: '@Oronts\AssetPilotBundle\Service\DbalDependencyProjectionFreshness'
@@ -410,6 +411,12 @@ services:
     Oronts\AssetPilotBundle\Action\RuleActionResolver:
         arguments:
             $actions: !tagged_iterator oronts_asset_pilot.rule_action
+
+    # -- Asset format converters (pluggable seam) -------------------------------
+
+    Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolver:
+        arguments:
+            $converters: !tagged_iterator oronts_asset_pilot.asset_converter
 
     # -- Maintenance tasks ------------------------------------------------------
 

@@ -12,6 +12,7 @@ use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
 use Oronts\AssetPilotBundle\Notification\NotifierInterface;
 use Oronts\AssetPilotBundle\Observer\DurableOperationObserverInterface;
 use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
+use Oronts\AssetPilotBundle\Service\Conversion\AssetConverterInterface;
 use Oronts\AssetPilotBundle\Strategy\CallbackDecisionInterface;
 use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use Symfony\Component\Config\FileLocator;
@@ -44,6 +45,7 @@ class OrontsAssetPilotExtension extends Extension implements PrependExtensionInt
         ZipEntryStrategyInterface::class => 'oronts_asset_pilot.zip_strategy',
         ContextProviderInterface::class => 'oronts_asset_pilot.context_provider',
         DurableOperationObserverInterface::class => 'oronts_asset_pilot.operation_observer',
+        AssetConverterInterface::class => 'oronts_asset_pilot.asset_converter',
     ];
     public function prepend(ContainerBuilder $container): void
     {
