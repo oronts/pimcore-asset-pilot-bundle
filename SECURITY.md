@@ -12,20 +12,31 @@ yet published; when `v2.0.0` is tagged and released it becomes the supported lin
 updated in the same release operation.
 
 Supported releases receive dependency and security fixes. Release CI runs locked Composer and npm
-audits without ignored advisories. A remaining upstream advisory must have a documented reachability
-assessment and mitigation before release.
+audits. The npm audit runs through `assets/studio/scripts/audit-allowlist.mjs`, which fails the build on
+any advisory at low severity or above, except a small, documented, expiry-bound allowlist of advisories
+deferred to the coordinated Pimcore Studio 2026.1 host upgrade (listed below). Any other upstream
+advisory fails the build until it has a documented reachability assessment and mitigation.
 
 ### Known upstream advisories
 
-The locked npm graph reports three Moderate advisories in `react-router` / `react-router-dom`
-(`GHSA-wrjc-x8rr-h8h6`, `GHSA-337j-9hxr-rhxg`). They are transitive-only through
-`@pimcore/studio-ui-bundle` (Pimcore Studio 2025.4), which the Asset Pilot Studio remote consumes as a
-Module Federation shared singleton: the host application provides react-router at runtime, so no
-react-router code is bundled into or shipped by this bundle's remote. The SSR hydration advisory does
-not apply to the client-side Studio SPA, which performs no server-side rendering. The upstream fix ships
-only in the breaking `@pimcore/studio-ui-bundle` 2026.1 line; this bundle targets Studio 2025.4, so the
-fix is deferred to the coordinated host-stack upgrade rather than forced under an incompatible host. The
-`brace-expansion`, `fast-uri`, and `dompurify` advisories were resolved by refreshing the lockfile.
+The locked npm graph reports advisories in transitive dependencies that are not reachable from the
+shipped Studio remote and whose fixes ship only in the breaking Pimcore Studio 2026.1 line. They are
+deferred to the coordinated host-stack upgrade and allowlisted in `audit-allowlist.mjs` (review by
+2026-11-01):
+
+- `react-router` / `react-router-dom` (`GHSA-wrjc-x8rr-h8h6`, `GHSA-337j-9hxr-rhxg`,
+  `GHSA-jjmj-jmhj-qwj2`; Moderate): transitive-only through `@pimcore/studio-ui-bundle` (Studio 2025.4),
+  which the Asset Pilot remote consumes as a Module Federation shared singleton, so the host application
+  provides react-router at runtime and no react-router code is bundled into or shipped by this remote.
+  The SSR hydration advisory does not apply to the client-side Studio SPA, which performs no
+  server-side rendering.
+- `undici` (`GHSA-4cwx-7wf7-3272`, High; `GHSA-8xcm-r25x-g524`, `GHSA-m8rv-5g2x-5cg5`,
+  `GHSA-jr45-8vmc-qm54`, `GHSA-v3r7-h72x-cjcm`, Moderate): transitive-only through the `@module-federation`
+  build plugin. undici is a Node HTTP client used at build time and is never bundled into or shipped by
+  the browser remote, so these server-side HTTP advisories are not reachable in the shipped artifact.
+
+The `brace-expansion`, `fast-uri`, `dompurify`, and `postcss` advisories were resolved by refreshing the
+lockfile.
 
 ## Authority model
 

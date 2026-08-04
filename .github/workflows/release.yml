@@ -46,7 +46,8 @@ jobs:
         run: npm ci --prefix assets/studio
 
       - name: Audit frontend dependencies
-        run: npm audit --prefix assets/studio --audit-level=low
+        working-directory: assets/studio
+        run: node scripts/audit-allowlist.mjs
 
       - name: Lint frontend
         run: npm --prefix assets/studio run lint
