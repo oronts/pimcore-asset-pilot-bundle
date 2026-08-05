@@ -100,7 +100,7 @@ interface OperationRunStoreInterface
     public function get(string $runId, ActorContext $actor): ?array;
 
     /** @return list<array<string, mixed>> */
-    public function recent(ActorContext $actor, int $limit = 20): array;
+    public function recent(ActorContext $actor, int $limit = 20, ?OperationRunKind $kind = null): array;
 
     public function retry(string $runId, ActorContext $actor): ?string;
 

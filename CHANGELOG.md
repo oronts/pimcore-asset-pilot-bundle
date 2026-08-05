@@ -9,6 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Dry-run simulations (P3). A new `POST /operations/simulate` records what organizing a data object would
+  move as a durable, terminal "simulation" operation run (a new `simulation` run kind) without mutating
+  anything, so the diff can be reviewed later. The Operations Studio tab gains a "Simulate & save" action
+  and a recorded-simulations panel that shows each simulated asset's from/to path. `GET /operations/runs`
+  gains an optional `?kind=` filter. The recorded run items are built through the overridable
+  `OperationsController::simulationItems()` seam. Simulation runs are View-gated, terminal, and never
+  dispatched, so they cost no worker and are pruned by the usual run retention.
+- Studio tree organize action (F9). Right-clicking an asset folder in the Studio tree offers "Organize
+  with Asset Pilot", which opens the dashboard on the Operations tab with the clicked folder pre-filled
+  into the reviewed Reorganize form. It never mutates in one click: the organize still runs through the
+  existing preview and apply. The menu item registers through the Studio `ContextMenuRegistry` on the
+  asset-tree slot and is gated to folder nodes for actors who can operate.
 - CSV asset distribution (F23). A new `asset-pilot:distribute-from-csv <file>` command moves existing
   assets into target folders from a CSV mapping (configurable `--asset-column`/`--target-column`, an
   asset id or path, a target folder id or path), for one-off imports and migrations that place assets by

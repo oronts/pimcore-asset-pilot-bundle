@@ -63,7 +63,7 @@ class OpenApiOperationRunItemSchema
     required: ['id', 'kind', 'status', 'totalCount', 'processedCount', 'succeededCount', 'skippedCount', 'blockedCount', 'failedCount', 'attempt', 'request', 'createdAt', 'updatedAt'],
     properties: [
         new OA\Property(property: 'id', type: 'string', pattern: '^[a-f0-9]{32}$'),
-        new OA\Property(property: 'kind', type: 'string', enum: ['organize', 'reorganize', 'replay', 'duplicate-merge']),
+        new OA\Property(property: 'kind', type: 'string', enum: ['organize', 'reorganize', 'replay', 'duplicate-merge', 'simulation']),
         new OA\Property(property: 'status', type: 'string', enum: ['pending_dispatch', 'queued', 'running', 'cancel_requested', 'cancelled', 'completed', 'blocked', 'partial', 'failed']),
         new OA\Property(property: 'totalCount', type: 'integer', minimum: 0),
         new OA\Property(property: 'processedCount', type: 'integer', minimum: 0),

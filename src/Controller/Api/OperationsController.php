@@ -16,6 +16,7 @@ use Oronts\AssetPilotBundle\Enum\ApplyPlanStatus;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
 use Oronts\AssetPilotBundle\Enum\BulkRunOutcomeKind;
 use Oronts\AssetPilotBundle\Enum\OperationRunKind;
+use Oronts\AssetPilotBundle\Enum\OperationRunStatus;
 use Oronts\AssetPilotBundle\Enum\ReviewedSelectionError;
 use Oronts\AssetPilotBundle\Enum\SingleRunOutcomeKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
@@ -347,6 +348,79 @@ class OperationsController
             ], Response::HTTP_CONFLICT),
             SingleRunOutcomeKind::Failed => new JsonResponse(['error' => 'Organization failed.', 'runId' => $runId], Response::HTTP_INTERNAL_SERVER_ERROR),
         };
+    }
+
+    /**
+     * Persist a dry-run as a durable "simulation" operation run (P3). It computes the moves organizing the
+     * object would make and records them as a terminal run (no dispatch, no mutation), so the diff can be
+     * reviewed later. View-gated: it reads and records, but never changes an asset.
+     */
+    #[Route('/operations/simulate', name: 'oronts_asset_pilot_operations_simulate', methods: ['POST'])]
+    #[IsGranted(AssetPilotPermission::View->value)]
+    public function simulate(Request $request): JsonResponse
+    {
+        $resolved = $this->resolveObjectFromBody($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        [$object] = $resolved;
+        $objectId = (int) $object->getId();
+        $actor = $this->authorization->currentActor();
+
+        $operations = $this->previewObjects([$object])['operations'];
+        $this->logger->info('Asset Pilot API: simulation recorded for object {id} ({count} moves)', [
+            'id' => $objectId,
+            'count' => count($operations),
+        ]);
+
+        if ($operations === []) {
+            return new JsonResponse([
+                'runId' => null,
+                'operations' => [],
+                'message' => 'No moves would result from organizing this object; nothing was recorded.',
+            ]);
+        }
+
+        $runId = $this->runs->create(
+            OperationRunKind::Simulation,
+            $actor,
+            $this->simulationItems($operations),
+            ['objectId' => $objectId, 'trigger' => TriggerType::Api->value],
+            initialStatus: OperationRunStatus::Completed,
+        );
+
+        return new JsonResponse([
+            'runId' => $runId,
+            'operations' => array_map($this->responses->previewOperation(...), $operations),
+        ]);
+    }
+
+    /**
+     * Map previewed moves to operation-run items for a recorded simulation. Each move is one asset item whose
+     * `state` carries the from/to diff that the run-detail endpoint surfaces. Override to enrich the recorded
+     * state (for example DAM ids or dimensions) without changing the endpoint.
+     *
+     * @param list<MoveOperation> $operations
+     *
+     * @return list<array{key: string, type: string, id: int, fingerprint: string|null, state: array<string, mixed>}>
+     */
+    protected function simulationItems(array $operations): array
+    {
+        return array_map(
+            static fn (MoveOperation $op): array => [
+                'key' => 'asset:' . $op->assetId,
+                'type' => 'asset',
+                'id' => $op->assetId,
+                'fingerprint' => $op->executionFingerprint,
+                'state' => [
+                    'from' => $op->sourcePath,
+                    'to' => $op->targetPath,
+                    'ruleName' => $op->ruleName,
+                    'objectId' => $op->objectId,
+                ],
+            ],
+            $operations,
+        );
     }
 
     #[Route('/organize/bulk', name: 'oronts_asset_pilot_organize_bulk', methods: ['POST'])]

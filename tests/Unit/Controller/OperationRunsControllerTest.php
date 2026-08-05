@@ -39,7 +39,7 @@ final class OperationRunsControllerTest extends TestCase
         $runs = $this->createMock(OperationRunStoreInterface::class);
         $summary = $this->runFixture();
         unset($summary['items']);
-        $runs->expects(self::once())->method('recent')->with($actor, 25)->willReturn([$summary]);
+        $runs->expects(self::once())->method('recent')->with($actor, 25, null)->willReturn([$summary]);
 
         $response = $this->controller($runs, $actor)->list(new Request(['limit' => '25']));
         $body = json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
@@ -48,6 +48,29 @@ final class OperationRunsControllerTest extends TestCase
         self::assertSame(25, $body['limit']);
         self::assertSame(self::RUN_ID, $body['items'][0]['id']);
         self::assertArrayNotHasKey('items', $body['items'][0]);
+    }
+
+    #[Test]
+    public function filtersRecentRunsByKindWhenRequested(): void
+    {
+        $actor = ActorContext::user(7);
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::once())->method('recent')->with($actor, 20, OperationRunKind::Simulation)->willReturn([]);
+
+        $response = $this->controller($runs, $actor)->list(new Request(['kind' => 'simulation']));
+
+        self::assertSame(Response::HTTP_OK, $response->getStatusCode());
+    }
+
+    #[Test]
+    public function rejectsAnUnknownRunKindFilter(): void
+    {
+        $runs = $this->createMock(OperationRunStoreInterface::class);
+        $runs->expects(self::never())->method('recent');
+
+        $response = $this->controller($runs, ActorContext::user(7))->list(new Request(['kind' => 'not-a-kind']));
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
     }
 
     #[Test]

@@ -21,18 +21,15 @@
     },
     "globalName": "oronts_asset_pilot_bundle",
     "pluginVersion": "2.8.1",
-    "publicPath": "/bundles/orontsassetpilot/studio/build/2.0.0-96e65d67-1bd3-4609-bb7f-3046a79efc8d/"
+    "publicPath": "/bundles/orontsassetpilot/studio/build/2.0.0-a5ec7aab-c119-4082-93ae-2377b9a47f94/"
   },
   "shared": [
     {
-      "singleton": true,
-      "requiredVersion": "5.22.x",
-      "shareScope": "default",
-      "import": "antd",
+      "id": "oronts_asset_pilot_bundle:antd",
       "name": "antd",
       "version": "5.22.7",
-      "eager": false,
-      "id": "oronts_asset_pilot_bundle:antd",
+      "singleton": true,
+      "requiredVersion": "5.22.x",
       "assets": {
         "js": {
           "async": [],
@@ -45,20 +42,14 @@
           "sync": []
         }
       },
-      "usedIn": [
-        "."
-      ],
-      "usedExports": [],
       "fallback": ""
     },
     {
-      "singleton": true,
-      "requiredVersion": "^23.16.8",
-      "shareScope": "default",
-      "eager": true,
+      "id": "oronts_asset_pilot_bundle:i18next",
       "name": "i18next",
       "version": "23.16.8",
-      "id": "oronts_asset_pilot_bundle:i18next",
+      "singleton": true,
+      "requiredVersion": "^23.16.8",
       "assets": {
         "js": {
           "async": [],
@@ -72,74 +63,14 @@
           "sync": []
         }
       },
-      "usedIn": [
-        "."
-      ],
-      "usedExports": [],
       "fallback": ""
     },
     {
-      "singleton": true,
-      "requiredVersion": "^18.3.1",
-      "shareScope": "default",
-      "eager": true,
+      "id": "oronts_asset_pilot_bundle:react-dom",
       "name": "react-dom",
       "version": "18.3.1",
-      "id": "oronts_asset_pilot_bundle:react-dom",
-      "assets": {
-        "js": {
-          "async": [],
-          "sync": [
-            "static/js/710.de53b0d2.js",
-            "static/js/remoteEntry.js"
-          ]
-        },
-        "css": {
-          "async": [],
-          "sync": []
-        }
-      },
-      "usedIn": [
-        "."
-      ],
-      "usedExports": [],
-      "fallback": ""
-    },
-    {
-      "singleton": true,
-      "requiredVersion": "^14.1.3",
-      "shareScope": "default",
-      "eager": true,
-      "name": "react-i18next",
-      "version": "14.1.3",
-      "id": "oronts_asset_pilot_bundle:react-i18next",
-      "assets": {
-        "js": {
-          "async": [],
-          "sync": [
-            "static/js/710.de53b0d2.js",
-            "static/js/remoteEntry.js"
-          ]
-        },
-        "css": {
-          "async": [],
-          "sync": []
-        }
-      },
-      "usedIn": [
-        "."
-      ],
-      "usedExports": [],
-      "fallback": ""
-    },
-    {
       "singleton": true,
       "requiredVersion": "^18.3.1",
-      "shareScope": "default",
-      "eager": true,
-      "name": "react",
-      "version": "18.3.1",
-      "id": "oronts_asset_pilot_bundle:react",
       "assets": {
         "js": {
           "async": [],
@@ -153,92 +84,97 @@
           "sync": []
         }
       },
-      "usedIn": [
-        "."
-      ],
-      "usedExports": [],
+      "fallback": ""
+    },
+    {
+      "id": "oronts_asset_pilot_bundle:react-i18next",
+      "name": "react-i18next",
+      "version": "14.1.3",
+      "singleton": true,
+      "requiredVersion": "^14.1.3",
+      "assets": {
+        "js": {
+          "async": [],
+          "sync": [
+            "static/js/710.de53b0d2.js",
+            "static/js/remoteEntry.js"
+          ]
+        },
+        "css": {
+          "async": [],
+          "sync": []
+        }
+      },
+      "fallback": ""
+    },
+    {
+      "id": "oronts_asset_pilot_bundle:react",
+      "name": "react",
+      "version": "18.3.1",
+      "singleton": true,
+      "requiredVersion": "^18.3.1",
+      "assets": {
+        "js": {
+          "async": [],
+          "sync": [
+            "static/js/710.de53b0d2.js",
+            "static/js/remoteEntry.js"
+          ]
+        },
+        "css": {
+          "async": [],
+          "sync": []
+        }
+      },
       "fallback": ""
     }
   ],
   "remotes": [
     {
-      "alias": "@pimcore/studio-ui-bundle",
-      "consumingFederationContainerName": "oronts_asset_pilot_bundle",
       "federationContainerName": "promise new Promise((resolve, reject) => {\n          const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl\n          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {\n            throw new Error('Studio UI remote URL is unavailable')\n          }\n\n          const isAlreadyInitializedError = (error) => {\n            return typeof error === 'object'\n              && error !== null\n              && typeof error.message === 'string'\n              && error.message.toLowerCase().includes('already been initialized')\n          }\n\n          const resolveContainer = () => {\n            const container = window['pimcore_studio_ui_bundle']\n            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {\n              throw new Error('Studio UI remote container did not initialize')\n            }\n            resolve({\n              get: (request) => container.get(request),\n              init: (...args) => {\n                try {\n                  const result = container.init(...args)\n                  if (result && typeof result.catch === 'function') {\n                    return result.catch((error) => {\n                      if (isAlreadyInitializedError(error)) return undefined\n                      throw error\n                    })\n                  }\n                  return result\n                } catch (error) {\n                  if (isAlreadyInitializedError(error)) return undefined\n                  throw error\n                }\n              }\n            })\n          }\n\n          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href\n          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)\n          if (existing && window['pimcore_studio_ui_bundle']) {\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n            return\n          }\n\n          const script = existing ?? document.createElement('script')\n          const timeout = window.setTimeout(() => {\n            reject(new Error('Studio UI remote loading timed out'))\n          }, 15000)\n          script.addEventListener('load', () => {\n            window.clearTimeout(timeout)\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n          }, { once: true })\n          script.addEventListener('error', () => {\n            window.clearTimeout(timeout)\n            reject(new Error('Studio UI remote failed to load'))\n          }, { once: true })\n          if (!existing) {\n            script.src = absoluteRemoteUrl\n            document.head.appendChild(script)\n          }\n        })\n        ",
       "moduleName": ".",
-      "usedIn": [
-        "js/src/plugins.ts + 101 modules"
-      ],
-      "version": "*"
+      "alias": "@pimcore/studio-ui-bundle",
+      "entry": "*"
     },
     {
-      "alias": "@pimcore/studio-ui-bundle",
-      "consumingFederationContainerName": "oronts_asset_pilot_bundle",
       "federationContainerName": "promise new Promise((resolve, reject) => {\n          const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl\n          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {\n            throw new Error('Studio UI remote URL is unavailable')\n          }\n\n          const isAlreadyInitializedError = (error) => {\n            return typeof error === 'object'\n              && error !== null\n              && typeof error.message === 'string'\n              && error.message.toLowerCase().includes('already been initialized')\n          }\n\n          const resolveContainer = () => {\n            const container = window['pimcore_studio_ui_bundle']\n            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {\n              throw new Error('Studio UI remote container did not initialize')\n            }\n            resolve({\n              get: (request) => container.get(request),\n              init: (...args) => {\n                try {\n                  const result = container.init(...args)\n                  if (result && typeof result.catch === 'function') {\n                    return result.catch((error) => {\n                      if (isAlreadyInitializedError(error)) return undefined\n                      throw error\n                    })\n                  }\n                  return result\n                } catch (error) {\n                  if (isAlreadyInitializedError(error)) return undefined\n                  throw error\n                }\n              }\n            })\n          }\n\n          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href\n          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)\n          if (existing && window['pimcore_studio_ui_bundle']) {\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n            return\n          }\n\n          const script = existing ?? document.createElement('script')\n          const timeout = window.setTimeout(() => {\n            reject(new Error('Studio UI remote loading timed out'))\n          }, 15000)\n          script.addEventListener('load', () => {\n            window.clearTimeout(timeout)\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n          }, { once: true })\n          script.addEventListener('error', () => {\n            window.clearTimeout(timeout)\n            reject(new Error('Studio UI remote failed to load'))\n          }, { once: true })\n          if (!existing) {\n            script.src = absoluteRemoteUrl\n            document.head.appendChild(script)\n          }\n        })\n        ",
       "moduleName": "app",
-      "usedIn": [
-        "js/src/plugins.ts + 101 modules"
-      ],
-      "version": "*"
+      "alias": "@pimcore/studio-ui-bundle",
+      "entry": "*"
     },
     {
-      "alias": "@pimcore/studio-ui-bundle",
-      "consumingFederationContainerName": "oronts_asset_pilot_bundle",
       "federationContainerName": "promise new Promise((resolve, reject) => {\n          const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl\n          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {\n            throw new Error('Studio UI remote URL is unavailable')\n          }\n\n          const isAlreadyInitializedError = (error) => {\n            return typeof error === 'object'\n              && error !== null\n              && typeof error.message === 'string'\n              && error.message.toLowerCase().includes('already been initialized')\n          }\n\n          const resolveContainer = () => {\n            const container = window['pimcore_studio_ui_bundle']\n            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {\n              throw new Error('Studio UI remote container did not initialize')\n            }\n            resolve({\n              get: (request) => container.get(request),\n              init: (...args) => {\n                try {\n                  const result = container.init(...args)\n                  if (result && typeof result.catch === 'function') {\n                    return result.catch((error) => {\n                      if (isAlreadyInitializedError(error)) return undefined\n                      throw error\n                    })\n                  }\n                  return result\n                } catch (error) {\n                  if (isAlreadyInitializedError(error)) return undefined\n                  throw error\n                }\n              }\n            })\n          }\n\n          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href\n          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)\n          if (existing && window['pimcore_studio_ui_bundle']) {\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n            return\n          }\n\n          const script = existing ?? document.createElement('script')\n          const timeout = window.setTimeout(() => {\n            reject(new Error('Studio UI remote loading timed out'))\n          }, 15000)\n          script.addEventListener('load', () => {\n            window.clearTimeout(timeout)\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n          }, { once: true })\n          script.addEventListener('error', () => {\n            window.clearTimeout(timeout)\n            reject(new Error('Studio UI remote failed to load'))\n          }, { once: true })\n          if (!existing) {\n            script.src = absoluteRemoteUrl\n            document.head.appendChild(script)\n          }\n        })\n        ",
       "moduleName": "modules/app",
-      "usedIn": [
-        "js/src/plugins.ts + 101 modules"
-      ],
-      "version": "*"
+      "alias": "@pimcore/studio-ui-bundle",
+      "entry": "*"
     },
     {
-      "alias": "@pimcore/studio-ui-bundle",
-      "consumingFederationContainerName": "oronts_asset_pilot_bundle",
       "federationContainerName": "promise new Promise((resolve, reject) => {\n          const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl\n          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {\n            throw new Error('Studio UI remote URL is unavailable')\n          }\n\n          const isAlreadyInitializedError = (error) => {\n            return typeof error === 'object'\n              && error !== null\n              && typeof error.message === 'string'\n              && error.message.toLowerCase().includes('already been initialized')\n          }\n\n          const resolveContainer = () => {\n            const container = window['pimcore_studio_ui_bundle']\n            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {\n              throw new Error('Studio UI remote container did not initialize')\n            }\n            resolve({\n              get: (request) => container.get(request),\n              init: (...args) => {\n                try {\n                  const result = container.init(...args)\n                  if (result && typeof result.catch === 'function') {\n                    return result.catch((error) => {\n                      if (isAlreadyInitializedError(error)) return undefined\n                      throw error\n                    })\n                  }\n                  return result\n                } catch (error) {\n                  if (isAlreadyInitializedError(error)) return undefined\n                  throw error\n                }\n              }\n            })\n          }\n\n          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href\n          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)\n          if (existing && window['pimcore_studio_ui_bundle']) {\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n            return\n          }\n\n          const script = existing ?? document.createElement('script')\n          const timeout = window.setTimeout(() => {\n            reject(new Error('Studio UI remote loading timed out'))\n          }, 15000)\n          script.addEventListener('load', () => {\n            window.clearTimeout(timeout)\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n          }, { once: true })\n          script.addEventListener('error', () => {\n            window.clearTimeout(timeout)\n            reject(new Error('Studio UI remote failed to load'))\n          }, { once: true })\n          if (!existing) {\n            script.src = absoluteRemoteUrl\n            document.head.appendChild(script)\n          }\n        })\n        ",
       "moduleName": "modules/auth",
-      "usedIn": [
-        "js/src/plugins.ts + 101 modules"
-      ],
-      "version": "*"
+      "alias": "@pimcore/studio-ui-bundle",
+      "entry": "*"
     },
     {
-      "alias": "@pimcore/studio-ui-bundle",
-      "consumingFederationContainerName": "oronts_asset_pilot_bundle",
       "federationContainerName": "promise new Promise((resolve, reject) => {\n          const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl\n          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {\n            throw new Error('Studio UI remote URL is unavailable')\n          }\n\n          const isAlreadyInitializedError = (error) => {\n            return typeof error === 'object'\n              && error !== null\n              && typeof error.message === 'string'\n              && error.message.toLowerCase().includes('already been initialized')\n          }\n\n          const resolveContainer = () => {\n            const container = window['pimcore_studio_ui_bundle']\n            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {\n              throw new Error('Studio UI remote container did not initialize')\n            }\n            resolve({\n              get: (request) => container.get(request),\n              init: (...args) => {\n                try {\n                  const result = container.init(...args)\n                  if (result && typeof result.catch === 'function') {\n                    return result.catch((error) => {\n                      if (isAlreadyInitializedError(error)) return undefined\n                      throw error\n                    })\n                  }\n                  return result\n                } catch (error) {\n                  if (isAlreadyInitializedError(error)) return undefined\n                  throw error\n                }\n              }\n            })\n          }\n\n          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href\n          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)\n          if (existing && window['pimcore_studio_ui_bundle']) {\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n            return\n          }\n\n          const script = existing ?? document.createElement('script')\n          const timeout = window.setTimeout(() => {\n            reject(new Error('Studio UI remote loading timed out'))\n          }, 15000)\n          script.addEventListener('load', () => {\n            window.clearTimeout(timeout)\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n          }, { once: true })\n          script.addEventListener('error', () => {\n            window.clearTimeout(timeout)\n            reject(new Error('Studio UI remote failed to load'))\n          }, { once: true })\n          if (!existing) {\n            script.src = absoluteRemoteUrl\n            document.head.appendChild(script)\n          }\n        })\n        ",
       "moduleName": "api",
-      "usedIn": [
-        "js/src/plugins.ts + 101 modules"
-      ],
-      "version": "*"
+      "alias": "@pimcore/studio-ui-bundle",
+      "entry": "*"
     },
     {
-      "alias": "@pimcore/studio-ui-bundle",
-      "consumingFederationContainerName": "oronts_asset_pilot_bundle",
       "federationContainerName": "promise new Promise((resolve, reject) => {\n          const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl\n          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {\n            throw new Error('Studio UI remote URL is unavailable')\n          }\n\n          const isAlreadyInitializedError = (error) => {\n            return typeof error === 'object'\n              && error !== null\n              && typeof error.message === 'string'\n              && error.message.toLowerCase().includes('already been initialized')\n          }\n\n          const resolveContainer = () => {\n            const container = window['pimcore_studio_ui_bundle']\n            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {\n              throw new Error('Studio UI remote container did not initialize')\n            }\n            resolve({\n              get: (request) => container.get(request),\n              init: (...args) => {\n                try {\n                  const result = container.init(...args)\n                  if (result && typeof result.catch === 'function') {\n                    return result.catch((error) => {\n                      if (isAlreadyInitializedError(error)) return undefined\n                      throw error\n                    })\n                  }\n                  return result\n                } catch (error) {\n                  if (isAlreadyInitializedError(error)) return undefined\n                  throw error\n                }\n              }\n            })\n          }\n\n          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href\n          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)\n          if (existing && window['pimcore_studio_ui_bundle']) {\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n            return\n          }\n\n          const script = existing ?? document.createElement('script')\n          const timeout = window.setTimeout(() => {\n            reject(new Error('Studio UI remote loading timed out'))\n          }, 15000)\n          script.addEventListener('load', () => {\n            window.clearTimeout(timeout)\n            try {\n              resolveContainer()\n            } catch (error) {\n              reject(error)\n            }\n          }, { once: true })\n          script.addEventListener('error', () => {\n            window.clearTimeout(timeout)\n            reject(new Error('Studio UI remote failed to load'))\n          }, { once: true })\n          if (!existing) {\n            script.src = absoluteRemoteUrl\n            document.head.appendChild(script)\n          }\n        })\n        ",
       "moduleName": "modules/element",
-      "usedIn": [
-        "js/src/plugins.ts + 101 modules"
-      ],
-      "version": "*"
+      "alias": "@pimcore/studio-ui-bundle",
+      "entry": "*"
     }
   ],
   "exposes": [
     {
-      "path": ".",
       "id": "oronts_asset_pilot_bundle:.",
       "name": ".",
-      "requires": [
-        "react",
-        "react-dom",
-        "i18next",
-        "react-i18next",
-        "antd"
-      ],
-      "file": "js/src/plugins.ts",
       "assets": {
         "js": {
           "sync": [
-            "static/js/async/__federation_expose_default_export.6036c153.js"
+            "static/js/async/__federation_expose_default_export.e11d6550.js"
           ],
           "async": []
         },
@@ -246,7 +182,8 @@
           "sync": [],
           "async": []
         }
-      }
+      },
+      "path": "."
     }
   ]
 }

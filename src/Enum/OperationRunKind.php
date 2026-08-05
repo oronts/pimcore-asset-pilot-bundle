@@ -10,4 +10,5 @@ enum OperationRunKind: string
     case Reorganize = 'reorganize';
     case Replay = 'replay';
     case DuplicateMerge = 'duplicate-merge';
+    case Simulation = 'simulation';
 }

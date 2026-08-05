@@ -4,6 +4,7 @@ import { BulkOrganizeForm } from './bulk-organize-form'
 import { ReplayFailuresForm } from './replay-failures-form'
 import { OperationStatus } from './operation-status'
 import { ReorganizeForm } from './reorganize-form'
+import { SimulationsPanel } from './simulations-panel'
 import { RecentOperationRuns } from './recent-operation-runs'
 import { OperationRecoveryPanel } from './operation-recovery-panel'
 import { DeliveryRetryPanel } from './delivery-retry-panel'
@@ -17,6 +18,8 @@ export const OperationsTab: React.FC = () => (
     <ReplayFailuresForm />
     <div style={{ borderTop: '1px solid var(--ap-color-border-secondary)' }} />
     <ReorganizeForm />
+    <div style={{ borderTop: '1px solid var(--ap-color-border-secondary)' }} />
+    <SimulationsPanel />
     <div style={{ borderTop: '1px solid var(--ap-color-border-secondary)' }} />
     <RecentOperationRuns />
     <div style={{ borderTop: '1px solid var(--ap-color-border-secondary)' }} />

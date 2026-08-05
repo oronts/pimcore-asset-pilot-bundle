@@ -711,6 +711,25 @@ class OpenApiAssetManagementSpecification
     ],
 )]
 #[OA\Post(
+    path: '{prefix}/asset-pilot/operations/simulate',
+    operationId: 'asset_pilot_operations_simulate',
+    tags: ['Asset Pilot'],
+    parameters: [new OA\Parameter(ref: '#/components/parameters/StudioPrefix')],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(type: 'object', required: ['objectId'], properties: [
+        new OA\Property(property: 'objectId', type: 'integer', minimum: 1, description: 'The data object whose organization is simulated and recorded as a terminal run.'),
+    ])),
+    responses: [
+        new OA\Response(response: 200, description: 'Simulation recorded (no mutation); the run holds the previewed moves', content: new OA\JsonContent(type: 'object', required: ['runId', 'operations'], properties: [
+            new OA\Property(property: 'runId', type: 'string', nullable: true, pattern: '^[a-f0-9]{32}$', description: 'The recorded simulation run id, or null when nothing would move.'),
+            new OA\Property(property: 'operations', type: 'array', items: new OA\Items(ref: '#/components/schemas/MoveOperationPreview')),
+            new OA\Property(property: 'message', type: 'string', nullable: true),
+        ])),
+        new OA\Response(response: 400, description: 'Invalid JSON or objectId', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 403, description: 'View or object access permission required', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 404, description: 'Object not found', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+    ],
+)]
+#[OA\Post(
     path: '{prefix}/asset-pilot/operations/replay',
     operationId: 'asset_pilot_operations_replay',
     tags: ['Asset Pilot'],
@@ -914,13 +933,14 @@ class OpenApiAssetManagementSpecification
     parameters: [
         new OA\Parameter(ref: '#/components/parameters/StudioPrefix'),
         new OA\Parameter(name: 'limit', in: 'query', schema: new OA\Schema(type: 'integer', minimum: 1, maximum: 100, default: 20)),
+        new OA\Parameter(name: 'kind', in: 'query', required: false, description: 'Filter to one operation run kind (for example simulation).', schema: new OA\Schema(type: 'string', enum: ['organize', 'reorganize', 'replay', 'duplicate-merge', 'simulation'])),
     ],
     responses: [
         new OA\Response(response: 200, description: 'Actor-scoped recent operation runs', content: new OA\JsonContent(type: 'object', required: ['items', 'limit'], properties: [
             new OA\Property(property: 'items', type: 'array', items: new OA\Items(ref: '#/components/schemas/OperationRunSummary')),
             new OA\Property(property: 'limit', type: 'integer', minimum: 1, maximum: 100),
         ])),
-        new OA\Response(response: 400, description: 'Limit is not an integer between 1 and 100', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
+        new OA\Response(response: 400, description: 'Limit or kind filter is invalid', content: new OA\JsonContent(ref: '#/components/schemas/Error')),
         new OA\Response(response: 403, description: 'View permission required'),
     ],
 )]

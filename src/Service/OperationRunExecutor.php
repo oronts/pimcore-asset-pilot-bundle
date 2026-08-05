@@ -36,6 +36,8 @@ class OperationRunExecutor implements OperationRunExecutorInterface
             OperationRunKind::Reorganize,
             OperationRunKind::Replay => $this->dispatchOrganization($runId, $run, $actor),
             OperationRunKind::DuplicateMerge => $this->resumeDuplicateMerge($runId, $actor),
+            // A simulation is a terminal record; supports() excludes it, so retry rejects it before this runs.
+            OperationRunKind::Simulation => throw new \LogicException('A simulation run is never dispatched or retried.'),
         };
     }
 

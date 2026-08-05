@@ -23,8 +23,8 @@ class OpenApiSpecificationTest extends TestCase
         $document = $this->document();
         $operations = iterator_count($this->operations($document));
 
-        self::assertSame(57, count($document['paths']));
-        self::assertSame(58, $operations);
+        self::assertSame(58, count($document['paths']));
+        self::assertSame(59, $operations);
         self::assertArrayHasKey('{prefix}/asset-pilot/health', $document['paths']);
         self::assertArrayHasKey('{prefix}/asset-pilot/health/readiness', $document['paths']);
         self::assertArrayHasKey('{prefix}/asset-pilot/assets/{id}/lock', $document['paths']);

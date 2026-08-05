@@ -43,6 +43,7 @@ import type {
   DriftResponse,
   OperationRun,
   OperationRunListResponse,
+  SimulateResponse,
   OperationRunMutationResponse,
   OperationRunRetryResponse,
   OperationRecoveryResponse,
@@ -177,6 +178,14 @@ export const assetPilotApi = {
     }),
   getOperationRuns: (limit = 20, signal?: AbortSignal) =>
     request<OperationRunListResponse>(`/operations/runs${buildQuery({ limit })}`, { signal }),
+  getSimulations: (limit = 20, signal?: AbortSignal) =>
+    request<OperationRunListResponse>(`/operations/runs${buildQuery({ limit, kind: 'simulation' })}`, { signal }),
+  simulate: (objectId: number, signal?: AbortSignal) =>
+    request<SimulateResponse>('/operations/simulate', {
+      method: 'POST',
+      body: JSON.stringify({ objectId }),
+      signal,
+    }),
   getOperationRun: (id: string, signal?: AbortSignal) =>
     request<OperationRun>(`/operations/runs/${encodeURIComponent(id)}`, { signal }),
   cancelOperationRun: (id: string) =>

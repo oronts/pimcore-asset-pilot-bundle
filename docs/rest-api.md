@@ -225,10 +225,11 @@ unknown run returns `404`.
 | `POST` | `/operations/bulk-preview` | View | Paginated object-selector browser; it does not create an apply plan |
 | `POST` | `/operations/replay` | Operate | Preview and re-run failed objects through a signed apply plan (`{since?, rule?, class?, limit?, dryRun?, planToken?, async?}`) |
 | `POST` | `/operations/reorganize` | Operate | Preview and re-organize owners of assets in a folder through a signed apply plan (`{folder, limit?, dryRun?, planToken?, async?}`) |
+| `POST` | `/operations/simulate` | View | Record what organizing one object (`{objectId}`) would move as a durable, terminal `simulation` run without mutating anything. Returns `{runId, operations[]}` (`runId` is null when nothing would move). The move diff is read later from the run's item state |
 | `POST` | `/operations/recovery` | Admin | Preview stale move/revert journal classifications or apply the exact signed review (`{limit?, apply?, planToken?}`) |
 | `POST` | `/operations/deliveries/retry` | Admin | Preview dead durable deliveries or atomically requeue the exact signed review (`{limit?, apply?, planToken?}`) |
 | `GET` | `/operations/status` | View | Operation statistics |
-| `GET` | `/operations/runs` | View | List the current actor's recent operation runs (`?limit`, default 20, max 100). Returns `{items[], limit}` without per-run item details |
+| `GET` | `/operations/runs` | View | List the current actor's recent operation runs (`?limit`, default 20, max 100; optional `?kind=` to filter to one run kind, for example `simulation`). Returns `{items[], limit}` without per-run item details |
 | `GET` | `/operations/runs/{id}` | View | Read an actor-scoped queued or completed operation run |
 | `POST` | `/operations/runs/{id}/cancel` | Operate | Cancel a `pending_dispatch`, queued, or running run; pending and queued runs become `cancelled` immediately (a running run becomes `cancel_requested`). A listener-created automatic organize run starts in `pending_dispatch` until the maintenance relay publishes it |
 | `POST` | `/operations/runs/{id}/retry` | Operate | Retry blocked, failed, or cancelled items as a new actor-scoped run; object work retains immutable-plan fingerprints and duplicate merges resume their persisted phases. Skipped items are terminal and are not retried. |

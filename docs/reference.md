@@ -155,7 +155,7 @@ operations have stricter requirements than the usual View/Operate split (see [Pe
 | GET | `/storage/trends` | Admin |
 | POST | `/folders/empty/delete` | Operate |
 | POST | `/organize`, `/organize/bulk` | Operate |
-| POST | `/organize/explain`, `/operations/bulk-preview` | View |
+| POST | `/organize/explain`, `/operations/bulk-preview`, `/operations/simulate` | View |
 | POST | `/operations/replay`, `/operations/reorganize` | Operate |
 | GET | `/operations/status` | View |
 | GET | `/operations/runs`, `/operations/runs/{id}` | View |

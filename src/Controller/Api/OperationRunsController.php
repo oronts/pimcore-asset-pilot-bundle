@@ -41,9 +41,15 @@ final class OperationRunsController
             return new JsonResponse(['error' => 'The limit must be an integer between 1 and 100.'], Response::HTTP_BAD_REQUEST);
         }
 
+        $kind = null;
+        $rawKind = $request->query->get('kind');
+        if ($rawKind !== null && (!is_string($rawKind) || ($kind = OperationRunKind::tryFrom($rawKind)) === null)) {
+            return new JsonResponse(['error' => 'The kind filter must be a known operation run kind.'], Response::HTTP_BAD_REQUEST);
+        }
+
         $runs = array_map(
             fn (array $run): array => $this->serializeSummary($run),
-            $this->runs->recent($this->authorization->currentActor(), (int) $rawLimit),
+            $this->runs->recent($this->authorization->currentActor(), (int) $rawLimit, $kind),
         );
 
         return new JsonResponse(['items' => $runs, 'limit' => (int) $rawLimit]);

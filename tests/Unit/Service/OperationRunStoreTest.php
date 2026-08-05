@@ -427,6 +427,53 @@ final class OperationRunStoreTest extends TestCase
     }
 
     #[Test]
+    public function recordsASimulationAsACompletedRunThatIsNeverDueForDispatch(): void
+    {
+        $actor = ActorContext::user(7);
+        $runId = $this->store->create(
+            OperationRunKind::Simulation,
+            $actor,
+            [[
+                'key' => 'asset:12',
+                'type' => 'asset',
+                'id' => 12,
+                'fingerprint' => 'fp12',
+                'state' => ['from' => '/Uploads/a.jpg', 'to' => '/Photos/a.jpg', 'ruleName' => 'images'],
+            ]],
+            ['objectId' => 99],
+            initialStatus: OperationRunStatus::Completed,
+        );
+
+        $run = $this->requiredRun($runId, $actor);
+        self::assertSame(OperationRunKind::Simulation->value, $run['kind']);
+        self::assertSame(OperationRunStatus::Completed->value, $run['status']);
+        self::assertSame(1, (int) $run['total_count']);
+        self::assertSame(1, (int) $run['processed_count'], 'a terminal run reports processed == total, not a stalled 0/N');
+        self::assertSame(1, (int) $run['succeeded_count']);
+        self::assertSame(
+            ['from' => '/Uploads/a.jpg', 'to' => '/Photos/a.jpg', 'ruleName' => 'images'],
+            $run['items'][0]['state_payload'],
+            'the from/to diff is recorded in item state for later review',
+        );
+        self::assertSame([], $this->store->dueForDispatch(50), 'a completed simulation is never published to a worker');
+    }
+
+    #[Test]
+    public function recentFiltersByKindWhenRequested(): void
+    {
+        $actor = ActorContext::user(7);
+        $item = [['key' => 'asset:1', 'type' => 'asset', 'id' => 1]];
+        $this->store->create(OperationRunKind::Organize, $actor, $item, initialStatus: OperationRunStatus::Completed);
+        $simulation = $this->store->create(OperationRunKind::Simulation, $actor, $item, initialStatus: OperationRunStatus::Completed);
+
+        self::assertCount(2, $this->store->recent($actor), 'the unfiltered listing returns both runs');
+
+        $simulations = $this->store->recent($actor, 20, OperationRunKind::Simulation);
+        self::assertCount(1, $simulations);
+        self::assertSame($simulation, $simulations[0]['id'], 'the kind filter returns only simulation runs');
+    }
+
+    #[Test]
     public function invalidItemRollsBackTheEntireCreate(): void
     {
         try {

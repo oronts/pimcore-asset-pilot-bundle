@@ -95,7 +95,7 @@ export interface OrganizeResponse {
   observerWarnings?: string[]
 }
 
-export type OperationRunKind = 'organize' | 'reorganize' | 'replay' | 'duplicate-merge'
+export type OperationRunKind = 'organize' | 'reorganize' | 'replay' | 'duplicate-merge' | 'simulation'
 
 export type OperationRunStatus =
   | 'pending_dispatch'
@@ -152,6 +152,12 @@ export interface OperationRun extends OperationRunSummary {
 export interface OperationRunListResponse {
   items: OperationRunSummary[]
   limit: number
+}
+
+export interface SimulateResponse {
+  runId: string | null
+  operations: MoveOperation[]
+  message?: string
 }
 
 export interface OperationRunMutationResponse {

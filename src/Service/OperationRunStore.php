@@ -53,6 +53,10 @@ final class OperationRunStore implements OperationRunStoreInterface
                 $attempt = (int) $parentAttempt + 1;
             }
 
+            // A run created directly in a terminal state (a recorded simulation) has already "processed" all
+            // of its items, so keep the terminal invariant every other completed run holds (processed == total)
+            // instead of persisting a completed-but-0-processed row that reads as stalled.
+            $processed = $initialStatus->isTerminal() ? count($items) : 0;
             $this->connection->insert(Installer::TABLE_OPERATION_RUN, [
                 'id' => $runId,
                 'kind' => $kind->value,
@@ -60,8 +64,8 @@ final class OperationRunStore implements OperationRunStoreInterface
                 'actor_user_id' => $actor->userId,
                 'status' => $initialStatus->value,
                 'total_count' => count($items),
-                'processed_count' => 0,
-                'succeeded_count' => 0,
+                'processed_count' => $processed,
+                'succeeded_count' => $processed,
                 'skipped_count' => 0,
                 'blocked_count' => 0,
                 'failed_count' => 0,
@@ -717,7 +721,7 @@ final class OperationRunStore implements OperationRunStoreInterface
     }
 
     /** @return list<array<string, mixed>> */
-    public function recent(ActorContext $actor, int $limit = 20): array
+    public function recent(ActorContext $actor, int $limit = 20, ?OperationRunKind $kind = null): array
     {
         [$where, $params] = $this->actorWhere($actor);
         $query = $this->connection->createQueryBuilder()
@@ -727,6 +731,10 @@ final class OperationRunStore implements OperationRunStoreInterface
             ->orderBy('created_at', 'DESC')
             ->addOrderBy('id', 'DESC')
             ->setMaxResults(min(100, max(1, $limit)));
+        if ($kind !== null) {
+            $query->andWhere('kind = ?');
+            $params[] = $kind->value;
+        }
         foreach ($params as $index => $parameter) {
             $query->setParameter($index, $parameter);
         }

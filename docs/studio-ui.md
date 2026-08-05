@@ -7,6 +7,11 @@ Experience & E-commerce → Asset Pilot. It has a tab per feature (Dashboard, Ru
 Log, Unused Assets, Duplicates, Integrity, Quarantine, Storage, Empty Folders, Drift, Asset
 Management).
 
+Asset Pilot also adds an "Organize with Asset Pilot" item to the Studio asset-tree context menu (right
+click a folder). It opens the dashboard on the Operations tab with the clicked folder pre-filled into the
+Reorganize form, so the organize still runs through the reviewed preview and apply. The item appears only
+on folder nodes and only for actors who can operate.
+
 ![Asset Pilot in Pimcore Studio: the Unused Assets gallery, with filters, confidence badges, page-size control, and the documentation link](images/unused-assets-gallery.png)
 
 The tabs:
@@ -15,7 +20,7 @@ The tabs:
 |-----|-------------|
 | **Dashboard** | Statistics overview (organized, pending, failed, skipped, and rules counts), an operations-by-status donut and an assets-by-class bar chart, a health panel (database schema, rule config, shared cache, required consumers and queues, dependency tracking, stale/recovery-required journal entries, overdue/dead observer deliveries, and stuck operation runs awaiting dispatch or queued past the backlog threshold), class breakdown table, recent operations list |
 | **Rules** | View all configured rules with priority, strategy, target path. Export the rule set as a portable artifact. An overlap panel warns about rules competing for the same assets. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. Compare modal to diff the running rule set against an uploaded exported rule artifact (added, removed, changed, and unchanged rules). |
-| **Operations** | Single-object organize, bulk organize with paginated selection, replay, reorganize, durable run status/cancel/retry, and system status. Admins also get signed preview/apply panels for stale journal recovery and exact dead-delivery retry. |
+| **Operations** | Single-object organize, bulk organize with paginated selection, replay, reorganize, Simulate & save (record a dry-run for an object as a durable, non-mutating `simulation` run and review its from/to move diff), durable run status/cancel/retry, and system status. Admins also get signed preview/apply panels for stale journal recovery and exact dead-delivery retry. |
 | **Audit Log** | Durable operation history. Sort and filter by class, status, and rule name, export CSV, and revert eligible operations. |
 | **Unused Assets** | Confidence-scored unused assets in a list or gallery view with color-coded badges. Filter by type, extensions, date range, folder, and confidence level. User-adjustable page size and CSV export. Bulk delete, move, or quarantine the selected assets; locked rows may be selected but are skipped by those actions (a protected-skipped count is shown), plus bulk lock and bulk unlock the selection. Filter presets. |
 | **Duplicates** | Browse indexed byte-identical groups in a list or gallery view, filter by minimum copy count and asset type, export CSV, preview a merge, select the canonical asset and disposition strategy, then confirm the merge. |
