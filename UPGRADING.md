@@ -58,6 +58,11 @@ Bulk organization and duplicate merge now use `asset_pilot_operation_run` and
 phase so an interrupted merge can resume with `asset-pilot:merge-duplicates --run-id=... --apply`
 or the actor-scoped REST run ID.
 
+Automatic organization gains a durable per-object coalescing record in the new
+`asset_pilot_automatic_organize_intent` table (the fifteenth Asset Pilot table), so concurrent saves of
+the same object, including two inside one source transaction, fold into a single pending run instead of
+creating duplicate runs. The table is created by the migration and needs no data step.
+
 ### Timestamp normalization
 
 Version 2.0 normalizes every timestamp writer to an explicit UTC clock and serializes every REST
@@ -280,7 +285,29 @@ fan-out itself is replaceable through `NotificationDispatcherInterface`.
 
 Direct `OperationRunStoreInterface` and `OrganizeDispatcherInterface` replacements now receive
 `OperationRunKind` rather than arbitrary kind strings. Serialize the enum's `value` only at database, REST, or
-message boundaries.
+message boundaries. The enum also gains a `Simulation` case in 2.0; a custom `OperationRunExecutorInterface`
+or any exhaustive `match` on the enum must handle it. A simulation run is a recorded terminal run that is
+never dispatched or retried.
+
+### New optional capabilities
+
+These 2.0 additions are opt-in and need no upgrade action; they are listed here so you know they are
+available after upgrading:
+
+- `convert_format` rule action: re-encode an organized image asset to `png`, `jpeg`, `gif`, or `webp`
+  through a pluggable converter (a GD-backed converter ships by default; add Imagick, vips, or
+  external-binary encoders with `AssetConverterInterface`). See
+  [docs/extending.md](docs/extending.md#rule-actions-do-more-than-move) and
+  [docs/overriding.md](docs/overriding.md).
+- `asset-pilot:distribute-from-csv <file>`: move existing assets into target folders from a CSV mapping,
+  previewing by default and moving with `--apply`. See [docs/commands.md](docs/commands.md).
+- Persisted dry-run simulations: `POST /operations/simulate` records what organizing a data object would
+  move as a terminal `simulation` run, and the Studio Operations tab shows the recorded source and target
+  paths. `GET /operations/runs` gains an optional `kind` filter. See [docs/rest-api.md](docs/rest-api.md)
+  and [docs/studio-ui.md](docs/studio-ui.md).
+- Studio asset-tree context action "Organize with Asset Pilot" opens the dashboard on the Reorganize form
+  pre-filled with the clicked folder, then runs through the usual preview and apply. See
+  [docs/studio-ui.md](docs/studio-ui.md).
 
 ### Rollback
 

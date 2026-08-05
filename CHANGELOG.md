@@ -5,59 +5,42 @@ All notable changes to Asset Pilot are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - unreleased
+
+Asset Pilot 2.0 makes every destructive operation durable, reviewable, and recoverable. Automatic
+organization moves to a transactional producer outbox, every mutating workflow runs through a signed
+single-use preview and apply, and the compiled Studio remote now ships inside the Composer archive so a
+production install needs no JavaScript toolchain. This is a major release with breaking changes and a new
+operational requirement (a scheduled `pimcore:maintenance`). Read [UPGRADING.md](UPGRADING.md) before you
+deploy.
 
 ### Added
 
-- Dry-run simulations (P3). A new `POST /operations/simulate` records what organizing a data object would
-  move as a durable, terminal "simulation" operation run (a new `simulation` run kind) without mutating
-  anything, so the diff can be reviewed later. The Operations Studio tab gains a "Simulate & save" action
-  and a recorded-simulations panel that shows each simulated asset's from/to path. `GET /operations/runs`
-  gains an optional `?kind=` filter. The recorded run items are built through the overridable
-  `OperationsController::simulationItems()` seam. Simulation runs are View-gated, terminal, and never
-  dispatched, so they cost no worker and are pruned by the usual run retention.
-- Studio tree organize action (F9). Right-clicking an asset folder in the Studio tree offers "Organize
+- Asset format conversion. A new `convert_format` rule action re-encodes an image asset to a target
+  format (`png`, `jpeg`, `gif`, or `webp`) after it is organized, through a pluggable converter seam:
+  implement `AssetConverterInterface` and tag it `oronts_asset_pilot.asset_converter` to add Imagick,
+  vips, or external-binary encoders. A GD-backed converter ships by default. The action is best-effort by
+  contract: a non-image asset, an asset already in the target format, a missing encoder, or a source the
+  converter cannot decode all skip without failing the organize. The resolver is the overridable
+  `AssetConverterResolverInterface`.
+- CSV asset distribution. A new `asset-pilot:distribute-from-csv <file>` command moves existing assets
+  into target folders from a CSV mapping, resolving an asset by id or path and a target folder by id or
+  path (configurable `--asset-column` and `--target-column`), for one-off imports and migrations that
+  place assets by an external plan rather than by rules. It previews by default and moves only with
+  `--apply`; every row is reported (planned, moved, already in place, unknown asset, missing target, or
+  invalid) so one bad row never aborts the run, each move honors the asset lock and excluded folders and
+  is audited, and the behavior is overridable through `CsvDistributionServiceInterface`.
+- Persisted dry-run simulations. A new `POST /operations/simulate` records the moves that organizing a
+  data object would make as a durable, terminal operation run (a new `simulation` run kind) without
+  changing anything, so the diff can be reviewed later. The Studio Operations tab gains a "Simulate and
+  save" action and a recorded-simulations panel that shows each simulated asset's source and target path.
+  `GET /operations/runs` gains an optional `kind` filter. Simulation runs are read-only (View permission),
+  terminal, and never dispatched, so they cost no worker and are pruned by the usual run retention. The
+  recorded run items are built through the overridable `OperationsController::simulationItems()` seam.
+- Studio asset-tree organize action. Right-clicking an asset folder in the Studio tree offers "Organize
   with Asset Pilot", which opens the dashboard on the Operations tab with the clicked folder pre-filled
   into the reviewed Reorganize form. It never mutates in one click: the organize still runs through the
-  existing preview and apply. The menu item registers through the Studio `ContextMenuRegistry` on the
-  asset-tree slot and is gated to folder nodes for actors who can operate.
-- CSV asset distribution (F23). A new `asset-pilot:distribute-from-csv <file>` command moves existing
-  assets into target folders from a CSV mapping (configurable `--asset-column`/`--target-column`, an
-  asset id or path, a target folder id or path), for one-off imports and migrations that place assets by
-  an external plan rather than by rules. It previews by default and moves only with `--apply`; every row
-  is reported (planned, moved, skipped-already-there, unknown asset, missing target, or invalid) so one
-  bad row never aborts the run, each move is guarded and audited, and the behavior is overridable via
-  `CsvDistributionServiceInterface`.
-- Asset format conversion (F17). A new `convert_format` rule action re-encodes an image asset to a
-  target format (png, jpeg, gif, webp) after it is organized, through a pluggable converter seam:
-  implement `AssetConverterInterface` and tag it `oronts_asset_pilot.asset_converter` to add Imagick,
-  vips, or external-binary encoders. The bundle ships a GD-backed default. The action is best-effort by
-  contract: a non-image asset, an asset already in the target format, a missing binary, or a converter
-  that cannot decode the source all skip without failing the organize. The resolver is exposed as the
-  overridable `AssetConverterResolverInterface`.
-
-### Changed
-
-- Automatic organize producers now bind a durable per-object coalescing intent (a new
-  `asset_pilot_automatic_organize_intent` table) so concurrent saves of the same object, including two
-  inside one source transaction, fold into a single pending run instead of creating duplicate runs. The
-  intent and its pending run are written in one transaction; a save that folds in through the fast cache
-  path is recorded durably too; the drain and the maintenance backstop rotate a coalesced save by
-  atomically re-recording a fresh pending run rather than an ephemeral dispatch, so a crash, an
-  undispatchable or exhausted run, or a purged run never loses it; and an outbox write that fails inside
-  a caller-owned transaction now rolls back with the source save instead of being swallowed.
-
-### Security
-
-- Refreshed the Studio npm lockfile to clear the `brace-expansion`, `fast-uri`, and `dompurify`
-  advisories. The remaining transitive `react-router` Moderate advisories are provided by the host
-  through `@pimcore/studio-ui-bundle` 2025.4 (not bundled in this remote; see SECURITY.md) and are
-  deferred to the coordinated Pimcore Studio 2026.1 upgrade.
-
-## [2.0.0] - Unreleased
-
-### Added
-
+  existing preview and apply. The item is gated to folder nodes and to actors who can operate.
 - Mandatory pre-mutation operation journal with persisted intent, actor, recovery metadata, and
   outcome-specific prepared deliveries.
 - Database-backed durable observer outbox with exact delivery messages, leases, bounded retry,
@@ -107,16 +90,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Automatic organization (data-object save and asset-upload listeners) now uses a transactional producer
   outbox. The listener records a committed `pending_dispatch` operation run inside the (possibly
-  consumer-owned) save transaction instead of publishing a Messenger message directly, and
-  `OrganizeDispatchRelayTask` (a Pimcore maintenance task) publishes only committed pending runs after the
-  transaction commits. This removes the pre-commit publish race, so a rolled-back save leaves no phantom
-  message and a worker never sees a run before it is committed. Automatic organization now requires
-  `pimcore:maintenance` to be scheduled; see UPGRADING.md. Manual and controller-triggered organization
-  publish directly and are unaffected.
+  consumer-owned) save transaction instead of publishing a Messenger message directly, and a Pimcore
+  maintenance task publishes only committed pending runs after the transaction commits. This removes the
+  pre-commit publish race, so a rolled-back save leaves no phantom message and a worker never sees a run
+  before it is committed. Automatic organization now requires `pimcore:maintenance` to be scheduled; see
+  UPGRADING.md. Manual and controller-triggered organization publish directly and are unaffected.
+- Automatic organize producers bind a durable per-object coalescing intent (the
+  `asset_pilot_automatic_organize_intent` table) so concurrent saves of the same object, including two
+  inside one source transaction, fold into a single pending run instead of creating duplicate runs. The
+  intent and its pending run are written in one transaction; a save that folds in through the fast cache
+  path is recorded durably too; the drain and the maintenance backstop rotate a coalesced save by
+  atomically re-recording a fresh pending run rather than an ephemeral dispatch, so a crash, an
+  undispatchable or exhausted run, or a purged run never loses it; and an outbox write that fails inside a
+  caller-owned transaction now rolls back with the source save instead of being swallowed.
 - The `operation_run_backlog` health check and its backlog count now include `pending_dispatch` runs, so a
   stranded producer backlog (for example when `pimcore:maintenance` is not scheduled) is visible instead of
   silent.
-
 - Conflict strategies now receive an explicit `dryRun` flag; custom decisions and preview listeners
   have a documented query-only contract.
 - Callback services now implement the focused auto-tagged `CallbackDecisionInterface`; configuration
@@ -144,8 +133,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added operation-journal health for stale or recovery-required operations and overdue or dead
   observer deliveries. Durable-delivery routing and both consumer heartbeats are required even when
   organization itself is synchronous.
-- Persisted journal, delivery, operation-run, plan-claim, dependency, and asset-deletion-fence state
-  across fourteen bundle-owned tables.
+- Persisted journal, delivery, operation-run, plan-claim, dependency, asset-deletion-fence, and
+  automatic-organize-intent state across fifteen bundle-owned tables.
 - Treat skipped operation-run items as deliberate terminal outcomes; retry is limited to blocked,
   failed, and cancelled items.
 - Ship the compiled Studio remote in the Composer archive so production installs do not require a
@@ -153,7 +142,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Support asset-referencing element saves inside a consumer-owned database transaction via a dedicated
   autocommit sidecar connection that carries the dirty marker, dependency edge, and deletion-fence
   read; the prior rejection of saves under an ambient transaction is removed. See UPGRADING.md for the
-  two documented limitations (same-transaction asset+reference creation, and phantom-edge over-block
+  two documented limitations (same-transaction asset and reference creation, and phantom-edge over-block
   after a rolled-back save).
 
 ### Fixed
@@ -193,11 +182,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Security
 
 - Removed vulnerable locked dependency versions and added release-blocking Composer and npm audits.
+- Updated `guzzlehttp/guzzle` to 7.15.2 to resolve CVE-2026-69245 and CVE-2026-69246 (noncanonical host
+  and cookie-domain handling in a transitive dependency).
+- Refreshed the Studio npm lockfile to clear the `brace-expansion`, `fast-uri`, and `dompurify`
+  advisories. The remaining transitive `react-router` advisories are provided by the host through
+  `@pimcore/studio-ui-bundle` (not bundled in this remote; see SECURITY.md) and are deferred to the
+  coordinated Pimcore Studio 2026.1 upgrade.
 - Pinned release workflow actions to immutable revisions.
 
 ### Upgrade notes
 
 Read [UPGRADING.md](UPGRADING.md) before deploying this release.
 
-[Unreleased]: https://github.com/oronts/pimcore-asset-pilot-bundle/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/oronts/pimcore-asset-pilot-bundle/compare/v1.1.0...v2.0.0
