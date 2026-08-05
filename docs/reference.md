@@ -100,7 +100,7 @@ Full tree and defaults in [Configuration](configuration.md).
 | `enabled` | bool | `true` | Toggle the rule |
 | `filters` | map | `{}` | `types`, `min_size`, `max_size`, `extensions` |
 | `options` | map | `{}` | Arbitrary per-rule data for custom code |
-| `actions` | list | `[]` | Post-move actions (`{type, ...}`); built-in `set_property`. See [Extending](extending.md#rule-actions-do-more-than-move) |
+| `actions` | list | `[]` | Post-move actions (`{type, ...}`); built-in `set_property` and `convert_format`. See [Extending](extending.md#rule-actions-do-more-than-move) |
 
 ## Commands
 
@@ -134,6 +134,7 @@ Full flags in [Commands](commands.md).
 | `asset-pilot:check-integrity` | Detect assets whose binary no longer renders (`--by-ids`, `--folder`, `--type`, `--extension`, `--limit`) |
 | `asset-pilot:heal-assets` | Preview healing/undo; apply the exact signed selection with `--apply --plan-token=...` (`--by-ids`, `--undo`, scan filters, or explicit `--all`) |
 | `asset-pilot:download-zip` | Build a zip of assets to a file for cron/workers (`--asset-ids`/`--folder-id`/`--object-ids`, `--non-recursive`, `--strategy`, `--thumbnail`, `--output`, `--force`) |
+| `asset-pilot:distribute-from-csv` | Move assets into target folders from a CSV mapping (`--asset-column`/`--target-column`); previews by default, moves with `--apply` |
 
 ## REST endpoints
 
@@ -256,7 +257,7 @@ Constants on `AssetPilotEvents`. Details in [DX](dx.md#events) and
 | `OperationDeliveryStatus` | `prepared`, `pending`, `processing`, `retry`, `delivered`, `dead`, `cancelled` |
 | `OperationKind` | `move`, `revert` |
 | `OperationRunItemStatus` | `queued`, `running`, `completed`, `blocked`, `skipped`, `failed`, `cancelled` |
-| `OperationRunKind` | `organize`, `reorganize`, `replay`, `duplicate-merge` |
+| `OperationRunKind` | `organize`, `reorganize`, `replay`, `duplicate-merge`, `simulation` |
 | `OperationRunStatus` | `pending_dispatch`, `queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `blocked`, `partial`, `failed` |
 | `QuarantineStatus` | `pending`, `committed` |
 | `RevertFailure` | `audit_entry_not_found`, `not_completed`, `asset_not_found`, `asset_locked`, `permission_denied`, `path_conflict`, `execution_failed`, `recovery_required` |
@@ -278,7 +279,7 @@ Tag a service to plug in. See [DX](dx.md#extension-points-tags) and [Extending](
 | `oronts_asset_pilot.twig_extension` | Twig `ExtensionInterface` |
 | `oronts_asset_pilot.expression_function_provider` | `ExpressionFunctionProviderInterface` |
 | `oronts_asset_pilot.health_check` | `HealthCheckInterface` |
-| `oronts_asset_pilot.rule_action` | `RuleActionInterface` (post-move actions, built-in `set_property`) |
+| `oronts_asset_pilot.rule_action` | `RuleActionInterface` (post-move actions, built-in `set_property` and `convert_format`) |
 | `oronts_asset_pilot.operation_observer` | `DurableOperationObserverInterface` (prepare before mutation, deliver after outcome, declare any required asset permission) |
 | `oronts_asset_pilot.integrity_checker` | `IntegrityCheckerInterface` (broken-asset detection; built-ins stream/image/document) |
 | `oronts_asset_pilot.notifier` | `NotifierInterface` (typed `Notification` transport; built-in Pimcore in-app notifier) |

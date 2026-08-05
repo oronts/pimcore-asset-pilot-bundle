@@ -134,7 +134,7 @@ flowchart TD
 
 ```
 src/
-├── Action/                 RuleActionInterface + set-property action beyond moving
+├── Action/                 RuleActionInterface + set-property and convert-format actions beyond moving
 ├── Api/                    RFC 3339 UTC serialization (ApiDateFormatter, OperationResponseAssembler)
 ├── Audit/                  Focused writer, query, export, retention contracts + AuditLogger default
 ├── Cache/                  Stampede-safe stats caching
@@ -370,5 +370,6 @@ heartbeat; maintenance then reconciles a running item whose lease expired
 and never a legitimately long-running or broker-queued run. Every synchronous run item now also holds
 a claim-token lease, so there is no leaseless running path left to reconcile by age. Duplicate merges use that payload to persist the reference-repoint
 and copy-disposition phase, allowing an interrupted run to resume without repeating a completed
-phase. The supported run kinds are `organize`, `reorganize`, `replay`, and `duplicate-merge`;
-unknown persisted kinds are not retryable.
+phase. The supported run kinds are `organize`, `reorganize`, `replay`, `duplicate-merge`, and
+`simulation` (a recorded terminal run that is never dispatched or retried); unknown persisted kinds
+are not retryable.

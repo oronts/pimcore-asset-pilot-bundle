@@ -564,6 +564,17 @@ For `property_type: bool`, `value` accepts a native boolean, `1`/`0`, or the tex
 `true`/`false`/`yes`/`no`/`on`/`off` (blank or unknown is rejected); this is the same canonical boolean
 contract the REST `bulk-property` endpoint documents (see [REST API](rest-api.md)).
 
+The built-in `convert_format` action re-encodes an image asset to a target `format` (`png`, `jpeg`, `gif`,
+or `webp`) after it is organized, through a pluggable converter seam. A GD-backed converter ships in the
+box; add Imagick, vips, or external-binary encoders by implementing `AssetConverterInterface` (see
+[Overriding](overriding.md)). It is best-effort by contract: a non-image asset, an asset already in the
+target format, a missing encoder, or a target-filename collision all skip without failing the organize.
+
+```yaml
+            actions:
+                - { type: convert_format, format: webp, quality: 82 }   # quality (1-100) is optional
+```
+
 Add your own action (e.g. assign a tag, derive any metadata, call an external system) by
 implementing `RuleActionInterface`; it is auto-tagged and selected by `getType()`:
 
