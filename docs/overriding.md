@@ -132,7 +132,20 @@ format (Imagick, vips, an external-binary encoder, DPI/color transforms); it is 
 container autoconfigures. The bundle ships a GD-backed default for png/jpeg/gif/webp. Resolution is
 best-effort by contract: when no available converter supports the requested format the action logs and
 leaves the asset unchanged, so a missing binary never fails an organize. Replace or decorate the resolver
-to change converter ordering, cache availability, or force a converter per format.
+to change converter ordering, cache availability, or force a converter per format. The `convert_format`
+action itself is a non-final `RuleActionInterface`; its `ConvertFormatAction::targetFilenameIsFree()` is a
+`protected` seam you can override to change how a re-encoded filename collision is detected before the save.
+
+`CsvDistributionServiceInterface` owns the `asset-pilot:distribute-from-csv` move contract. Alias it to your
+own implementation (or subclass `CsvDistributionService`, which is non-final) to change how a row resolves an
+asset or target, how the CSV is read, or the move itself. Its per-row protections are `protected` seams:
+`assetIsLocked()` (honours the configured lock property), `isInExcludedFolder()`, `resolveAsset()`,
+`resolveFolder()`, `move()`, and `auditMove()` are all overridable without touching the reporting loop.
+
+`OperationsController::simulationItems()` is the `protected` seam for the persisted dry-run simulation (P3):
+override it to enrich the run items a simulation records (for example DAM ids or dimensions) in each item's
+`state`, which the run-detail endpoint surfaces as the move diff, without changing the `POST /operations/simulate`
+contract.
 
 
 `DuplicateMergeServiceInterface::preview()` is the read-only capability. `merge()` is the apply
