@@ -340,7 +340,7 @@ bin/console asset-pilot:distribute-from-csv mapping.csv --apply
 bin/console asset-pilot:distribute-from-csv plan.csv --asset-column=sku_asset --target-column=folder --apply
 ```
 
-Moves existing assets into target folders from a CSV mapping (F23), for one-off imports and migrations
+Moves existing assets into target folders from a CSV mapping, for one-off imports and migrations
 that place assets by an external plan rather than by rules. The CSV needs a header row; the `--asset-column`
 (default `asset`) value resolves an asset by numeric id or path, and the `--target-column` (default
 `target`) value resolves the destination folder by id or path. Previews by default and moves only with

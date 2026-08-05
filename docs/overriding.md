@@ -142,7 +142,7 @@ asset or target, how the CSV is read, or the move itself. Its per-row protection
 `assetIsLocked()` (honours the configured lock property), `isInExcludedFolder()`, `resolveAsset()`,
 `resolveFolder()`, `move()`, and `auditMove()` are all overridable without touching the reporting loop.
 
-`OperationsController::simulationItems()` is the `protected` seam for the persisted dry-run simulation (P3):
+`OperationsController::simulationItems()` is the `protected` seam for the persisted dry-run simulation:
 override it to enrich the run items a simulation records (for example DAM ids or dimensions) in each item's
 `state`, which the run-detail endpoint surfaces as the move diff, without changing the `POST /operations/simulate`
 contract.
