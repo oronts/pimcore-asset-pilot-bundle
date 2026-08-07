@@ -2,69 +2,73 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useBrokenAssets } from '../../hooks/use-asset-pilot-api'
 import { usePermissions } from '../../hooks/use-permissions'
-import { useToast } from '../../hooks/use-toast'
-import { assetPilotApi } from '../../services/api'
+import type { BrokenAssetFilters } from '../../types'
 import { TableSkeleton } from '../shared/skeleton/table-skeleton'
 import { EmptyState } from '../shared/empty-state'
 import { ResponsiveTableWrapper } from '../shared/responsive-table-wrapper'
 import { Pagination } from '../shared/pagination'
 import { ExpandablePath } from '../shared/expandable-path'
-import { ConfirmDialog } from '../shared/confirm-dialog'
 import { OpenButton } from '../shared/open-button'
 import { GalleryCards, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { HealModal } from './heal-modal'
+import { HealHistory } from './heal-history'
+import { IntegrityFilters } from './integrity-filters'
+import { useRowSelection } from '../../hooks/use-row-selection'
 
 export const IntegrityTab: React.FC = () => {
   const { t } = useTranslation()
   const perms = usePermissions()
-  const toast = useToast()
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(25)
-  const { data, loading, error, refetch } = useBrokenAssets(page, limit)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [filters, setFilters] = useState<BrokenAssetFilters>({})
+  const { data, loading, error, refetch } = useBrokenAssets(page, limit, filters)
+  const { selected, toggleSelect, clear } = useRowSelection(data?.items)
   const [healing, setHealing] = useState(false)
-  const [undoing, setUndoing] = useState<number | null>(null)
-  const [busy, setBusy] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const history = perms.admin ? <HealHistory key="heal-history" /> : null
 
-  if (loading) return <TableSkeleton rows={4} columns={4} />
+  if (loading) return <div><TableSkeleton rows={4} columns={4} />{history}</div>
   if (error != null) return (
     <div>
-      <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
-      <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
+      <div>
+        <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+        <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
+      </div>
+      {history}
     </div>
   )
 
-  if (data == null) return null
+  if (data == null) return <div>{history}</div>
 
-  // Page off the scanned-source count, not the filtered broken rows, or later pages get skipped.
-  const hasNext = data.scanned >= limit
-  if (data.items.length === 0 && page === 1 && !hasNext) {
-    return <EmptyState variant="no-data" title={t('asset-pilot.integrity.empty')} description={t('asset-pilot.integrity.empty-desc')} />
+  const hasNext = data.hasNext
+  const filtersActive = filters.folder != null || filters.type != null || filters.extension != null
+  if (data.items.length === 0 && page === 1 && !hasNext && !filtersActive) {
+    return (
+      <div>
+        <EmptyState variant="no-data" title={t('asset-pilot.integrity.empty')} description={t('asset-pilot.integrity.empty-desc')} />
+        {history}
+      </div>
+    )
   }
 
-  const toggle = (id: number): void => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const goToPage = (nextPage: number): void => {
+    setPage(nextPage)
+    clear()
+    setHealing(false)
   }
 
-  const handleUndo = async (): Promise<void> => {
-    if (undoing == null) return
-    setBusy(true)
-    try {
-      await assetPilotApi.undoHeal(undoing)
-      toast.success(t('asset-pilot.integrity.undone', { id: undoing }))
-      setUndoing(null)
-      refetch()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('asset-pilot.integrity.undo-failed'))
-    } finally {
-      setBusy(false)
-    }
+  const changeLimit = (nextLimit: number): void => {
+    setLimit(nextLimit)
+    setPage(1)
+    clear()
+    setHealing(false)
+  }
+
+  const changeFilters = (nextFilters: BrokenAssetFilters): void => {
+    setFilters(nextFilters)
+    setPage(1)
+    clear()
+    setHealing(false)
   }
 
   return (
@@ -78,10 +82,11 @@ export const IntegrityTab: React.FC = () => {
         )}
       </div>
 
+      <IntegrityFilters filters={filters} onChange={changeFilters} />
       <ViewToggle mode={viewMode} onChange={setViewMode} />
 
       {data.items.length === 0
-        ? <p style={{ fontSize: 13, color: '#8c8c8c', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+        ? <p style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t(filtersActive && !hasNext ? 'asset-pilot.integrity.no-filter-results' : 'asset-pilot.common.none-on-page')}</p>
         : viewMode === 'gallery'
         ? (
           <GalleryCards
@@ -90,38 +95,38 @@ export const IntegrityTab: React.FC = () => {
               selectId: item.id,
               thumbnailId: item.id,
               type: 'image',
-              fallbackLabel: item.path.split('.').pop() ?? 'FILE',
+              fallbackLabel: item.path.split('.').pop() ?? t('asset-pilot.common.file'),
               title: <OpenButton id={item.id} type="asset" />,
-              meta: <span style={{ fontSize: 11, color: '#fa541c' }}>{item.reason}</span>,
-              actions: perms.admin ? <button onClick={() => setUndoing(item.id)} style={actionBtnStyle}>{t('asset-pilot.integrity.undo')}</button> : undefined,
+              meta: <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-warning-text)' }}>{item.reason}</span>,
             }))}
-            selection={{ selected, toggleSelect: toggle }}
+            selection={{ selected, toggleSelect }}
           />
         )
         : (
-          <ResponsiveTableWrapper>
+          <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
               <thead>
-                <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+                <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
                   <th style={thStyle}></th>
                   <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
                   <th style={thStyle}>{t('asset-pilot.columns.path')}</th>
                   <th style={thStyle}>{t('asset-pilot.columns.reason')}</th>
-                  {perms.admin && <th style={thStyle}>{t('asset-pilot.common.actions')}</th>}
                 </tr>
               </thead>
               <tbody>
                 {data.items.map(item => (
-                  <tr key={item.id} style={{ borderBottom: '1px solid #f5f5f5', background: selected.has(item.id) ? '#e6f4ff' : 'transparent' }}>
-                    <td style={tdStyle}><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggle(item.id)} /></td>
+                  <tr key={item.id} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)', background: selected.has(item.id) ? 'var(--ap-color-primary-bg)' : 'transparent' }}>
+                    <td style={tdStyle}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(item.id)}
+                        aria-label={t('asset-pilot.integrity.select-asset', { id: item.id })}
+                        onChange={() => toggleSelect(item.id)}
+                      />
+                    </td>
                     <td style={tdStyle}><OpenButton id={item.id} type="asset" /></td>
                     <td style={tdStyle}><ExpandablePath path={item.path} maxLength={48} /></td>
-                    <td style={{ ...tdStyle, color: '#fa541c' }}>{item.reason}</td>
-                    {perms.admin && (
-                      <td style={tdStyle}>
-                        <button onClick={() => setUndoing(item.id)} style={actionBtnStyle}>{t('asset-pilot.integrity.undo')}</button>
-                      </td>
-                    )}
+                    <td style={{ ...tdStyle, color: 'var(--ap-color-warning-text)' }}>{item.reason}</td>
                   </tr>
                 ))}
               </tbody>
@@ -129,38 +134,25 @@ export const IntegrityTab: React.FC = () => {
           </ResponsiveTableWrapper>
         )}
 
-      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} pageSizeOptions={[20, 25, 50]} />
+      <Pagination page={data.page} pages={hasNext ? page + 1 : page} onPage={goToPage} limit={limit} onLimit={changeLimit} pageSizeOptions={[20, 25, 50]} />
 
       {healing && (
         <HealModal
           ids={[...selected]}
           canApply={perms.operate}
           onClose={() => setHealing(false)}
-          onHealed={() => { setHealing(false); setSelected(new Set()); refetch() }}
+          onHealed={() => { setHealing(false); clear(); refetch() }}
         />
       )}
 
-      {undoing != null && (
-        <ConfirmDialog
-          variant="warning"
-          title={t('asset-pilot.integrity.undo-title')}
-          description={t('asset-pilot.integrity.undo-desc', { id: undoing })}
-          confirmLabel={t('asset-pilot.integrity.undo')}
-          loading={busy}
-          onConfirm={() => { void handleUndo() }}
-          onCancel={() => setUndoing(null)}
-        />
-      )}
+      {history}
     </div>
   )
 }
 
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 12, color: '#8c8c8c', fontWeight: 500 }
+const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500 }
 const tdStyle: React.CSSProperties = { padding: '8px 6px' }
-const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 13 }
+const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid var(--ap-color-border)', borderRadius: 6, background: 'var(--ap-color-bg-container)', cursor: 'pointer', fontSize: 13 }
 const healBtnStyle: React.CSSProperties = {
-  padding: '6px 16px', border: 'none', borderRadius: 6, background: '#52c41a', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-}
-const actionBtnStyle: React.CSSProperties = {
-  padding: '3px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer', fontSize: 12, color: '#1677ff',
+  padding: '6px 16px', border: 'none', borderRadius: 6, background: 'var(--ap-color-success)', color: 'var(--ap-color-text-light-solid)', cursor: 'pointer', fontSize: 13, fontWeight: 500,
 }

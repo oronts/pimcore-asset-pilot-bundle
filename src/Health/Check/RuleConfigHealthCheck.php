@@ -8,7 +8,7 @@ use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
 use Oronts\AssetPilotBundle\Enum\HealthStatus;
 use Oronts\AssetPilotBundle\Health\HealthCheckInterface;
 use Oronts\AssetPilotBundle\Model\HealthCheckResult;
-use Oronts\AssetPilotBundle\Service\ConfigValidator;
+use Oronts\AssetPilotBundle\Service\ConfigValidatorInterface;
 
 /**
  * Runs the same validation as `asset-pilot:validate-config` over the loaded rules: a failing rule
@@ -18,7 +18,7 @@ class RuleConfigHealthCheck implements HealthCheckInterface
 {
     public function __construct(
         protected readonly RuleEngineInterface $ruleEngine,
-        protected readonly ConfigValidator $configValidator,
+        protected readonly ConfigValidatorInterface $configValidator,
     ) {}
 
     public function name(): string

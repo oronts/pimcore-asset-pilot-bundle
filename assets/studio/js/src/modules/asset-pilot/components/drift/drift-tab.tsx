@@ -11,7 +11,7 @@ import { GalleryCards, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 
 export const DriftTab: React.FC = () => {
   const { t } = useTranslation()
-  const { data: rules } = useRules()
+  const { data: rules, loading: rulesLoading, error: rulesError, refetch: refetchRules } = useRules()
   const [selectedClass, setSelectedClass] = useState<string>('')
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(50)
@@ -36,15 +36,22 @@ export const DriftTab: React.FC = () => {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.drift.title')}</h4>
         <select
+          aria-label={t('asset-pilot.drift.pick-class')}
           value={selectedClass}
+          disabled={rulesLoading || rulesError != null}
           onChange={e => onClassChange(e.target.value)}
-          style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #d9d9d9', fontSize: 13 }}
+          style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--ap-color-border)', fontSize: 13 }}
         >
           <option value="">{t('asset-pilot.drift.pick-class')}</option>
           {classes.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
-      <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 16 }}>{t('asset-pilot.drift.hint')}</p>
+      {rulesError != null && (
+        <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 'var(--ap-font-size)' }}>
+          {t('asset-pilot.operations.rules-failed', { message: rulesError })} <button onClick={refetchRules}>{t('asset-pilot.common.retry')}</button>
+        </p>
+      )}
+      <p style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', marginBottom: 16 }}>{t('asset-pilot.drift.hint')}</p>
 
       {selectedClass !== '' && <ViewToggle mode={viewMode} onChange={setViewMode} />}
 
@@ -55,17 +62,21 @@ export const DriftTab: React.FC = () => {
       {selectedClass !== '' && loading && <TableSkeleton rows={4} columns={4} />}
 
       {selectedClass !== '' && !loading && error != null && (
-        <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+        <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+      )}
+
+      {selectedClass !== '' && !loading && error == null && data?.truncated === true && (
+        <p role="status" style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-warning-text-active)', marginBottom: 8 }}>{t('asset-pilot.drift.truncated')}</p>
       )}
 
       {selectedClass !== '' && !loading && error == null && data != null && (
-        data.items.length === 0 && !hasNext
+        data.items.length === 0 && !hasNext && data.truncated !== true
           ? <EmptyState variant="no-results" title={t('asset-pilot.drift.none')} description={t('asset-pilot.drift.none-desc', { count: data.objectsScanned })} />
           : (
             <>
-              <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>{t('asset-pilot.drift.scanned', { count: data.objectsScanned })}</p>
+              <p style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', marginBottom: 8 }}>{t('asset-pilot.drift.scanned', { count: data.objectsScanned })}</p>
               {data.items.length === 0
-                ? <p style={{ fontSize: 13, color: '#8c8c8c', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+                ? <p style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
                 : viewMode === 'gallery'
                 ? (
                   <GalleryCards
@@ -73,35 +84,38 @@ export const DriftTab: React.FC = () => {
                       key: `${item.assetId}-${item.ruleName}-${i}`,
                       thumbnailId: item.assetId,
                       type: 'image',
-                      fallbackLabel: item.currentPath.split('.').pop() ?? 'FILE',
+                      fallbackLabel: item.currentPath.split('.').pop() ?? t('asset-pilot.common.file'),
                       title: <OpenButton id={item.assetId} type="asset" />,
                       meta: (
-                        <div style={{ fontSize: 11 }}>
-                          <div style={{ color: '#fa541c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.currentPath}</div>
-                          <div style={{ color: '#52c41a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.expectedPath}</div>
+                        <div style={{ fontSize: 'var(--ap-font-size)' }}>
+                          <div style={{ color: 'var(--ap-color-warning-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.currentPath}</div>
+                          <div style={{ color: 'var(--ap-color-success-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.expectedPath}</div>
+                          <div style={{ color: item.eligibility === 'blocked' ? 'var(--ap-color-error-text)' : 'var(--ap-color-text-secondary)' }}>{item.reason ?? t(`asset-pilot.drift.eligibility-${item.eligibility}`)}</div>
                         </div>
                       ),
                     }))}
                   />
                 )
                 : (
-                  <ResponsiveTableWrapper>
+                  <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                       <thead>
-                        <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+                        <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
                           <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
                           <th style={thStyle}>{t('asset-pilot.drift.current')}</th>
                           <th style={thStyle}>{t('asset-pilot.drift.expected')}</th>
                           <th style={thStyle}>{t('asset-pilot.columns.rule')}</th>
+                          <th style={thStyle}>{t('asset-pilot.drift.eligibility')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.items.map((item, i) => (
-                          <tr key={`${item.assetId}-${item.ruleName}-${i}`} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                          <tr key={`${item.assetId}-${item.ruleName}-${i}`} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
                             <td style={tdStyle}><OpenButton id={item.assetId} type="asset" /></td>
-                            <td style={{ ...tdStyle, color: '#fa541c' }}><ExpandablePath path={item.currentPath} maxLength={36} /></td>
-                            <td style={{ ...tdStyle, color: '#52c41a' }}><ExpandablePath path={item.expectedPath} maxLength={36} /></td>
+                            <td style={{ ...tdStyle, color: 'var(--ap-color-warning-text)' }}><ExpandablePath path={item.currentPath} maxLength={36} /></td>
+                            <td style={{ ...tdStyle, color: 'var(--ap-color-success-text)' }}><ExpandablePath path={item.expectedPath} maxLength={36} /></td>
                             <td style={tdStyle}>{item.ruleName}</td>
+                            <td style={tdStyle} title={item.reason ?? undefined}>{item.reason ?? t(`asset-pilot.drift.eligibility-${item.eligibility}`)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -116,5 +130,5 @@ export const DriftTab: React.FC = () => {
   )
 }
 
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 12, color: '#8c8c8c', fontWeight: 500 }
+const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500 }
 const tdStyle: React.CSSProperties = { padding: '8px 6px' }

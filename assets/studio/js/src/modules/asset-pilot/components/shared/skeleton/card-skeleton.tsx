@@ -11,6 +11,9 @@ const SKELETON_CSS = `
   50% { opacity: 0.4; }
   100% { opacity: 1; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .ap-skeleton { animation: none !important; }
+}
 `
 
 export const CardSkeleton: React.FC<CardSkeletonProps> = ({ count = 5 }) => {
@@ -20,8 +23,8 @@ export const CardSkeleton: React.FC<CardSkeletonProps> = ({ count = 5 }) => {
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} style={cardStyle}>
-          <div style={{ ...barStyle, width: 80, height: 12, marginBottom: 8 }} />
-          <div style={{ ...barStyle, width: 48, height: 24 }} />
+          <div className="ap-skeleton" style={{ ...barStyle, width: 80, height: 12, marginBottom: 8 }} />
+          <div className="ap-skeleton" style={{ ...barStyle, width: 48, height: 24 }} />
         </div>
       ))}
     </div>
@@ -31,13 +34,13 @@ export const CardSkeleton: React.FC<CardSkeletonProps> = ({ count = 5 }) => {
 const cardStyle: React.CSSProperties = {
   padding: '16px 20px',
   borderRadius: 8,
-  border: '1px solid #f0f0f0',
-  borderLeft: '3px solid #e8e8e8',
-  background: '#fafafa',
+  border: '1px solid var(--ap-color-border-secondary)',
+  borderLeft: '3px solid var(--ap-color-border-secondary)',
+  background: 'var(--ap-color-fill-alter)',
 }
 
 const barStyle: React.CSSProperties = {
   borderRadius: 4,
-  background: '#e8e8e8',
+  background: 'var(--ap-color-border-secondary)',
   animation: 'ap-skeleton-pulse 1.5s ease-in-out infinite',
 }

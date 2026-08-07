@@ -7,18 +7,31 @@ Experience & E-commerce → Asset Pilot. It has a tab per feature (Dashboard, Ru
 Log, Unused Assets, Duplicates, Integrity, Quarantine, Storage, Empty Folders, Drift, Asset
 Management).
 
+Asset Pilot also adds an "Organize with Asset Pilot" item to the Studio asset-tree context menu (right
+click a folder). It opens the dashboard on the Operations tab with the clicked folder pre-filled into the
+Reorganize form, so the organize still runs through the reviewed preview and apply. The item appears only
+on folder nodes and only for actors who can operate.
+
 ![Asset Pilot in Pimcore Studio: the Unused Assets gallery, with filters, confidence badges, page-size control, and the documentation link](images/unused-assets-gallery.png)
 
-The core tabs:
+The tabs:
 
 | Tab | Description |
 |-----|-------------|
-| **Dashboard** | Statistics overview (organized, pending, failed, skipped counts), a health panel (audit table, rule config, shared cache, async transport), class breakdown table, recent operations list |
-| **Rules** | View all configured rules with priority, strategy, target path. Export the rule set as a portable artifact. An overlap panel warns about rules competing for the same assets. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. |
-| **Operations** | Single object organize (with dry-run, async, and explain modes). Bulk organize by class with paginated preview and "Organize All" button. Replay failed operations (Operate permission). System status with refresh. |
-| **Audit Log** | Full operation history with sorting. Filter by class, status, and rule name. CSV export. Revert individual operations. |
-| **Unused Assets** | Confidence-scored unused assets in a list or gallery view with color-coded badges. Filter by type, extensions, date range, folder, and confidence level. User-adjustable page size and CSV export. Bulk delete, move, or quarantine selected assets. Filter presets. |
-| **Asset Management** | Search assets by filename/path; filter by type, folder, Object ID, file extension, or relation (referenced/unreferenced). List or gallery view. Lock/unlock assets. Bulk assign tags. Bulk set custom properties. Sortable columns with pagination. |
+| **Dashboard** | Statistics overview (organized, pending, failed, skipped, and rules counts), an operations-by-status donut and an assets-by-class bar chart, a health panel (database schema, rule config, shared cache, required consumers and queues, dependency tracking, stale/recovery-required journal entries, overdue/dead observer deliveries, and stuck operation runs awaiting dispatch or queued past the backlog threshold), class breakdown table, recent operations list |
+| **Rules** | View all configured rules with priority, strategy, target path. Export the rule set as a portable artifact. An overlap panel warns about rules competing for the same assets. Detail modal with configuration and statistics. Preview modal to test a rule against a specific object ID. Compare modal to diff the running rule set against an uploaded exported rule artifact (added, removed, changed, and unchanged rules). |
+| **Operations** | Single-object organize, bulk organize with paginated selection, replay, reorganize, Simulate & save (record a dry-run for an object as a durable, non-mutating `simulation` run and review its from/to move diff), durable run status/cancel/retry, and system status. Admins also get signed preview/apply panels for stale journal recovery and exact dead-delivery retry. |
+| **Audit Log** | Durable operation history. Sort and filter by class, status, and rule name, export CSV, and revert eligible operations. |
+| **Unused Assets** | Confidence-scored unused assets in a list or gallery view with color-coded badges. Filter by type, extensions, date range, folder, and confidence level. User-adjustable page size and CSV export. Bulk delete, move, or quarantine the selected assets; locked rows may be selected but are skipped by those actions (a protected-skipped count is shown), plus bulk lock and bulk unlock the selection. Filter presets. |
+| **Duplicates** | Browse indexed byte-identical groups in a list or gallery view, filter by minimum copy count and asset type, export CSV, preview a merge, select the canonical asset and disposition strategy, then confirm the merge. |
+| **Integrity** | Scan and inspect currently broken assets in a list or gallery view and preview or apply version rollback healing. Admins get a separate paginated reversible-heal history with lightweight current eligibility and reason; Undo repeats the authoritative content and state checks under lock. |
+| **Quarantine** | Review quarantined assets in a list or gallery view, export CSV, and restore an asset to its recorded original path. |
+| **Storage** | Plot captured unused-storage trends, including known bytes and unknown-size counts. Snapshot capture itself runs through maintenance or CLI. Visible only to `asset_pilot_admin` users; the tab is hidden and its trend endpoint is not fetched for view/operate users. |
+| **Empty Folders** | Review leaf-empty asset folders and delete selected folders after confirmation. |
+| **Drift** | Compare current and rule-expected asset paths for a selected class, in a list or gallery view, and show each move's current eligibility. |
+| **Asset Management** | Search assets by filename/path; filter by type, folder, Object ID, file extension, or relation (referenced/unreferenced). List or gallery view. Lock/unlock assets. Bulk tag assignment (through paginated server search) and bulk custom-property set are reviewed preview-then-apply operations: a preview reports per-asset eligibility and returns a plan token, a separate apply commits, and a superseded plan is rejected (409) and re-prompted. Collect assets across searches into a capped cart, then ZIP-download, remove items, or clear it from a persistent cart bar. Native streamed ZIP downloads (from the bulk action bar or the cart) with a layout strategy: server default, flat, per-folder, or per-type. Sortable columns with pagination. |
+
+Bounded listings show a "results truncated" status notice when a scan reaches its configured ceiling, and CSV exports append a final truncation marker row when the export budget is reached. Both prompt the user to narrow the filters and reach the remaining rows.
 
 ### Screenshots
 
@@ -38,7 +51,9 @@ The Asset Management tab searches the asset catalog by filename or path, type, f
 
 ![Asset Management search](images/asset-management.png)
 
-The Audit Log records every move with its rule, status, and timestamps; filter by class, status, or rule, revert an operation, or export to CSV:
+The Audit Log shows attempted operations with
+their rule, trigger, status, and timestamps. Filter by class, status, or rule, revert an eligible
+operation, or export to CSV:
 
 ![Audit Log](images/audit-log.png)
 
@@ -59,7 +74,9 @@ and `confidence.probably_unused_days` (see [Configuration](configuration.md)).
 
 ### Localization
 
-The Studio UI ships with English and German translations. All UI strings use the `asset-pilot.*` i18n namespace.
+The Studio UI ships English and German catalogs for its navigation, labels, and actions under the
+`asset-pilot.*` namespace. Rule names, paths, statuses or reasons returned by the server, and other
+configuration-derived values are displayed as data and are not translated by those catalogs.
 
 ### Permissions
 
@@ -68,38 +85,40 @@ Asset Pilot uses Pimcore's own permission system, not a custom one:
 - The three permissions (`asset_pilot_view` / `asset_pilot_operate` / `asset_pilot_admin`) are
   registered as Pimcore `Permission\Definition`s by the installer and appear under Settings →
   Users/Roles (category "Asset Pilot"). Admins are allowed everything automatically.
-- **Menu visibility** is gated by the nav item's `permission: 'asset_pilot_view'` — Studio hides the
+- **Menu visibility** is gated by the nav item's `permission: 'asset_pilot_view'`; Studio hides the
   module for users without it.
 - **Button-level gating** (operate/admin) uses the SDK's `isAllowed()` from `@pimcore/studio-ui-bundle/modules/auth`.
-- **Enforcement** is server-side: every REST endpoint carries `#[IsGranted(AssetPilotPermission::*)]`
-  (read = View, mutating = Operate, revert/merge = Admin).
+- **Enforcement** is server-side: every REST endpoint carries an Asset Pilot permission attribute.
+  Storage trends, integrity history and undo, duplicate merge, journal recovery, dead-delivery retry,
+  and tag operations have the additional requirements documented in [REST API](rest-api.md).
 
 The frontend calls the API with the studio session cookie (`credentials: 'same-origin'`) over
-`getPrefix()` — no custom token handling.
+`getPrefix()`, no custom token handling.
 
-> After `pimcore:bundle:install`, run `bin/console pimcore:cache:clear`. Studio caches the set of
-> known permission keys (`USER_PERMISSIONS`); without clearing the Pimcore data cache the newly
-> registered `asset_pilot_*` permissions are not recognised and every endpoint returns 403. Symfony's
-> `cache:clear` does not clear the Pimcore data cache.
+> The installer verifies all permission definitions and invalidates Studio's permission-key cache.
+> Keep `bin/console pimcore:cache:clear` in the deployment sequence after bundle or role changes as a
+> safe application-wide transition.
 
 ### Building the frontend
 
-The bundle ships the UI source under `assets/studio` but not the compiled bundle (`public/studio/build`
-is gitignored). Build it against the Studio version your project runs:
+Composer releases include the compiled remote under `public/studio/build`; consuming applications do
+not run npm. Contributors changing the UI use the pinned Node/npm and Studio SDK versions:
 
 ```bash
-cd assets/studio
-# set @pimcore/studio-ui-bundle in package.json to match your installed pimcore/studio-ui-bundle
-npm install
-npm run build           # outputs public/studio/build/<id> (entrypoints.json + remoteEntry.js)
+npm ci --prefix assets/studio
+npm --prefix assets/studio test
+npm --prefix assets/studio run test:a11y
+npm --prefix assets/studio run check-types
+npm --prefix assets/studio run lint
+npm --prefix assets/studio run build
+npm --prefix assets/studio run prepare-release-build # release archives only
+npm --prefix assets/studio run verify-build
 ```
 
-Then publish the bundle assets so the web server serves them, and clear caches:
+The build is published to a new immutable generation and `active.json` switches only after artifact
+validation. Publish bundle assets and clear the Pimcore cache in a consuming application:
 
 ```bash
-bin/console assets:install          # hard-copy (use this; a symlink target outside the web root is not served)
-bin/console cache:clear
+bin/console assets:install
+bin/console pimcore:cache:clear
 ```
-
-The module-registration API is shared across the studio 0.15 / 1.x / 2025.x lines, so the same source
-builds against any of them; only the npm SDK version needs to match the runtime.

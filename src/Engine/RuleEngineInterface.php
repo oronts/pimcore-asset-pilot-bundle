@@ -11,7 +11,13 @@ use Pimcore\Model\DataObject\AbstractObject;
 
 interface RuleEngineInterface
 {
-    /** @return RuleMatch[] */
+    /**
+     * Supported convenience API: evaluate the object's rules against the asset with no field or locale scoping.
+     * A rule's field constraint is not applied and locale-scoped rules are excluded, so this is a coarse check.
+     * Use matchField() for field- and locale-scoped matching, or explain() for the matches plus the evaluation trace.
+     *
+     * @return RuleMatch[]
+     */
     public function match(AbstractObject $object, Asset $asset): array;
 
     /** @return RuleMatch[] */

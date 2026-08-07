@@ -8,11 +8,12 @@ namespace Oronts\AssetPilotBundle\Model;
  * The outcome of a successful revert: the asset moved back from $fromPath (where the original move
  * had placed it) to $toPath (its pre-move location).
  */
-final class RevertResult
+class RevertResult
 {
     public function __construct(
         public readonly int $assetId,
         public readonly string $fromPath,
         public readonly string $toPath,
+        public readonly ?string $warning = null,
     ) {}
 }

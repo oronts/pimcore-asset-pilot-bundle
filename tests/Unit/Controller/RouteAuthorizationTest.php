@@ -10,9 +10,8 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 /**
- * Enforces the bundle-wide invariant (CLAUDE.md non-negotiable): every routed Studio API action
- * carries an #[IsGranted] check, at the method or the class level. A new endpoint that forgets the
- * attribute fails here instead of shipping an unguarded route.
+ * Every routed Studio API action must carry an #[IsGranted] check at method or class level. A new
+ * endpoint that omits the attribute fails here instead of shipping an unguarded route.
  */
 class RouteAuthorizationTest extends TestCase
 {

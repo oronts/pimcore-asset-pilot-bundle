@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Maintenance;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditRetentionInterface;
 use Oronts\AssetPilotBundle\Maintenance\AuditRetentionTask;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
@@ -15,22 +15,11 @@ use Psr\Log\NullLogger;
 class AuditRetentionTaskTest extends TestCase
 {
     #[Test]
-    public function prunesUsingTheConfiguredRetentionWhenEnabled(): void
+    public function prunesUsingTheConfiguredRetention(): void
     {
-        $audit = $this->createMock(AuditLoggerInterface::class);
-        $audit->method('isEnabled')->willReturn(true);
+        $audit = $this->createMock(AuditRetentionInterface::class);
         $audit->method('getRetentionDays')->willReturn(90);
         $audit->expects(self::once())->method('cleanup')->with(90)->willReturn(5);
-
-        (new AuditRetentionTask($audit, new NullLogger()))->execute();
-    }
-
-    #[Test]
-    public function doesNothingWhenAuditingIsDisabled(): void
-    {
-        $audit = $this->createMock(AuditLoggerInterface::class);
-        $audit->method('isEnabled')->willReturn(false);
-        $audit->expects(self::never())->method('cleanup');
 
         (new AuditRetentionTask($audit, new NullLogger()))->execute();
     }
@@ -40,8 +29,7 @@ class AuditRetentionTaskTest extends TestCase
     {
         $this->expectNotToPerformAssertions();
 
-        $audit = $this->createMock(AuditLoggerInterface::class);
-        $audit->method('isEnabled')->willReturn(true);
+        $audit = $this->createMock(AuditRetentionInterface::class);
         $audit->method('getRetentionDays')->willReturn(90);
         $audit->method('cleanup')->willThrowException(new \RuntimeException('db gone'));
 

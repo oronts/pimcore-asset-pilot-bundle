@@ -4,25 +4,19 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Enum\OperationStatus;
-use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\Model\DriftItem;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\Query\BoundedScan;
+use Oronts\AssetPilotBundle\Service\Query\ObjectClassWindow;
 use Pimcore\Model\DataObject\AbstractObject;
-use Pimcore\Model\DataObject\Listing;
-use Psr\Log\LoggerInterface;
 
-/**
- * Organization-drift detection: after a rule change, previously-organized assets silently stay in
- * their old location. This compares each asset's actual path against where the current rules resolve
- * it (a dry run) and reports the mismatches. The per-class scan is paged and bounded so it never
- * turns into a full-catalog block; a whole-catalog sweep belongs in the CLI/async, not a request.
- */
-class LocationDriftService
+class LocationDriftService implements LocationDriftServiceInterface
 {
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly LoggerInterface $logger,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly int $defaultLimit = 50,
+        protected readonly int $maxCandidates = 5000,
     ) {}
 
     /**
@@ -30,20 +24,15 @@ class LocationDriftService
      */
     public function driftForObject(AbstractObject $object): array
     {
-        $drift = [];
-        foreach ($this->organizer->dryRun($object, TriggerType::Manual) as $operation) {
-            // A Pending dry-run op is an asset the rules would move = it is not where they want it.
-            // Skipped ops (already-at-target, locked, excluded) are not drift.
-            if ($operation->status === OperationStatus::Pending) {
-                $drift[] = new DriftItem($operation->assetId, $operation->sourcePath, $operation->targetPath, $operation->ruleName);
-            }
+        if (!$this->isVisible($object)) {
+            return [];
         }
 
-        return $drift;
+        return $this->organizer->analyzeDrift($object);
     }
 
     /**
-     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int}
+     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int, truncated: bool}
      */
     public function driftForClass(string $className, int $page = 1, ?int $limit = null): array
     {
@@ -51,37 +40,30 @@ class LocationDriftService
         $page = max(1, $page);
         $offset = ($page - 1) * $limit;
 
-        $ids = $this->listObjectIds($className, $offset, $limit);
-
         $items = [];
-        $scanned = 0;
-        foreach ($ids as $id) {
-            $object = $this->loadObject((int) $id);
-            if ($object === null) {
-                continue;
-            }
-            ++$scanned;
+        ['objects' => $objects, 'truncated' => $truncated] = $this->visibleObjects($className, $offset, $limit);
+        foreach ($objects as $object) {
             foreach ($this->driftForObject($object) as $driftItem) {
                 $items[] = $driftItem;
             }
         }
 
-        return ['items' => $items, 'objectsScanned' => $scanned, 'page' => $page, 'limit' => $limit];
+        return ['items' => $items, 'objectsScanned' => count($objects), 'page' => $page, 'limit' => $limit, 'truncated' => $truncated];
     }
 
     /**
      * Drift for a single object, in the same shape as driftForClass so callers render it identically.
      *
-     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int}|null null when the object does not exist
+     * @return array{items: list<DriftItem>, objectsScanned: int, page: int, limit: int, truncated: bool}|null null when the object does not exist
      */
     public function driftForObjectId(int $objectId): ?array
     {
         $object = $this->loadObject($objectId);
-        if ($object === null) {
+        if ($object === null || !$this->isVisible($object)) {
             return null;
         }
 
-        return ['items' => $this->driftForObject($object), 'objectsScanned' => 1, 'page' => 1, 'limit' => 1];
+        return ['items' => $this->driftForObject($object), 'objectsScanned' => 1, 'page' => 1, 'limit' => 1, 'truncated' => false];
     }
 
     /**
@@ -89,17 +71,44 @@ class LocationDriftService
      */
     protected function listObjectIds(string $className, int $offset, int $limit): array
     {
-        $listing = new Listing();
-        $listing->setObjectTypes([AbstractObject::OBJECT_TYPE_OBJECT, AbstractObject::OBJECT_TYPE_VARIANT]);
-        $listing->setCondition('className = ?', [$className]);
-        $listing->setOffset($offset);
-        $listing->setLimit($limit);
-
-        return array_map('intval', $listing->loadIdList());
+        return ObjectClassWindow::ids($className, $offset, $limit);
     }
 
     protected function loadObject(int $id): ?AbstractObject
     {
         return AbstractObject::getById($id);
+    }
+
+    protected function isVisible(AbstractObject $object): bool
+    {
+        return $this->authorization->isAllowed($object, 'view');
+    }
+
+    /**
+     * A workspace-restricted user can hide most of a class, so the raw scan is bounded by
+     * {@see $maxCandidates}; a page that cannot be resolved within that budget reports truncated.
+     *
+     * @return array{objects: list<AbstractObject>, truncated: bool}
+     */
+    protected function visibleObjects(string $className, int $visibleOffset, int $limit): array
+    {
+        $objects = [];
+        $visibleSeen = 0;
+
+        $truncated = BoundedScan::run(
+            fn (int $offset, int $batch): array => $this->listObjectIds($className, $offset, $batch),
+            function (int $id) use (&$objects, &$visibleSeen, $visibleOffset, $limit): bool {
+                $object = $this->loadObject($id);
+                if ($object !== null && $this->isVisible($object) && $visibleSeen++ >= $visibleOffset) {
+                    $objects[] = $object;
+                }
+
+                return count($objects) >= $limit;
+            },
+            $this->maxCandidates,
+            min(500, max(50, $limit)),
+        );
+
+        return ['objects' => $objects, 'truncated' => $truncated];
     }
 }

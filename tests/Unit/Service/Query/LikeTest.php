@@ -15,8 +15,9 @@ class LikeTest extends TestCase
     #[Test]
     public function escapesWildcardsAndTheEscapeChar(): void
     {
-        self::assertSame('100\\% \\_x', Like::escape('100% _x'));
-        self::assertSame('a\\\\b', Like::escape('a\\b'));
+        self::assertSame('100!% !_x', Like::escape('100% _x'));
+        self::assertSame('a!!b', Like::escape('a!b'));
+        self::assertSame('a\\b', Like::escape('a\\b'));
     }
 
     #[Test]

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\EventListener;
 
+use Doctrine\DBAL\Connection;
+use Oronts\AssetPilotBundle\Enum\TriggerType;
 use Oronts\AssetPilotBundle\EventListener\AssetUploadListener;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
@@ -25,6 +27,7 @@ class AssetUploadListenerPagingTest extends TestCase
             $this->createMock(OrganizeDispatcher::class),
             $this->createMock(LoopGuard::class),
             new NullLogger(),
+            $this->createMock(Connection::class),
             true,
             true,
             $pages,
@@ -33,9 +36,9 @@ class AssetUploadListenerPagingTest extends TestCase
             public int $processedCount = 0;
 
             /** @param list<list<array<string, mixed>>> $pages */
-            public function __construct($organizer, $bus, $guard, $logger, bool $enabled, bool $async, private array $pages)
+            public function __construct($organizer, $bus, $guard, $logger, Connection $connection, bool $enabled, bool $async, private array $pages)
             {
-                parent::__construct($organizer, $bus, $guard, $logger, $enabled, $async);
+                parent::__construct($organizer, $bus, $guard, $logger, $connection, new \Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore((new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor()), $enabled, $async);
             }
 
             protected function fetchDependents(Dependency $dependency, int $offset, int $limit): array
@@ -92,5 +95,40 @@ class AssetUploadListenerPagingTest extends TestCase
         self::assertSame(103, $listener->run($this->createMock(Dependency::class)));
         self::assertSame(2, $listener->fetchCount);
         self::assertSame(103, $listener->processedCount);
+    }
+
+    #[Test]
+    public function processingObjectIsMarkedDirtyInsteadOfLosingTheUpload(): void
+    {
+        $guard = $this->createMock(LoopGuard::class);
+        $guard->method('isProcessingObject')->with(42)->willReturn(true);
+        $guard->expects(self::once())->method('markObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::never())->method('dispatchObject');
+
+        $listener = $this->dependentListener($guard, $dispatcher);
+        $listener->runDependent(['type' => 'object', 'id' => 42]);
+    }
+
+    #[Test]
+    public function recentDispatchCoalescesInsteadOfLosingTheUpload(): void
+    {
+        $guard = $this->createMock(LoopGuard::class);
+        $guard->method('isProcessingObject')->with(42)->willReturn(false);
+        $dispatcher = $this->createMock(OrganizeDispatcher::class);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::AssetUpload);
+
+        $listener = $this->dependentListener($guard, $dispatcher);
+        $listener->runDependent(['type' => 'object', 'id' => 42]);
+    }
+
+    private function dependentListener(LoopGuard $guard, OrganizeDispatcher $dispatcher): object
+    {
+        return new class ($this->createMock(AssetOrganizer::class), $dispatcher, $guard, new NullLogger(), $this->createMock(Connection::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class)) extends AssetUploadListener {
+            public function runDependent(array $dependency): void
+            {
+                $this->processDependent($dependency);
+            }
+        };
     }
 }

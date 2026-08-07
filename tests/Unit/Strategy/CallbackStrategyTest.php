@@ -6,8 +6,8 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Strategy;
 
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
 use Oronts\AssetPilotBundle\Model\Rule;
+use Oronts\AssetPilotBundle\Strategy\CallbackDecisionInterface;
 use Oronts\AssetPilotBundle\Strategy\CallbackStrategy;
-use Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -37,7 +37,7 @@ class CallbackStrategyTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertFalse($strategy->resolve($asset, $object, $this->createRule(null)));
+        self::assertFalse($strategy->resolve($asset, $object, $this->createRule(null), false));
     }
 
     #[Test]
@@ -51,7 +51,7 @@ class CallbackStrategyTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertFalse($strategy->resolve($asset, $object, $this->createRule('app.my_callback')));
+        self::assertFalse($strategy->resolve($asset, $object, $this->createRule('app.my_callback'), false));
     }
 
     #[Test]
@@ -66,7 +66,7 @@ class CallbackStrategyTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertFalse($strategy->resolve($asset, $object, $this->createRule('app.my_callback')));
+        self::assertFalse($strategy->resolve($asset, $object, $this->createRule('app.my_callback'), false));
     }
 
     #[Test]
@@ -83,7 +83,7 @@ class CallbackStrategyTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertTrue($strategy->resolve($asset, $object, $this->createRule('app.my_callback')));
+        self::assertTrue($strategy->resolve($asset, $object, $this->createRule('app.my_callback'), false));
     }
 
     #[Test]
@@ -100,7 +100,7 @@ class CallbackStrategyTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertFalse($strategy->resolve($asset, $object, $this->createRule('app.my_callback')));
+        self::assertFalse($strategy->resolve($asset, $object, $this->createRule('app.my_callback'), false));
     }
 
     #[Test]
@@ -117,7 +117,7 @@ class CallbackStrategyTest extends TestCase
         $asset = $this->createMock(Asset::class);
         $object = $this->createMock(AbstractObject::class);
 
-        self::assertTrue($strategy->resolve($asset, $object, $this->createRule('app.my_callback')));
+        self::assertTrue($strategy->resolve($asset, $object, $this->createRule('app.my_callback'), false));
     }
 
     #[Test]
@@ -139,27 +139,24 @@ class CallbackStrategyTest extends TestCase
         $object = $this->createMock(AbstractObject::class);
         $rule = $this->createRule('app.my_callback');
 
-        $strategy->resolve($asset, $object, $rule);
+        $strategy->resolve($asset, $object, $rule, true);
 
-        self::assertCount(3, $receivedArgs);
+        self::assertCount(4, $receivedArgs);
         self::assertSame($asset, $receivedArgs[0]);
         self::assertSame($object, $receivedArgs[1]);
         self::assertSame($rule, $receivedArgs[2]);
+        self::assertTrue($receivedArgs[3]);
     }
 
     #[Test]
-    public function delegatesToAConflictStrategyInterfaceService(): void
+    public function delegatesToACallbackDecisionInterfaceService(): void
     {
-        $custom = new class () implements ConflictStrategyInterface {
-            public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+        $custom = new class () implements CallbackDecisionInterface {
+            public function decide(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool
             {
                 return true;
             }
 
-            public function supports(MoveStrategy $strategy): bool
-            {
-                return false;
-            }
         };
 
         $container = $this->createMock(ContainerInterface::class);
@@ -172,6 +169,7 @@ class CallbackStrategyTest extends TestCase
             $this->createMock(Asset::class),
             $this->createMock(AbstractObject::class),
             $this->createRule('app.custom_strategy'),
+            false,
         ));
     }
 

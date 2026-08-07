@@ -6,8 +6,8 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
-use Oronts\AssetPilotBundle\Audit\AuditLogger;
 use Oronts\AssetPilotBundle\Enum\ConfidenceLevel;
+use Oronts\AssetPilotBundle\Installer;
 use Psr\Log\LoggerInterface;
 
 class ConfidenceScorer implements ConfidenceScorerInterface
@@ -118,7 +118,7 @@ class ConfidenceScorer implements ConfidenceScorerInterface
 
         $rows = $this->connection->createQueryBuilder()
             ->select('DISTINCT asset_id')
-            ->from(AuditLogger::TABLE_NAME)
+            ->from(Installer::TABLE_AUDIT_LOG)
             ->where('asset_id IN (:ids)')
             ->setParameter('ids', $assetIds, ArrayParameterType::INTEGER)
             ->executeQuery()

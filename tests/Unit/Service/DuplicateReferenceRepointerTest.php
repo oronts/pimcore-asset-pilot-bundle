@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\NotPermittedException;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\DuplicateReferenceRepointer;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
+use Oronts\AssetPilotBundle\Service\ObjectSaveDrain;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
+use Pimcore\Model\Element\AbstractElement;
 use Psr\Log\NullLogger;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\Lock\LockFactory;
@@ -52,13 +58,18 @@ class DuplicateReferenceRepointerTest extends TestCase
         bool $stillReferences = false,
         ?\ArrayObject $writes = null,
         ?\ArrayObject $saved = null,
+        bool $isObjectAuthorized = true,
+        ?LoopGuard $loopGuard = null,
+        ?OrganizeDispatcherInterface $dispatcher = null,
     ): DuplicateReferenceRepointer {
         $writes ??= new \ArrayObject();
         $saved ??= new \ArrayObject();
 
         return new class (
             $requiredBy, $fromAsset, $toAsset, $object, $relationFields, $wysiwygFields, $values,
-            $stillReferences, $writes, $saved,
+            $stillReferences, $writes, $saved, $this->createMock(ElementAuthorization::class),
+            $isObjectAuthorized, $loopGuard ?? new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
+            $dispatcher ?? $this->createMock(OrganizeDispatcherInterface::class),
         ) extends DuplicateReferenceRepointer {
             /**
              * @param array<int, array{id: int, type: string}> $requiredBy
@@ -79,8 +90,12 @@ class DuplicateReferenceRepointerTest extends TestCase
                 private readonly bool $stillReferences,
                 private readonly \ArrayObject $writes,
                 private readonly \ArrayObject $saved,
+                ElementAuthorization $authorization,
+                private readonly bool $isObjectAuthorized,
+                LoopGuard $loopGuard,
+                OrganizeDispatcherInterface $dispatcher,
             ) {
-                parent::__construct(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor());
+                parent::__construct($loopGuard, new NullLogger(), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), $authorization, new ObjectSaveDrain($loopGuard, $dispatcher, new \Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore((new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor()), (new \ReflectionClass(\Doctrine\DBAL\Connection::class))->newInstanceWithoutConstructor(), new NullLogger()));
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -96,6 +111,18 @@ class DuplicateReferenceRepointerTest extends TestCase
             protected function loadObject(int $id): ?Concrete
             {
                 return $this->object;
+            }
+
+            protected function referrerFingerprint(string $type, int $id, AbstractElement $element): string
+            {
+                return hash('sha256', $type . ':' . $id . ':v1');
+            }
+
+            protected function objectAllows(Concrete $object, string $permission): bool
+            {
+                TestCase::assertContains($permission, ['view', 'publish']);
+
+                return $this->isObjectAuthorized;
             }
 
             protected function relationFieldDefs(Concrete $object): array
@@ -203,13 +230,28 @@ class DuplicateReferenceRepointerTest extends TestCase
     #[Test]
     public function rewritesBothThePathAndTheEmbeddedIdInWysiwyg(): void
     {
-        $html = 'see <a href="/copy.jpg">x</a> and <img pimcore_id="9" src="/copy.jpg">';
+        $html = 'see <a href="/copy.jpg">x</a> and <img pimcore_id="9" pimcore_type="asset" src="/copy.jpg">';
         [$changed, $new] = $this->repointer([])->exposeHtml($html, '/copy.jpg', '/canonical.jpg', 9, 105);
 
         self::assertTrue($changed);
         self::assertStringContainsString('/canonical.jpg', $new);
         self::assertStringContainsString('pimcore_id="105"', $new);
         self::assertStringNotContainsString('/copy.jpg', $new);
+    }
+
+    #[Test]
+    public function leavesNonAssetPimcoreIdsUntouched(): void
+    {
+        $html = '<a pimcore_type="object" pimcore_id="9">object</a>'
+            . '<a pimcore_id="9" pimcore_type="document">document</a>'
+            . '<img pimcore_type="asset" pimcore_id="9">';
+
+        [$changed, $new] = $this->repointer([])->exposeHtml($html, '/copy.jpg', '/canonical.jpg', 9, 105);
+
+        self::assertTrue($changed);
+        self::assertStringContainsString('pimcore_type="object" pimcore_id="9"', $new);
+        self::assertStringContainsString('pimcore_id="9" pimcore_type="document"', $new);
+        self::assertStringContainsString('pimcore_type="asset" pimcore_id="105"', $new);
     }
 
     #[Test]
@@ -258,6 +300,28 @@ class DuplicateReferenceRepointerTest extends TestCase
     }
 
     #[Test]
+    public function repointDrainsACoalescedSaveAfterTheGuardedSave(): void
+    {
+        $loopGuard = $this->createMock(LoopGuard::class);
+        $loopGuard->method('acquireObject')->willReturn(true);
+        $loopGuard->method('isObjectDirty')->with(42)->willReturn(true);
+        $loopGuard->expects(self::once())->method('clearObjectDirty')->with(42);
+        $dispatcher = $this->createMock(OrganizeDispatcherInterface::class);
+        $dispatcher->expects(self::once())->method('deferObject')->with(42, TriggerType::ObjectSave, self::anything());
+
+        $this->repointer(
+            [['id' => 42, 'type' => 'object']],
+            fromAsset: $this->asset(9, '/copy.jpg'),
+            toAsset: $this->asset(105, '/canonical.jpg'),
+            object: $this->createMock(Concrete::class),
+            relationFields: [['hero', 'manyToOneRelation']],
+            values: ['hero' => $this->asset(9)],
+            loopGuard: $loopGuard,
+            dispatcher: $dispatcher,
+        )->repoint(9, 105);
+    }
+
+    #[Test]
     public function blocksWhenTheObjectStillReferencesTheCopyAfterRewrite(): void
     {
         $report = $this->repointer(
@@ -275,6 +339,69 @@ class DuplicateReferenceRepointerTest extends TestCase
     }
 
     #[Test]
+    public function blocksBeforeRewritingAnObjectOutsideTheActorWorkspace(): void
+    {
+        $writes = new \ArrayObject();
+        $saved = new \ArrayObject();
+        $report = $this->repointer(
+            [['id' => 42, 'type' => 'object']],
+            fromAsset: $this->asset(9, '/copy.jpg'),
+            toAsset: $this->asset(105, '/canonical.jpg'),
+            object: $this->createMock(Concrete::class),
+            relationFields: [['hero', 'manyToOneRelation']],
+            values: ['hero' => $this->asset(9)],
+            writes: $writes,
+            saved: $saved,
+            isObjectAuthorized: false,
+        )->repoint(9, 105);
+
+        self::assertFalse($report->fullyRepointed);
+        self::assertStringContainsString('outside the actor workspace', $report->blocked[0]);
+        self::assertSame([], $writes->getArrayCopy());
+        self::assertSame([], $saved->getArrayCopy());
+    }
+
+    #[Test]
+    public function preflightSnapshotsEveryObjectReferrerBeforeMutation(): void
+    {
+        $saved = new \ArrayObject();
+        $preflight = $this->repointer(
+            [['id' => 42, 'type' => 'object']],
+            fromAsset: $this->asset(9, '/copy.jpg'),
+            toAsset: $this->asset(105, '/canonical.jpg'),
+            object: $this->createMock(Concrete::class),
+            saved: $saved,
+        )->preflight(9, 105, 'publish');
+
+        self::assertSame([], $preflight->blocked);
+        self::assertCount(1, $preflight->referrers);
+        self::assertSame('object:42', $preflight->referrers[0]->key());
+        self::assertSame(hash('sha256', 'object:42:v1'), $preflight->referrers[0]->fingerprint);
+        self::assertSame([], $saved->getArrayCopy());
+    }
+
+    #[Test]
+    public function preflightRejectsAnUnauthorizedReferrerBeforeMutation(): void
+    {
+        $saved = new \ArrayObject();
+        $repointer = $this->repointer(
+            [['id' => 42, 'type' => 'object']],
+            fromAsset: $this->asset(9, '/copy.jpg'),
+            toAsset: $this->asset(105, '/canonical.jpg'),
+            object: $this->createMock(Concrete::class),
+            saved: $saved,
+            isObjectAuthorized: false,
+        );
+
+        $this->expectException(NotPermittedException::class);
+        try {
+            $repointer->preflight(9, 105, 'publish');
+        } finally {
+            self::assertSame([], $saved->getArrayCopy());
+        }
+    }
+
+    #[Test]
     public function stillReferencesQueryIsTargetedAndBounded(): void
     {
         $connection = \Doctrine\DBAL\DriverManager::getConnection([
@@ -284,6 +411,8 @@ class DuplicateReferenceRepointerTest extends TestCase
             new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())),
             new NullLogger(),
             $connection,
+            $this->createMock(ElementAuthorization::class),
+            new ObjectSaveDrain(new LoopGuard(new ArrayAdapter(), new LockFactory(new InMemoryStore())), $this->createMock(OrganizeDispatcherInterface::class), $this->createMock(\Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface::class), $this->createMock(\Doctrine\DBAL\Connection::class), new NullLogger()),
         );
 
         $method = new \ReflectionMethod(DuplicateReferenceRepointer::class, 'stillReferencesQuery');
@@ -297,5 +426,30 @@ class DuplicateReferenceRepointerTest extends TestCase
         self::assertStringContainsString('targettype = :targetType', $sql);
         self::assertStringContainsString('targetid = :assetId', $sql);
         self::assertSame(1, $qb->getMaxResults(), 'must early-exit with LIMIT 1 instead of scanning all dependencies');
+    }
+
+    #[Test]
+    public function blocksBeforeMutationWhenAnotherWorkerHoldsTheObjectLock(): void
+    {
+        $store = new InMemoryStore();
+        $owner = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        $worker = new LoopGuard(new ArrayAdapter(), new LockFactory($store));
+        self::assertTrue($owner->acquireObject(42));
+        $saved = new \ArrayObject();
+
+        $report = $this->repointer(
+            [['id' => 42, 'type' => 'object']],
+            fromAsset: $this->asset(9, '/copy.jpg'),
+            toAsset: $this->asset(105, '/canonical.jpg'),
+            object: $this->createMock(Concrete::class),
+            relationFields: [['hero', 'manyToOneRelation']],
+            values: ['hero' => $this->asset(9)],
+            saved: $saved,
+            loopGuard: $worker,
+        )->repoint(9, 105);
+
+        self::assertFalse($report->fullyRepointed);
+        self::assertStringContainsString('another job', $report->blocked[0]);
+        self::assertSame([], $saved->getArrayCopy());
     }
 }

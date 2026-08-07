@@ -12,14 +12,17 @@ namespace Oronts\AssetPilotBundle\Support;
  *
  * @internal Not a documented extension seam; relocate-safe.
  */
-final class BulkIds
+class BulkIds
 {
     public const int MAX = 1000;
 
     /**
-     * Normalize a client-supplied id array: keep only positive integers (ints or plain digit
-     * strings — never booleans, arrays, floats, or signed/spaced strings), drop non-positive ids,
-     * and de-duplicate preserving first-seen order. Stops one past self::MAX so a caller can reject
+     * Normalize a client-supplied id array: keep only positive integers (ints or canonical positive
+     * digit strings, no leading zeros — never booleans, arrays, floats, signed/spaced/`0`-prefixed
+     * strings, nor digit strings above the platform integer range), drop non-positive ids,
+     * and de-duplicate preserving first-seen order. The over-range round-trip check is deliberately
+     * stricter than the OpenAPI IdList digit pattern, which cannot express a 64-bit ceiling in a regex.
+     * Stops one past self::MAX so a caller can reject
      * an oversized request without this doing unbounded work first. Returns a clean list (empty when
      * the input is not a usable array). Callers reject `[]` and `count > self::MAX` with 400.
      *
@@ -36,7 +39,9 @@ final class BulkIds
         foreach ($raw as $value) {
             if (is_int($value)) {
                 $id = $value;
-            } elseif (is_string($value) && ctype_digit($value)) {
+            } elseif (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1 && (string) (int) $value === $value) {
+                // The round-trip drops digit strings above the platform integer range (they would
+                // otherwise saturate to PHP_INT_MAX), matching ReadsRequestScalars::parsePositiveInt.
                 $id = (int) $value;
             } else {
                 continue;

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
-use Oronts\AssetPilotBundle\Service\ConfigValidator;
+use Oronts\AssetPilotBundle\Service\ConfigValidatorInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -19,7 +19,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class ValidateConfigCommand extends Command
 {
     public function __construct(
-        private readonly ConfigValidator $configValidator,
+        private readonly ConfigValidatorInterface $configValidator,
         private readonly RuleEngineInterface $ruleEngine,
     ) {
         parent::__construct();

@@ -10,13 +10,13 @@ use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
 use Psr\Log\LoggerInterface;
 
-readonly class AlwaysMoveStrategy implements ConflictStrategyInterface
+readonly class AlwaysMoveStrategy implements SideEffectFreeConflictStrategyInterface
 {
     public function __construct(
         private LoggerInterface $logger,
     ) {}
 
-    public function resolve(Asset $asset, AbstractObject $object, Rule $rule): bool
+    public function resolve(Asset $asset, AbstractObject $object, Rule $rule, bool $dryRun): bool
     {
         $this->logger->debug('AlwaysMoveStrategy: allowing move for asset {assetId} via rule "{rule}".', [
             'assetId' => $asset->getId(),

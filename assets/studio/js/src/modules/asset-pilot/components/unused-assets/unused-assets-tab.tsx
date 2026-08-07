@@ -2,14 +2,14 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useUnusedAssets, useUnusedStats } from '../../hooks/use-asset-pilot-api'
 import { assetPilotApi } from '../../services/api'
-import type { UnusedAsset, UnusedAssetFilters } from '../../types'
+import type { PlannedBulkActionResult, UnusedAsset, UnusedAssetFilters } from '../../types'
 import { UnusedAssetsFiltersBar } from './unused-assets-filters'
-import { BulkActionBar } from './bulk-action-bar'
+import { BulkActionBar, type PlannedAction } from './bulk-action-bar'
 import { OpenButton } from '../shared/open-button'
 import { TypeBadge } from '../shared/type-badge'
 import { ConfidenceBadge } from '../shared/confidence-badge'
 import { EmptyState } from '../shared/empty-state'
-import { LockBadge } from '../shared/lock-badge'
+import { LockCell } from '../shared/lock-cell'
 import { DataTable, type DataColumn } from '../shared/data-table'
 import { GalleryGrid, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { useSort } from '../../hooks/use-sort'
@@ -17,70 +17,41 @@ import { useToast } from '../../hooks/use-toast'
 import { useRowSelection } from '../../hooks/use-row-selection'
 import { formatBytes, formatDate } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
+import { theme } from 'antd'
 
 export const UnusedAssetsTab: React.FC = () => {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const toast = useToast()
   const { sortField, sortDirection, toggleSort, sortParams } = useSort()
   const [filters, setFilters] = useState<UnusedAssetFilters>({ page: 1, limit: 25 })
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useUnusedAssets(mergedFilters)
   const { data: stats } = useUnusedStats()
-  // Locked assets are excluded from cleanup, so they must never enter a bulk selection (the backend
-  // also rejects them per-asset; this keeps the UI from offering an action that would be refused).
-  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items, a => !a.locked)
-  const [actionLoading, setActionLoading] = useState(false)
+  const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
+  const lockedIds = React.useMemo(() => (data?.items ?? []).filter(a => a.locked && selected.has(a.id)).map(a => a.id), [data?.items, selected])
   const [viewMode, setViewMode] = useState<ViewMode>('list')
 
-  const handleBulkDelete = async (): Promise<void> => {
-    if (selected.size === 0) return
-    setActionLoading(true)
-    try {
-      const result = await assetPilotApi.bulkDeleteAssets([...selected])
+  const handleBulkActionComplete = (action: PlannedAction, result: PlannedBulkActionResult): void => {
+    if (action === 'delete') {
       const msg = t('asset-pilot.unused.deleted-result', { deleted: result.deleted ?? 0, failed: result.failed })
-      if (result.failed > 0) toast.warning(msg)
+      const observerWarning = result.observerWarnings?.join(' ') ?? ''
+      if (result.failed > 0 || observerWarning !== '') toast.warning([msg, observerWarning].filter(Boolean).join(' '))
       else toast.success(msg)
-      clear()
-      refetch()
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Unknown error')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleBulkMove = async (targetFolder: string): Promise<void> => {
-    if (selected.size === 0 || !targetFolder) return
-    setActionLoading(true)
-    try {
-      const result = await assetPilotApi.bulkMoveAssets([...selected], targetFolder)
+    } else if (action === 'move') {
       const msg = t('asset-pilot.unused.moved-result', { moved: result.moved ?? 0, failed: result.failed })
-      if (result.failed > 0) toast.warning(msg)
+      const observerWarning = result.observerWarnings?.join(' ') ?? ''
+      if (result.failed > 0 || observerWarning !== '') toast.warning([msg, observerWarning].filter(Boolean).join(' '))
       else toast.success(msg)
-      clear()
-      refetch()
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Unknown error')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleBulkQuarantine = async (): Promise<void> => {
-    if (selected.size === 0) return
-    setActionLoading(true)
-    try {
-      const result = await assetPilotApi.bulkQuarantineAssets([...selected])
+    } else {
       const msg = t('asset-pilot.unused.quarantined-result', { quarantined: result.quarantined ?? 0, failed: result.failed })
-      if (result.failed > 0) toast.warning(msg)
+      const observerWarning = result.observerWarnings?.join(' ') ?? ''
+      if (result.failed > 0 || observerWarning !== '') toast.warning([msg, observerWarning].filter(Boolean).join(' '))
       else toast.success(msg)
-      clear()
-      refetch()
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Unknown error')
-    } finally {
-      setActionLoading(false)
     }
+
+    clear()
+    refetch()
   }
 
   const hasFilters = filters.type != null || filters.extension != null || filters.before != null || filters.after != null || filters.folder != null || filters.confidence != null
@@ -92,18 +63,20 @@ export const UnusedAssetsTab: React.FC = () => {
 
   const columns: DataColumn<UnusedAsset>[] = [
     { key: 'id', label: t('asset-pilot.columns.id'), priority: 1, sortField: 'id', cell: a => <OpenButton id={a.id} type="asset" /> },
-    { key: 'lock', label: t('asset-pilot.columns.lock-status'), priority: 1, cell: a => (a.locked ? <LockBadge /> : null) },
+    { key: 'lock', label: t('asset-pilot.columns.lock-status'), priority: 1, cell: a => (a.locked ? <LockCell id={a.id} onUnlocked={refetch} /> : null) },
     { key: 'filename', label: t('asset-pilot.columns.filename'), priority: 1, sortField: 'filename', cellStyle: { fontWeight: 500 }, cell: a => <ExpandablePath path={a.filename} maxLength={35} /> },
     { key: 'path', label: t('asset-pilot.columns.path'), priority: 2, cell: a => <ExpandablePath path={a.full_path} maxLength={50} /> },
     { key: 'type', label: t('asset-pilot.columns.type'), priority: 1, sortField: 'type', cell: a => <TypeBadge type={a.type} /> },
     { key: 'confidence', label: t('asset-pilot.confidence.label'), priority: 1, cell: a => <ConfidenceBadge confidence={a.confidence} /> },
     { key: 'size', label: t('asset-pilot.columns.size'), priority: 2, cellStyle: { whiteSpace: 'nowrap' }, cell: a => formatBytes(a.file_size) },
-    { key: 'modified', label: t('asset-pilot.columns.modified'), priority: 3, sortField: 'modified_at', cellStyle: { fontSize: 11, color: '#8c8c8c', whiteSpace: 'nowrap' }, cell: a => formatDate(a.modified_at, true) },
+    { key: 'modified', label: t('asset-pilot.columns.modified'), priority: 3, sortField: 'modified_at', cellStyle: { color: token.colorTextSecondary, whiteSpace: 'nowrap' }, cell: a => formatDate(a.modified_at, true) },
   ]
 
   const unusedSummary = (
-    <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
-      {t('asset-pilot.unused.showing', { count: data?.items.length ?? 0, total: data?.total ?? 0 })} — {t('asset-pilot.common.page-info', { page: data?.page ?? 1, pages: data?.pages ?? 1 })}
+    <div style={{ fontSize: token.fontSize, color: token.colorTextSecondary, marginBottom: 8 }}>
+      {data?.total != null
+        ? `${t('asset-pilot.unused.showing', { count: data.items.length, total: data.total })} — ${t('asset-pilot.common.page-info', { page: data.page, pages: data.pages ?? 1 })}`
+        : t('asset-pilot.common.showing-page', { count: data?.items.length ?? 0 })}
     </div>
   )
 
@@ -119,13 +92,14 @@ export const UnusedAssetsTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button onClick={() => assetPilotApi.exportUnused(filters)} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
+        <button onClick={() => assetPilotApi.exportUnused(filters)} style={{ padding: '5px 12px', border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadius, background: token.colorBgContainer, color: token.colorText, cursor: 'pointer', fontSize: token.fontSize, fontWeight: 500 }}>{t('asset-pilot.common.export-csv')}</button>
       </div>
 
       {stats != null && (
         <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <StatBox label={t('asset-pilot.unused.total-unused')} value={String(stats.totalCount)} />
           <StatBox label={t('asset-pilot.unused.total-size')} value={stats.totalSizeFormatted} />
+          {stats.unknownSizeCount > 0 && <StatBox label={t('asset-pilot.unused.unknown-size')} value={String(stats.unknownSizeCount)} />}
           {stats.byType.map(bt => (
             <StatBox key={bt.type} label={bt.type} value={String(bt.count)} />
           ))}
@@ -137,11 +111,9 @@ export const UnusedAssetsTab: React.FC = () => {
       {selected.size > 0 && (
         <BulkActionBar
           count={selected.size}
-          loading={actionLoading}
           assetIds={[...selected]}
-          onDelete={handleBulkDelete}
-          onMove={handleBulkMove}
-          onQuarantine={handleBulkQuarantine}
+          lockedIds={lockedIds}
+          onActionComplete={handleBulkActionComplete}
           onDeselect={() => clear()}
           onLockDone={() => { clear(); refetch() }}
         />
@@ -156,6 +128,7 @@ export const UnusedAssetsTab: React.FC = () => {
             data={data}
             loading={loading}
             error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onRetry={refetch}
             onPage={goToPage}
             limit={filters.limit}
             onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
@@ -171,10 +144,13 @@ export const UnusedAssetsTab: React.FC = () => {
             data={data}
             loading={loading}
             error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onRetry={refetch}
             empty={unusedEmpty}
             summary={unusedSummary}
             page={data?.page ?? 1}
-            pages={data?.pages ?? 1}
+            pages={data?.pages ?? null}
+            hasMore={data?.hasMore}
+            truncated={data?.truncated}
             onPage={goToPage}
             limit={filters.limit}
             onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
@@ -186,8 +162,8 @@ export const UnusedAssetsTab: React.FC = () => {
               type: a.type,
               fallbackLabel: a.filename.split('.').pop() ?? a.type,
               title: <OpenButton id={a.id} type="asset" label={a.filename} />,
-              meta: <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}><TypeBadge type={a.type} /><ConfidenceBadge confidence={a.confidence} /><span style={{ fontSize: 11, color: '#8c8c8c' }}>{formatBytes(a.file_size)}</span></div>,
-              badges: a.locked ? <LockBadge /> : undefined,
+              meta: <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}><TypeBadge type={a.type} /><ConfidenceBadge confidence={a.confidence} /><span style={{ fontSize: token.fontSize, color: token.colorTextSecondary }}>{formatBytes(a.file_size)}</span></div>,
+              badges: a.locked ? <LockCell id={a.id} onUnlocked={refetch} /> : undefined,
             })}
           />
         )}
@@ -195,14 +171,13 @@ export const UnusedAssetsTab: React.FC = () => {
   )
 }
 
-const exportBtnStyle: React.CSSProperties = {
-  padding: '5px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff',
-  cursor: 'pointer', fontSize: 12, fontWeight: 500,
-}
+const StatBox: React.FC<{ label: string; value: string }> = ({ label, value }) => {
+  const { token } = theme.useToken()
 
-const StatBox: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div style={{ padding: '10px 16px', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, minWidth: 80 }}>
-    <div style={{ fontSize: 11, color: '#8c8c8c', marginBottom: 2 }}>{label}</div>
-    <div style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>{value}</div>
-  </div>
-)
+  return (
+    <div style={{ padding: '10px 16px', background: token.colorFillAlter, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, minWidth: 80 }}>
+      <div style={{ fontSize: token.fontSize, color: token.colorTextSecondary, marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: token.fontSizeHeading4, fontWeight: 600, color: token.colorText }}>{value}</div>
+    </div>
+  )
+}

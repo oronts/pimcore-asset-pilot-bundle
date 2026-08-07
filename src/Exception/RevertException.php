@@ -10,7 +10,7 @@ use Oronts\AssetPilotBundle\Enum\RevertFailure;
  * Thrown by OperationReverter when a revert cannot proceed. Carries the machine-readable reason and
  * any context (e.g. the conflicting paths) so a caller can react without parsing the message.
  */
-final class RevertException extends \RuntimeException
+class RevertException extends \RuntimeException
 {
     /** @param array<string, mixed> $context */
     public function __construct(

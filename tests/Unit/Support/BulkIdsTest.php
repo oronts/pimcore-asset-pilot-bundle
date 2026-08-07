@@ -64,6 +64,22 @@ class BulkIdsTest extends TestCase
     }
 
     #[Test]
+    public function rejectsLeadingZeroStringsToMatchTheCanonicalIdPattern(): void
+    {
+        self::assertSame([1, 2], BulkIds::clean(['1', '01', '007', '0', '2']));
+    }
+
+    #[Test]
+    public function dropsDigitStringsAboveThePlatformIntegerRangeInsteadOfSaturating(): void
+    {
+        self::assertSame([\PHP_INT_MAX], BulkIds::clean([(string) \PHP_INT_MAX]));
+        self::assertSame([], BulkIds::clean(['9223372036854775808']));
+        self::assertSame([], BulkIds::clean(['999999999999999999999999999999']));
+        self::assertSame([5], BulkIds::clean(['9223372036854775808', 5]));
+        self::assertSame([7], BulkIds::fromCsv('9223372036854775808, 7'));
+    }
+
+    #[Test]
     public function stopsCollectingJustAboveTheCapSoTheCallerCanReject(): void
     {
         $raw = range(1, BulkIds::MAX + 500);

@@ -4,63 +4,48 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
-use Oronts\AssetPilotBundle\Enum\OperationStatus;
-use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Model\ReorganizeResult;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
+use Oronts\AssetPilotBundle\Service\Query\BoundedScan;
 use Pimcore\Model\Asset;
-use Pimcore\Model\DataObject\AbstractObject;
-use Psr\Log\LoggerInterface;
 
 /**
- * Asset-centric reorganize for post-import: assets land in a staging folder, and re-organizing the
- * objects that own them relocates each asset to its rule-derived path. Resolves owner objects via
- * the dependency resolver and re-organizes them (idempotent), bounded and paged so a large folder
- * never blocks; async queues one organize message per owner instead.
+ * Resolves the exact owner-object selection for assets in a folder or an explicit asset set.
  */
-class AssetReorganizer
+class AssetReorganizer implements AssetReorganizerInterface
 {
     public function __construct(
-        protected readonly AssetDependencyResolver $dependencyResolver,
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
-        protected readonly LoggerInterface $logger,
+        protected readonly AssetDependencyResolverInterface $dependencyResolver,
+        protected readonly ElementAuthorizationInterface $authorization,
         protected readonly int $defaultLimit = 100,
+        protected readonly int $maxCandidates = 5000,
     ) {}
 
-    public function reorganizeFolder(string $folderPath, int $limit = 0, bool $async = false): ReorganizeResult
+    /**
+     * @return array{assetCount: int, objectIds: list<int>, truncated: bool}
+     */
+    public function selectFolder(string $folderPath, int $limit = 0): array
     {
         $limit = $limit > 0 ? $limit : $this->defaultLimit;
-        $assetIds = $this->listAssetIdsInFolder($folderPath, $limit);
+        ['ids' => $assetIds, 'truncated' => $truncated] = $this->listAssetIdsInFolder($folderPath, $limit);
 
-        return $this->reorganizeOwnersOf($assetIds, $async);
+        return ['assetCount' => count($assetIds), 'objectIds' => $this->ownerIdsFor($assetIds), 'truncated' => $truncated];
     }
 
     /**
-     * Re-organize the owners of an explicit set of asset ids (the targeted counterpart to
-     * reorganizeFolder, for "fix just these imported assets" rather than a whole staging folder).
+     * @param list<int> $assetIds
      *
-     * @param int[] $assetIds
+     * @return array{assetCount: int, objectIds: list<int>, truncated: bool}
      */
-    public function reorganizeAssets(array $assetIds, bool $async = false): ReorganizeResult
+    public function selectAssets(array $assetIds): array
     {
         $assetIds = array_values(array_unique(array_filter(
             array_map('intval', $assetIds),
             static fn (int $id): bool => $id > 0,
         )));
+        $assetIds = array_values(array_filter($assetIds, fn (int $id): bool => $this->isAssetVisible($id)));
 
-        return $this->reorganizeOwnersOf($assetIds, $async);
-    }
-
-    /**
-     * @param list<int> $assetIds
-     */
-    private function reorganizeOwnersOf(array $assetIds, bool $async): ReorganizeResult
-    {
-        $ownerIds = $this->ownerIdsFor($assetIds);
-        $counts = $this->organizeOwners($ownerIds, $async);
-
-        return new ReorganizeResult(count($assetIds), count($ownerIds), $counts['organized'], $counts['dispatched'], $counts['skipped'], $counts['failed']);
+        return ['assetCount' => count($assetIds), 'objectIds' => $this->ownerIdsFor($assetIds), 'truncated' => false];
     }
 
     /**
@@ -84,85 +69,52 @@ class AssetReorganizer
     }
 
     /**
-     * @param list<int> $ownerIds
-     * @return array{organized: int, dispatched: int, skipped: int, failed: int}
-     */
-    private function organizeOwners(array $ownerIds, bool $async): array
-    {
-        $organized = 0;
-        $dispatched = 0;
-        $skipped = 0;
-        $failed = 0;
-
-        foreach ($ownerIds as $objectId) {
-            if ($async) {
-                try {
-                    $this->dispatch($objectId);
-                    ++$dispatched;
-                } catch (\Throwable $e) {
-                    $this->logger->error('Asset Pilot: reorganize dispatch failed for object {id}: {error}', [
-                        'id' => $objectId,
-                        'error' => $e->getMessage(),
-                    ]);
-                    ++$failed;
-                }
-                continue;
-            }
-
-            $object = $this->loadObject($objectId);
-            if ($object === null) {
-                ++$skipped;
-                continue;
-            }
-
-            try {
-                $results = $this->organizer->organize($object, TriggerType::Manual);
-            } catch (\Throwable $e) {
-                $this->logger->error('Asset Pilot: reorganize failed for object {id}: {error}', [
-                    'id' => $objectId,
-                    'error' => $e->getMessage(),
-                    'exception' => $e,
-                ]);
-                ++$failed;
-                continue;
-            }
-
-            $objectFailed = false;
-            foreach ($results as $result) {
-                if ($result->status === OperationStatus::Failed) {
-                    $objectFailed = true;
-                    break;
-                }
-            }
-            $objectFailed ? ++$failed : ++$organized;
-        }
-
-        return ['organized' => $organized, 'dispatched' => $dispatched, 'skipped' => $skipped, 'failed' => $failed];
-    }
-
-    protected function dispatch(int $objectId): void
-    {
-        $this->dispatcher->dispatchObject($objectId, TriggerType::Manual);
-    }
-
-    /**
-     * @return list<int>
+     * The raw scan is bounded by {@see $maxCandidates} so a mostly-hidden folder cannot force a
+     * full-folder walk for a workspace-restricted user; truncated is reported when the budget is hit.
+     *
+     * @return array{ids: list<int>, truncated: bool}
      */
     protected function listAssetIdsInFolder(string $folderPath, int $limit): array
     {
-        // Shared filter helper: LIKE-escapes the folder path (so a name with `_`/`%` cannot
-        // over-match) and excludes folder rows, which carry no dependents to reorganize.
-        [$condition, $params] = AssetFilter::condition(['folder' => $folderPath], excludeFolders: true);
+        $visible = [];
 
+        $truncated = BoundedScan::run(
+            fn (int $offset, int $batch): array => $this->rawAssetIdsInFolder($folderPath, $offset, $batch),
+            function (int $id) use (&$visible, $limit): bool {
+                if ($this->isAssetVisible($id)) {
+                    $visible[] = $id;
+                }
+
+                return count($visible) >= $limit;
+            },
+            $this->maxCandidates,
+            min(500, max(50, $limit)),
+        );
+
+        return ['ids' => $visible, 'truncated' => $truncated];
+    }
+
+    /** @return list<int> */
+    protected function rawAssetIdsInFolder(string $folderPath, int $offset, int $limit): array
+    {
+        // LIKE-escapes the folder path (so a name with `_`/`%` cannot over-match) and excludes folder rows.
+        [$condition, $params] = AssetFilter::condition(['folder' => $folderPath], excludeFolders: true);
         $listing = new Asset\Listing();
         $listing->setCondition($condition, $params);
+        $listing->setOrderKey('id');
+        $listing->setOrder('asc');
+        $listing->setOffset($offset);
         $listing->setLimit($limit);
 
         return array_map('intval', $listing->loadIdList());
     }
 
-    protected function loadObject(int $id): ?AbstractObject
+    protected function isAssetVisible(int $assetId): bool
     {
-        return AbstractObject::getById($id);
+        $asset = Asset::getById($assetId);
+
+        return $asset instanceof Asset
+            && !$asset instanceof Asset\Folder
+            && $this->authorization->isAllowed($asset, 'view');
     }
 }

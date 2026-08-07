@@ -13,7 +13,7 @@ use Symfony\Contracts\EventDispatcher\Event;
 
 class AssetMoveEvent extends Event
 {
-    protected bool $cancelled = false;
+    use CancellableEvent;
 
     public function __construct(
         public readonly Asset $asset,
@@ -26,17 +26,6 @@ class AssetMoveEvent extends Event
         public readonly ?MoveOperation $operation = null,
         public readonly ?\Throwable $throwable = null,
     ) {}
-
-    public function cancel(): void
-    {
-        $this->cancelled = true;
-        $this->stopPropagation();
-    }
-
-    public function isCancelled(): bool
-    {
-        return $this->cancelled;
-    }
 
     /** True when fired from a preview/dry-run: listeners may decide cancellation but must not mutate state. */
     public function isDryRun(): bool

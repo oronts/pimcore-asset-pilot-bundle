@@ -8,7 +8,7 @@ namespace Oronts\AssetPilotBundle\Service\Query;
  * Maps a request sort key to a real column via a per-endpoint allowlist, keeping the identifier off
  * the SQL string. Unknown key -> default; non-ASC order -> DESC.
  */
-final class SortWhitelist
+class SortWhitelist
 {
     /**
      * @param array<string, string> $allowed map of public sort key => real column expression

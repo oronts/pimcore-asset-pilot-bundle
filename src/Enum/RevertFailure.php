@@ -13,7 +13,9 @@ enum RevertFailure: string
     case AuditEntryNotFound = 'audit_entry_not_found';
     case NotCompleted = 'not_completed';
     case AssetNotFound = 'asset_not_found';
+    case AssetLocked = 'asset_locked';
     case PermissionDenied = 'permission_denied';
     case PathConflict = 'path_conflict';
     case ExecutionFailed = 'execution_failed';
+    case RecoveryRequired = 'recovery_required';
 }

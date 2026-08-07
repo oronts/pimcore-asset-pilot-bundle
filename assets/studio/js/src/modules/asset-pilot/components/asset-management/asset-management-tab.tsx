@@ -1,14 +1,14 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAssetSearch } from '../../hooks/use-asset-pilot-api'
-import type { AssetItem, AssetSearchFilters } from '../../types'
+import type { AssetItem, AssetSearchFilters, MutationFeedback } from '../../types'
 import { BulkAssetActions } from './bulk-asset-actions'
 import { GalleryGrid, ViewToggle, type ViewMode } from '../shared/gallery-grid'
 import { OpenButton } from '../shared/open-button'
 import { TypeBadge } from '../shared/type-badge'
 import { Highlight } from '../shared/highlight'
 import { EmptyState } from '../shared/empty-state'
-import { LockBadge } from '../shared/lock-badge'
+import { LockCell } from '../shared/lock-cell'
 import { DataTable, type DataColumn } from '../shared/data-table'
 import { useSort } from '../../hooks/use-sort'
 import { useToast } from '../../hooks/use-toast'
@@ -17,11 +17,13 @@ import { useCart, CART_MAX } from '../../hooks/use-cart'
 import { formatBytes, formatDate } from '../../utils/format'
 import { ExpandablePath } from '../shared/expandable-path'
 import { AssetCartBar } from './asset-cart-bar'
+import { theme } from 'antd'
 
 const typeOptions = ['', 'image', 'document', 'video', 'audio', 'text', 'archive']
 
 export const AssetManagementTab: React.FC = () => {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const toast = useToast()
   const { sortField, sortDirection, toggleSort, sortParams } = useSort()
   const [filters, setFilters] = useState<AssetSearchFilters>({ page: 1, limit: 50 })
@@ -29,13 +31,16 @@ export const AssetManagementTab: React.FC = () => {
   const [objectIdInput, setObjectIdInput] = useState('')
   const mergedFilters = { ...filters, ...sortParams }
   const { data, loading, error, refetch } = useAssetSearch(mergedFilters)
+  // Any visible asset is selectable: safe actions (ZIP, cart, unlock) apply to protected assets too.
+  // Protection is enforced per-action in BulkAssetActions, not by hiding rows from selection.
   const { selected, allSelected, toggleSelect, toggleAll, clear } = useRowSelection(data?.items)
+  const lockedIds = useMemo(() => (data?.items ?? []).filter(a => a.locked).map(a => a.id), [data?.items])
   const cart = useCart()
   const [viewMode, setViewMode] = useState<ViewMode>('list')
 
   const addSelectionToCart = (): void => {
-    const capped = cart.add([...selected])
-    toast.success(t('asset-pilot.cart.added', { count: selected.size }))
+    const { added, capped } = cart.add([...selected])
+    toast.success(t('asset-pilot.cart.added', { count: added }))
     if (capped) toast.warning(t('asset-pilot.cart.full', { max: CART_MAX }))
     clear()
   }
@@ -46,8 +51,9 @@ export const AssetManagementTab: React.FC = () => {
     clear()
   }
 
-  const handleResult = (msg: string): void => {
-    toast.success(msg)
+  const handleResult = (result: MutationFeedback): void => {
+    toast[result.severity](result.message)
+    if (result.severity === 'error') return
     clear()
     refetch()
   }
@@ -59,17 +65,19 @@ export const AssetManagementTab: React.FC = () => {
 
   const columns: DataColumn<AssetItem>[] = [
     { key: 'id', label: t('asset-pilot.columns.id'), priority: 1, sortField: 'id', cell: a => <OpenButton id={a.id} type="asset" /> },
-    { key: 'lock', label: t('asset-pilot.columns.lock-status'), priority: 1, cell: a => (a.locked ? <LockBadge /> : null) },
+    { key: 'lock', label: t('asset-pilot.columns.lock-status'), priority: 1, cell: a => (a.locked ? <LockCell id={a.id} onUnlocked={refetch} /> : null) },
     { key: 'filename', label: t('asset-pilot.columns.filename'), priority: 1, sortField: 'filename', cellStyle: { fontWeight: 500 }, cell: a => <ExpandablePath path={a.filename} maxLength={35} highlight={<Highlight text={a.filename ?? ''} query={filters.q} />} /> },
     { key: 'path', label: t('asset-pilot.columns.path'), priority: 2, cell: a => <ExpandablePath path={a.full_path} maxLength={50} highlight={<Highlight text={a.full_path ?? ''} query={filters.q} />} /> },
     { key: 'type', label: t('asset-pilot.columns.type'), priority: 1, sortField: 'type', cell: a => <TypeBadge type={a.type} /> },
     { key: 'size', label: t('asset-pilot.columns.size'), priority: 2, cellStyle: { whiteSpace: 'nowrap' }, cell: a => formatBytes(a.file_size) },
-    { key: 'modified', label: t('asset-pilot.columns.modified'), priority: 3, sortField: 'modified_at', cellStyle: { fontSize: 11, color: '#8c8c8c', whiteSpace: 'nowrap' }, cell: a => formatDate(a.modified_at, true) },
+    { key: 'modified', label: t('asset-pilot.columns.modified'), priority: 3, sortField: 'modified_at', cellStyle: { color: token.colorTextSecondary, whiteSpace: 'nowrap' }, cell: a => formatDate(a.modified_at, true) },
   ]
 
   const summary = (
-    <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
-      {t('asset-pilot.common.showing', { count: data?.items.length ?? 0, total: data?.total ?? 0 })} — {t('asset-pilot.common.page-info', { page: data?.page ?? 1, pages: data?.pages ?? 1 })}
+    <div style={{ fontSize: token.fontSize, color: token.colorTextSecondary, marginBottom: 8 }}>
+      {data?.total != null
+        ? `${t('asset-pilot.common.showing', { count: data.items.length, total: data.total })} — ${t('asset-pilot.common.page-info', { page: data.page, pages: data.pages ?? 1 })}`
+        : t('asset-pilot.common.showing-page', { count: data?.items.length ?? 0 })}
     </div>
   )
 
@@ -91,7 +99,7 @@ export const AssetManagementTab: React.FC = () => {
             onChange={e => setSearchInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
             placeholder={t('asset-pilot.management.search-placeholder')}
-            style={{ ...inputStyle, width: 220 }}
+            style={{ ...controlStyle(token), width: 220 }}
           />
         </FilterField>
 
@@ -102,7 +110,7 @@ export const AssetManagementTab: React.FC = () => {
             onChange={e => setObjectIdInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
             placeholder={t('asset-pilot.management.object-id-placeholder')}
-            style={{ ...inputStyle, width: 120 }}
+            style={{ ...controlStyle(token), width: 120 }}
           />
         </FilterField>
 
@@ -110,7 +118,7 @@ export const AssetManagementTab: React.FC = () => {
           <select
             value={filters.type ?? ''}
             onChange={e => { setFilters(f => ({ ...f, type: e.target.value || undefined, page: 1 })); clear() }}
-            style={selectStyle}
+            style={controlStyle(token)}
           >
             {typeOptions.map(opt => <option key={opt} value={opt}>{opt || t('asset-pilot.management.all-types')}</option>)}
           </select>
@@ -122,7 +130,7 @@ export const AssetManagementTab: React.FC = () => {
             value={filters.folder ?? ''}
             onChange={e => { setFilters(f => ({ ...f, folder: e.target.value || undefined, page: 1 })); clear() }}
             placeholder={t('asset-pilot.management.folder-placeholder')}
-            style={{ ...inputStyle, width: 150 }}
+            style={{ ...controlStyle(token), width: 150 }}
           />
         </FilterField>
 
@@ -132,7 +140,7 @@ export const AssetManagementTab: React.FC = () => {
             value={filters.extension ?? ''}
             onChange={e => { setFilters(f => ({ ...f, extension: e.target.value || undefined, page: 1 })); clear() }}
             placeholder={t('asset-pilot.management.extension-placeholder')}
-            style={{ ...inputStyle, width: 90 }}
+            style={{ ...controlStyle(token), width: 90 }}
           />
         </FilterField>
 
@@ -140,7 +148,7 @@ export const AssetManagementTab: React.FC = () => {
           <select
             value={filters.referenced ?? ''}
             onChange={e => { setFilters(f => ({ ...f, referenced: (e.target.value || undefined) as AssetSearchFilters['referenced'], page: 1 })); clear() }}
-            style={selectStyle}
+            style={controlStyle(token)}
           >
             <option value="">{t('asset-pilot.management.relation-all')}</option>
             <option value="referenced">{t('asset-pilot.management.relation-referenced')}</option>
@@ -148,13 +156,13 @@ export const AssetManagementTab: React.FC = () => {
           </select>
         </FilterField>
 
-        <button onClick={handleSearch} style={searchBtnStyle}>{t('asset-pilot.management.search-btn')}</button>
+        <button onClick={handleSearch} style={{ ...controlStyle(token), borderColor: token.colorPrimary, background: token.colorPrimary, color: token.colorTextLightSolid, cursor: 'pointer', fontWeight: 500, alignSelf: 'flex-end' }}>{t('asset-pilot.management.search-btn')}</button>
       </div>
 
       {cart.count > 0 && <AssetCartBar cart={cart} />}
 
       {selected.size > 0 && (
-        <BulkAssetActions assetIds={[...selected]} onResult={handleResult} onDeselect={() => clear()} onAddToCart={addSelectionToCart} />
+        <BulkAssetActions assetIds={[...selected]} lockedIds={lockedIds} onResult={handleResult} onDeselect={() => clear()} onAddToCart={addSelectionToCart} />
       )}
 
       <ViewToggle mode={viewMode} onChange={setViewMode} />
@@ -166,6 +174,7 @@ export const AssetManagementTab: React.FC = () => {
             data={data}
             loading={loading}
             error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onRetry={refetch}
             onPage={goToPage}
             limit={filters.limit}
             onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
@@ -181,10 +190,13 @@ export const AssetManagementTab: React.FC = () => {
             data={data}
             loading={loading}
             error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onRetry={refetch}
             empty={emptyState}
             summary={summary}
             page={data?.page ?? 1}
-            pages={data?.pages ?? 1}
+            pages={data?.pages ?? null}
+            hasMore={data?.hasMore}
+            truncated={data?.truncated}
             onPage={goToPage}
             limit={filters.limit}
             onLimit={n => { setFilters(f => ({ ...f, limit: n, page: 1 })); clear() }}
@@ -196,8 +208,8 @@ export const AssetManagementTab: React.FC = () => {
               type: a.type,
               fallbackLabel: a.filename.split('.').pop() ?? a.type,
               title: <OpenButton id={a.id} type="asset" label={a.filename} />,
-              meta: <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><TypeBadge type={a.type} /><span style={{ fontSize: 11, color: '#8c8c8c' }}>{formatBytes(a.file_size)}</span></div>,
-              badges: a.locked ? <LockBadge /> : undefined,
+              meta: <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><TypeBadge type={a.type} /><span style={{ fontSize: token.fontSize, color: token.colorTextSecondary }}>{formatBytes(a.file_size)}</span></div>,
+              badges: a.locked ? <LockCell id={a.id} onUnlocked={refetch} /> : undefined,
             })}
           />
         )}
@@ -206,12 +218,21 @@ export const AssetManagementTab: React.FC = () => {
 }
 
 const FilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-    <label style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 500 }}>{label}</label>
-    {children}
-  </div>
+  <ThemedFilterField label={label}>{children}</ThemedFilterField>
 )
 
-const inputStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
-const selectStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
-const searchBtnStyle: React.CSSProperties = { padding: '5px 16px', border: '1px solid #1677ff', borderRadius: 6, background: '#1677ff', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500, alignSelf: 'flex-end' }
+const ThemedFilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => {
+  const { token } = theme.useToken()
+
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ fontSize: token.fontSize, color: token.colorTextSecondary, fontWeight: 500 }}>{label}</span>
+      {children}
+    </label>
+  )
+}
+
+const controlStyle = (token: ReturnType<typeof theme.useToken>['token']): React.CSSProperties => ({
+  padding: '5px 10px', border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadius,
+  fontSize: token.fontSize, outline: 'none', background: token.colorBgContainer, color: token.colorText,
+})

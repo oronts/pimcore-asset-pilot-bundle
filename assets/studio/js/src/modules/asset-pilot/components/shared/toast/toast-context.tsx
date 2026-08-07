@@ -1,6 +1,9 @@
 import React, { createContext, useState, useCallback, useEffect } from 'react'
 import ReactDOM from 'react-dom'
 import { injectStyles } from '../../../utils/inject-styles'
+import { useTranslation } from 'react-i18next'
+import { theme } from 'antd'
+import { assetPilotThemeVariables } from '../theme-variables'
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning'
 
@@ -27,20 +30,23 @@ const TOAST_CSS = `
   from { opacity: 1; }
   to { opacity: 0; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .ap-toast { animation: none !important; }
+}
 `
 
 const borderColors: Record<ToastType, string> = {
-  success: '#52c41a',
-  error: '#ff4d4f',
-  info: '#1677ff',
-  warning: '#fa8c16',
+  success: 'var(--ap-color-success)',
+  error: 'var(--ap-color-error)',
+  info: 'var(--ap-color-primary)',
+  warning: 'var(--ap-color-warning)',
 }
 
 const bgColors: Record<ToastType, string> = {
-  success: '#f6ffed',
-  error: '#fff2f0',
-  info: '#e6f4ff',
-  warning: '#fff7e6',
+  success: 'var(--ap-color-success-bg)',
+  error: 'var(--ap-color-error-bg)',
+  info: 'var(--ap-color-primary-bg)',
+  warning: 'var(--ap-color-warning-bg)',
 }
 
 const iconMap: Record<ToastType, string> = {
@@ -51,6 +57,7 @@ const iconMap: Record<ToastType, string> = {
 }
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { token } = theme.useToken()
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
   useEffect(() => { injectStyles('ap-toast-styles', TOAST_CSS) }, [])
@@ -69,7 +76,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [removeToast])
 
   const container = (
-    <div style={containerStyle}>
+    <div style={{ ...assetPilotThemeVariables(token), ...containerStyle }}>
       {toasts.map(toast => (
         <ToastNotification key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}
@@ -85,6 +92,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 }
 
 const ToastNotification: React.FC<{ toast: ToastItem; onClose: () => void }> = ({ toast, onClose }) => {
+  const { t } = useTranslation()
   const [exiting, setExiting] = useState(false)
 
   useEffect(() => {
@@ -93,7 +101,7 @@ const ToastNotification: React.FC<{ toast: ToastItem; onClose: () => void }> = (
   }, [])
 
   return (
-    <div style={{
+    <div className="ap-toast" role={toast.type === 'error' ? 'alert' : 'status'} aria-live={toast.type === 'error' ? 'assertive' : 'polite'} style={{
       ...toastStyle,
       borderLeft: `4px solid ${borderColors[toast.type]}`,
       background: bgColors[toast.type],
@@ -102,8 +110,8 @@ const ToastNotification: React.FC<{ toast: ToastItem; onClose: () => void }> = (
       <span style={{ color: borderColors[toast.type], fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
         {iconMap[toast.type]}
       </span>
-      <span style={{ flex: 1, fontSize: 13, color: '#262626', lineHeight: '1.4' }}>{toast.message}</span>
-      <button onClick={onClose} style={closeBtnStyle}>&times;</button>
+      <span style={{ flex: 1, fontSize: 13, color: 'var(--ap-color-text)', lineHeight: '1.4' }}>{toast.message}</span>
+      <button onClick={onClose} aria-label={t('asset-pilot.common.close-notification')} style={closeBtnStyle}>&times;</button>
     </div>
   )
 }
@@ -116,7 +124,9 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
+  width: 380,
   maxWidth: 380,
+  maxInlineSize: 'calc(100vw - 32px)',
   pointerEvents: 'none',
 }
 
@@ -126,7 +136,7 @@ const toastStyle: React.CSSProperties = {
   gap: 10,
   padding: '12px 16px',
   borderRadius: 8,
-  boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+  boxShadow: 'var(--ap-box-shadow-secondary)',
   pointerEvents: 'auto',
 }
 
@@ -135,7 +145,7 @@ const closeBtnStyle: React.CSSProperties = {
   background: 'none',
   fontSize: 18,
   cursor: 'pointer',
-  color: '#8c8c8c',
+  color: 'var(--ap-color-text-secondary)',
   padding: 0,
   lineHeight: 1,
   flexShrink: 0,

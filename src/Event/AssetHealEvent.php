@@ -16,22 +16,11 @@ use Symfony\Contracts\EventDispatcher\Event;
  */
 class AssetHealEvent extends Event
 {
-    protected bool $cancelled = false;
+    use CancellableEvent;
 
     public function __construct(
         public readonly Asset $asset,
         public readonly ?int $targetVersion,
         public readonly ?HealOutcome $outcome = null,
     ) {}
-
-    public function cancel(): void
-    {
-        $this->cancelled = true;
-        $this->stopPropagation();
-    }
-
-    public function isCancelled(): bool
-    {
-        return $this->cancelled;
-    }
 }

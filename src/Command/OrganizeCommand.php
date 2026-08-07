@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\BoundedIntegerOption;
+use Oronts\AssetPilotBundle\Command\Support\RendersRuleExplain;
+use Oronts\AssetPilotBundle\Command\Support\ReviewedSelectionConsolePresenter;
+use Oronts\AssetPilotBundle\Command\Support\ValidatesApplyPlanControl;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
-use Oronts\AssetPilotBundle\Enum\OperationStatus;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
+use Oronts\AssetPilotBundle\Exception\ReviewedSelectionException;
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Model\ReviewedSelectionResult;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface;
 use Pimcore\Model\DataObject;
 use Pimcore\Model\DataObject\AbstractObject;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -27,13 +32,14 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class OrganizeCommand extends Command
 {
+    use ValidatesApplyPlanControl;
+    use RendersRuleExplain;
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly ReviewedObjectOperationServiceInterface $reviewedOperations,
+        protected readonly ReviewedSelectionConsolePresenter $presenter,
         protected readonly RuleEngineInterface $ruleEngine,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
         protected readonly NamingStrategyInterface $namingStrategy,
-        protected readonly LoggerInterface $logger,
         protected readonly int $defaultBatchSize = 50,
     ) {
         parent::__construct();
@@ -44,8 +50,9 @@ class OrganizeCommand extends Command
         $this
             ->addOption('class', 'c', InputOption::VALUE_REQUIRED, 'DataObject class name to organize')
             ->addOption('object-id', 'o', InputOption::VALUE_REQUIRED, 'Specific object ID to organize')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Preview without actually moving assets')
-            ->addOption('async', null, InputOption::VALUE_NONE, 'Dispatch to messenger queue for async processing')
+            ->addOption('apply', null, InputOption::VALUE_NONE, 'Apply the reviewed organization; without this option the command only previews')
+            ->addOption('plan-token', null, InputOption::VALUE_REQUIRED, 'Signed, single-use token returned by the matching preview')
+            ->addOption('async', null, InputOption::VALUE_NONE, 'Queue the reviewed organization via Messenger instead of running inline')
             ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Batch size for bulk operations', (string) $this->defaultBatchSize);
     }
 
@@ -53,63 +60,140 @@ class OrganizeCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
         $objectId = $input->getOption('object-id');
-        $className = $input->getOption('class');
-        $dryRun = $input->getOption('dry-run');
-        $async = $input->getOption('async');
+        $className = $this->className($input->getOption('class'));
+        $apply = (bool) $input->getOption('apply');
+        $planToken = $input->getOption('plan-token');
+
+        if (!$this->hasValidPlanControl($io, $apply, $planToken)) {
+            return Command::INVALID;
+        }
 
         if ($objectId === null && $className === null) {
             $io->error('Either --class or --object-id must be provided.');
             return Command::FAILURE;
         }
+        if ($objectId !== null && $className !== null) {
+            $io->error('--class and --object-id cannot be used together.');
 
-        $verbose = $output->isVerbose();
-
-        // Single object mode
-        if ($objectId !== null) {
-            return $this->organizeSingle($io, (int) $objectId, $dryRun, $verbose);
-        }
-
-        // Bulk mode by class
-        return $this->organizeBulk($io, $className, $dryRun, $async, (int) $input->getOption('batch-size'));
-    }
-
-    protected function organizeSingle(SymfonyStyle $io, int $objectId, bool $dryRun, bool $verbose = false): int
-    {
-        $object = AbstractObject::getById($objectId);
-        if ($object === null) {
-            $io->error("Object #{$objectId} not found.");
             return Command::FAILURE;
         }
 
-        if ($dryRun) {
-            if ($verbose) {
-                return $this->organizeSingleVerbose($io, $object);
+        if ($objectId !== null) {
+            $parsedObjectId = BoundedIntegerOption::parse($objectId, 1, PHP_INT_MAX);
+            if ($parsedObjectId === null) {
+                $io->error('--object-id must be a positive integer.');
+
+                return Command::FAILURE;
             }
 
-            $operations = $this->organizer->dryRun($object);
-            if (empty($operations)) {
-                $io->success('No assets need organizing for this object.');
-                return Command::SUCCESS;
-            }
-
-            $rows = [];
-            foreach ($operations as $op) {
-                $statusLabel = $op->status === OperationStatus::Skipped
-                    ? '<fg=yellow>SKIP</> ' . ($op->errorMessage ?? '')
-                    : '<fg=green>MOVE</>';
-                $rows[] = [$op->assetId, $op->sourcePath, $op->targetPath, $op->ruleName, $statusLabel];
-            }
-            $io->table(['Asset ID', 'Source', 'Target', 'Rule', 'Status'], $rows);
-            $pending = count(array_filter($operations, static fn ($op) => $op->status !== OperationStatus::Skipped));
-            $skipped = count($operations) - $pending;
-            $io->note("{$pending} asset(s) would be moved" . ($skipped > 0 ? ", {$skipped} skipped." : '.'));
-            return Command::SUCCESS;
+            return $this->runReviewed(
+                $io,
+                [$parsedObjectId],
+                ['mode' => 'object_id', 'objectId' => $parsedObjectId],
+                TriggerType::Manual,
+                $apply,
+                (bool) $input->getOption('async'),
+                $planToken,
+                $output->isVerbose(),
+            );
         }
 
-        $results = $this->organizer->organize($object, TriggerType::Manual);
-        $this->displayResults($io, $results);
+        $batchSize = BoundedIntegerOption::parse($input->getOption('batch-size'), 1, 1_000);
+        if ($batchSize === null) {
+            $io->error('--batch-size must be an integer between 1 and 1000.');
+
+            return Command::FAILURE;
+        }
+
+        $total = $this->countObjectsForClass($className);
+        if ($total === 0) {
+            if ($apply) {
+                $io->error('The reviewed class selection is no longer current. Preview again.');
+
+                return Command::INVALID;
+            }
+            $io->warning("No objects found for class '{$className}'.");
+
+            return Command::SUCCESS;
+        }
+        if ($total > 1_000) {
+            $io->error(sprintf('The class contains %d objects, above the reviewed-operation maximum of 1000. Use a narrower operation selector.', $total));
+
+            return Command::INVALID;
+        }
+
+        try {
+            $ids = $this->collectObjectIds($className, $batchSize, $total);
+        } catch (\RuntimeException $e) {
+            $io->error($e->getMessage());
+
+            return Command::FAILURE;
+        }
+
+        return $this->runReviewed(
+            $io,
+            $ids,
+            ['class' => $className, 'mode' => 'class'],
+            TriggerType::BulkOperation,
+            $apply,
+            (bool) $input->getOption('async'),
+            $planToken,
+        );
+    }
+
+    /** @param list<int> $objectIds @param array<string, mixed> $selector */
+    private function runReviewed(
+        SymfonyStyle $io,
+        array $objectIds,
+        array $selector,
+        TriggerType $trigger,
+        bool $apply,
+        bool $async,
+        mixed $planToken,
+        bool $verbose = false,
+    ): int {
+        try {
+            $result = $this->reviewedOperations->execute(
+                OperationRunKind::Organize,
+                $objectIds,
+                $selector,
+                $trigger,
+                !$apply,
+                $async,
+                $planToken,
+                ActorContext::system(),
+            );
+        } catch (ReviewedSelectionException $e) {
+            return $this->presenter->renderError($io, $e);
+        }
+
+        $this->presenter->render($io, $result, ['objects selected' => count($objectIds)]);
+        if (!$apply && $verbose && count($objectIds) === 1) {
+            $object = $this->loadObject($objectIds[0]);
+            if ($object !== null) {
+                $this->organizeSingleVerbose($io, $object);
+            }
+        }
+
+        return $this->reviewedExit($io, $result, $apply, $async);
+    }
+
+    private function reviewedExit(SymfonyStyle $io, ReviewedSelectionResult $result, bool $apply, bool $async): int
+    {
+        if ($result->failed > 0) {
+            $io->warning(sprintf('%d object(s) failed to organize; inspect the run and audit log.', $result->failed));
+
+            return Command::FAILURE;
+        }
+
+        $io->success($apply ? ($async ? 'Organization queued.' : 'Organization complete.') : 'Preview complete; no assets were changed.');
 
         return Command::SUCCESS;
+    }
+
+    protected function loadObject(int $objectId): ?AbstractObject
+    {
+        return AbstractObject::getById($objectId);
     }
 
     protected function organizeSingleVerbose(SymfonyStyle $io, AbstractObject $object): int
@@ -126,117 +210,76 @@ class OrganizeCommand extends Command
             $io->section(sprintf('Field: %s (locale: %s)', $fieldInfo->fieldName, $localeLabel));
 
             foreach ($fieldInfo->assets as $asset) {
-                $io->text(sprintf('  Asset #%d: %s', $asset->getId(), $asset->getRealFullPath()));
-                $io->newLine();
-
-                $result = $this->ruleEngine->explain($object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
-                $evaluations = $result['evaluations'];
-                $matches = $result['matches'];
-
-                $rows = [];
-                foreach ($evaluations as $eval) {
-                    $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-                    $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
-                }
-
-                $io->table(['Rule', 'Result', 'Detail'], $rows);
-
-                if (!empty($matches)) {
-                    $match = $matches[0];
-                    $targetFilename = $this->namingStrategy->generateName($match->asset, $match->resolvedPath);
-                    $fullPath = rtrim($match->resolvedPath, '/') . '/' . $targetFilename;
-                    $io->text(sprintf('  Decision: Rule "%s" matched -> %s', $match->rule->name, $fullPath));
-                } else {
-                    $io->text('  Decision: No rules matched this asset.');
-                }
-
-                $io->newLine();
+                $this->renderRuleExplain($io, $object, $asset, $fieldInfo->fieldName, $fieldInfo->locale);
             }
         }
 
         return Command::SUCCESS;
     }
 
-    protected function organizeBulk(SymfonyStyle $io, string $className, bool $dryRun, bool $async, int $batchSize): int
+    private function className(mixed $value): ?string
     {
-        // Load all object IDs for the class
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        return trim($value);
+    }
+
+    protected function countObjectsForClass(string $className): int
+    {
+        $listing = $this->classListing($className);
+
+        return $listing->getTotalCount();
+    }
+
+    /** @return \Generator<int, list<int>> */
+    protected function objectIdBatches(string $className, int $batchSize): \Generator
+    {
+        $lastId = 0;
+        do {
+            $listing = $this->classListing($className, $lastId);
+            $listing->setOrderKey('id');
+            $listing->setOrder('ASC');
+            $listing->setLimit($batchSize);
+            $ids = array_values($listing->loadIdList());
+            if ($ids !== []) {
+                yield $ids;
+                $lastId = max($ids);
+            }
+        } while (count($ids) === $batchSize);
+    }
+
+    /** @return list<int> */
+    private function collectObjectIds(string $className, int $batchSize, int $expectedCount): array
+    {
+        $ids = [];
+        foreach ($this->objectIdBatches($className, $batchSize) as $batch) {
+            array_push($ids, ...$batch);
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids, SORT_NUMERIC);
+        if (count($ids) !== $expectedCount) {
+            throw new \RuntimeException('The class selection changed while its snapshot was being collected. Run the preview again.');
+        }
+
+        return $ids;
+    }
+
+    private function classListing(string $className, ?int $afterId = null): DataObject\Listing
+    {
         $listing = new DataObject\Listing();
         $listing->setObjectTypes([AbstractObject::OBJECT_TYPE_OBJECT, AbstractObject::OBJECT_TYPE_VARIANT]);
-        $listing->setCondition('className = ?', [$className]);
+        $listing->setCondition(
+            $afterId === null ? 'className = ?' : 'className = ? AND id > ?',
+            $afterId === null ? [$className] : [$className, $afterId],
+        );
         $listing->setUnpublished(false);
 
-        $objectIds = [];
-        foreach ($listing as $object) {
-            $objectIds[] = $object->getId();
-        }
-
-        if (empty($objectIds)) {
-            $io->warning("No objects found for class '{$className}'.");
-            return Command::SUCCESS;
-        }
-
-        $io->info(sprintf('Found %d %s object(s) to process.', count($objectIds), $className));
-
-        if ($dryRun) {
-            $io->note('Dry run - showing preview for first 5 objects:');
-            $previewIds = array_slice($objectIds, 0, 5);
-            foreach ($previewIds as $id) {
-                $obj = AbstractObject::getById($id);
-                if ($obj === null) {
-                    continue;
-                }
-                $ops = $this->organizer->dryRun($obj);
-                foreach ($ops as $op) {
-                    $io->writeln("  Asset #{$op->assetId}: {$op->sourcePath} -> {$op->targetPath} ({$op->ruleName})");
-                }
-            }
-            return Command::SUCCESS;
-        }
-
-        if ($async) {
-            // Dispatch in batches
-            $batches = array_chunk($objectIds, max(1, $batchSize));
-            foreach ($batches as $batch) {
-                $this->dispatcher->dispatchBulk($batch, TriggerType::BulkOperation);
-            }
-            $io->success(sprintf('Dispatched %d batch(es) to messenger queue.', count($batches)));
-            return Command::SUCCESS;
-        }
-
-        // Synchronous bulk
-        $progressBar = $io->createProgressBar(count($objectIds));
-        $results = $this->organizer->organizeBulk(
-            $objectIds,
-            TriggerType::BulkOperation,
-            static function (int $current, int $total) use ($progressBar): void {
-                $progressBar->setProgress($current);
-            },
-        );
-        $progressBar->finish();
-        $io->newLine(2);
-
-        $this->displayResults($io, $results);
-
-        return Command::SUCCESS;
+        return $listing;
     }
 
-    protected function displayResults(SymfonyStyle $io, array $results): void
-    {
-        $moved = count(array_filter($results, static fn ($r) => $r->status === OperationStatus::Completed));
-        $skipped = count(array_filter($results, static fn ($r) => $r->status === OperationStatus::Skipped));
-        $failed = count(array_filter($results, static fn ($r) => $r->status === OperationStatus::Failed));
-
-        $io->table(['Status', 'Count'], [
-            ['Moved', $moved],
-            ['Skipped', $skipped],
-            ['Failed', $failed],
-            ['Total', count($results)],
-        ]);
-
-        if ($failed > 0) {
-            $io->warning("{$failed} operation(s) failed. Check the audit log for details.");
-        } else {
-            $io->success("Organization complete: {$moved} moved, {$skipped} skipped.");
-        }
-    }
 }

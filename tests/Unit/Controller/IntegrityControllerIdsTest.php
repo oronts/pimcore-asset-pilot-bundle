@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Tests\Unit\Controller;
 
 use Oronts\AssetPilotBundle\Controller\Api\IntegrityController;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
+use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
+use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
+use Oronts\AssetPilotBundle\Service\IntegrityHealHistoryService;
 use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -20,7 +24,11 @@ class IntegrityControllerIdsTest extends TestCase
         return new IntegrityController(
             $integrity,
             $this->createMock(VersionRollbackHealer::class),
+            $this->createMock(IntegrityHealHistoryService::class),
             new NullLogger(),
+            $this->createMock(ApplyPlanServiceInterface::class),
+            $this->createMock(IntegrityHealFingerprintService::class),
+            $this->createMock(ElementAuthorization::class),
         );
     }
 

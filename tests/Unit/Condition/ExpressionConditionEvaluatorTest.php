@@ -238,6 +238,43 @@ class ExpressionConditionEvaluatorTest extends TestCase
     }
 
     #[Test]
+    public function invalidPathRegexFailsClosedWithoutPhpWarning(): void
+    {
+        $object = $this->createMock(AbstractObject::class);
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getFullPath')->willReturn('/Products/image.jpg');
+
+        self::assertFalse($this->evaluator->evaluate(
+            $object,
+            $asset,
+            $this->createRule('path_matches(asset, "#[invalid#")'),
+        ));
+    }
+
+    #[Test]
+    public function syntaxValidationRejectsInvalidLiteralPathRegex(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid regular expression');
+
+        $this->evaluator->validateSyntax('path_matches(asset, "#[invalid#")');
+    }
+
+    #[Test]
+    public function evaluatesValidPathRegex(): void
+    {
+        $object = $this->createMock(AbstractObject::class);
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getFullPath')->willReturn('/Products/image.jpg');
+
+        self::assertTrue($this->evaluator->evaluate(
+            $object,
+            $asset,
+            $this->createRule('path_matches(asset, "#^/Products/#")'),
+        ));
+    }
+
+    #[Test]
     public function cachesCompiledExpressions(): void
     {
         $object = $this->createMock(AbstractObject::class);

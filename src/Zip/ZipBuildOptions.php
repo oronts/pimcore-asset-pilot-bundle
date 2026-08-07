@@ -9,7 +9,7 @@ namespace Oronts\AssetPilotBundle\Zip;
  * for image assets, an optional Pimcore thumbnail config name to pack the derivative instead of the
  * original (non-images and missing thumbnails fall back to the original).
  */
-final class ZipBuildOptions
+class ZipBuildOptions
 {
     public function __construct(
         public readonly ?string $strategy = null,

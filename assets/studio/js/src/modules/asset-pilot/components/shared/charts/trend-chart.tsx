@@ -1,5 +1,8 @@
-import React from 'react'
+import React, { useId } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useContainerWidth } from '../../../hooks/use-container-width'
+import { theme } from 'antd'
+import { visuallyHiddenStyle } from '../visually-hidden-style'
 
 export interface TrendPoint {
   label: string
@@ -13,9 +16,11 @@ interface Props {
   height?: number
 }
 
-/** Dependency-free SVG area+line trend chart. Width is measured (1:1 coords) so the stroke never distorts. */
-export const TrendChart: React.FC<Props> = ({ points, formatValue, color = '#1677ff', height = 120 }) => {
+export const TrendChart: React.FC<Props> = ({ points, formatValue, color, height = 120 }) => {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
   const [ref, width] = useContainerWidth()
+  const summaryId = useId()
   const fmt = formatValue ?? ((v: number) => String(v))
 
   if (points.length === 0) return <div ref={ref} />
@@ -35,15 +40,18 @@ export const TrendChart: React.FC<Props> = ({ points, formatValue, color = '#167
   const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ')
   const area = `${line} L${x(n - 1).toFixed(1)},${height} L${x(0).toFixed(1)},${height} Z`
   const last = points[n - 1]
+  const chartColor = color ?? token.colorPrimary
+  const summary = points.map(point => t('asset-pilot.charts.value-item', { label: point.label, value: fmt(point.value) })).join('; ')
 
   return (
     <div ref={ref} style={{ width: '100%', overflowX: 'hidden' }}>
-      <svg width={w} height={height} role="img" aria-label={`trend, latest ${fmt(last.value)}`}>
-        <path d={area} fill={color} fillOpacity={0.12} />
-        <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-        <circle cx={x(n - 1)} cy={y(last.value)} r={3} fill={color} />
+      <svg width={w} height={height} role="img" aria-label={t('asset-pilot.charts.trend-latest', { value: fmt(last.value) })} aria-describedby={summaryId}>
+        <path d={area} fill={chartColor} fillOpacity={0.12} />
+        <path d={line} fill="none" stroke={chartColor} strokeWidth={2} strokeLinejoin="round" />
+        <circle cx={x(n - 1)} cy={y(last.value)} r={3} fill={chartColor} />
       </svg>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#8c8c8c', marginTop: 2 }}>
+      <span id={summaryId} style={visuallyHiddenStyle}>{summary}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: token.fontSize, color: token.colorTextSecondary, marginTop: 2 }}>
         <span>{points[0].label}</span>
         <span>{last.label}</span>
       </div>

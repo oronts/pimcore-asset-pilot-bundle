@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\PathResolver;
 
+use Oronts\AssetPilotBundle\Enum\MoveStrategy;
+use Oronts\AssetPilotBundle\Exception\PathResolutionException;
+use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\PathResolver\ContextProviderInterface;
 use Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -24,6 +27,28 @@ class TemplatePathResolverTest extends TestCase
 
         $resolver->validateTemplate('/Products/{{ object.getKey()|safe_key }}/{{ coalesce(a, "x") }}');
         $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function resolveFailsClosedWhenTemplateRenderingThrows(): void
+    {
+        // A throwing accessor / consumer extension must not be turned into a generic /Assets/<key>
+        // destination that silently misfiles the asset.
+        $resolver = new class (new \Psr\Log\NullLogger()) extends TemplatePathResolver {
+            protected function render(string $template, array $context): string
+            {
+                throw new \RuntimeException('accessor blew up');
+            }
+        };
+
+        $rule = new Rule(
+            name: 'broken', class: 'Product', fields: [], condition: null,
+            targetPath: '/Products/{{ object.getBroken() }}', strategy: MoveStrategy::Always, callback: null,
+            priority: 10, enabled: true, filters: [],
+        );
+
+        $this->expectException(PathResolutionException::class);
+        $resolver->resolve($this->createMock(AbstractObject::class), $this->createMock(Asset::class), $rule);
     }
 
     #[Test]

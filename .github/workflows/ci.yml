@@ -6,47 +6,144 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  tests:
-    name: Tests (PHP ${{ matrix.php }})
+  php:
+    name: PHP 8.4
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.4']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f
         with:
-          php-version: ${{ matrix.php }}
-          extensions: mbstring, xml, ctype, iconv, intl, redis
+          php-version: '8.4'
+          extensions: ctype, gd, iconv, intl, mbstring, pdo_mysql, redis, xml, zip
           coverage: none
+          tools: composer:v2
+
+      - name: Verify version consistency
+        run: php tools/verify-version-consistency.php
+
+      - name: Validate Composer metadata
+        run: composer validate --no-check-publish
 
       - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-progress
+        run: composer install --prefer-dist --no-progress --no-interaction
 
-      - name: Coding standards (php-cs-fixer)
-        run: vendor/bin/php-cs-fixer fix --dry-run --diff
+      - name: Audit production dependencies
+        run: composer audit --locked --no-dev
 
-      - name: Static analysis (phpstan)
+      - name: Check coding standards
+        run: vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no
+
+      - name: Run static analysis
         run: vendor/bin/phpstan analyse --no-progress
 
-      - name: Run PHPUnit
-        run: vendor/bin/phpunit
+      - name: Run tests
+        run: vendor/bin/phpunit --do-not-cache-result
 
-  notify-packagist:
-    name: Notify Packagist
+  studio:
+    name: Studio UI
     runs-on: ubuntu-latest
-    needs: tests
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-      - name: Update Packagist
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: assets/studio/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix assets/studio
+
+      - name: Audit frontend dependencies
+        working-directory: assets/studio
+        run: node scripts/audit-allowlist.mjs
+
+      - name: Lint frontend
+        run: npm --prefix assets/studio run lint
+
+      - name: Check frontend types
+        run: npm --prefix assets/studio run check-types
+
+      - name: Run frontend tests
+        run: npm --prefix assets/studio test
+
+      - name: Run frontend accessibility tests
+        run: npm --prefix assets/studio run test:a11y
+
+      - name: Verify shipped frontend build
+        run: npm --prefix assets/studio run verify-build
+
+      - name: Build package frontend
+        run: npm --prefix assets/studio run build
+
+      - name: Prepare release frontend
+        run: npm --prefix assets/studio run prepare-release-build
+
+      - name: Verify package frontend
+        run: npm --prefix assets/studio run verify-build
+
+      - name: Preserve verified package frontend
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: package-frontend
+          path: public/studio/build
+          if-no-files-found: error
+          retention-days: 1
+
+  package:
+    name: Composer package
+    runs-on: ubuntu-latest
+    needs: [php, studio]
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f
+        with:
+          php-version: '8.4'
+          extensions: zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      # Remove the tracked generation the checkout restored so the archive contains ONLY the freshly
+      # built (pruned) generation, matching what release.yml produces in a single workspace.
+      - name: Clear the tracked Studio build before restoring the verified one
+        run: rm -rf public/studio/build
+
+      - name: Download verified package frontend
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: package-frontend
+          path: public/studio/build
+
+      - name: Verify package frontend
+        run: npm --prefix assets/studio run verify-build
+
+      - name: Build Composer archive
+        run: composer archive --format=zip --dir=/tmp --file=asset-pilot-bundle
+
+      - name: Verify release archive
+        run: php tools/verify-release-archive.php /tmp/asset-pilot-bundle.zip
+
+      # The Git tag archive is what Packagist/GitHub distribute for a VCS package. Verify it obeys the
+      # same release layout as the custom Composer archive (clean of .github/tests/e2e via .gitattributes
+      # export-ignore, one active Studio generation, prebuilt remote present) so both artifacts agree.
+      - name: Verify Git tag archive
         run: |
-          curl -s -XPOST \
-            -H 'Content-Type: application/json' \
-            "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}" \
-            -d '{"repository":{"url":"https://github.com/oronts/pimcore-asset-pilot-bundle"}}'
+          git archive --format=zip HEAD -o /tmp/asset-pilot-tag.zip
+          php tools/verify-release-archive.php /tmp/asset-pilot-tag.zip

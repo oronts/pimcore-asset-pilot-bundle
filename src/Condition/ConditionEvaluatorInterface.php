@@ -15,4 +15,6 @@ interface ConditionEvaluatorInterface
 
     /** Like evaluate() but lets evaluation errors propagate, so callers (explain) can report them. */
     public function evaluateStrict(AbstractObject $object, Asset $asset, Rule $rule, ?string $locale = null): bool;
+
+    public function validateSyntax(string $expression): void;
 }

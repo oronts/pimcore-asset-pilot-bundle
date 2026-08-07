@@ -2,6 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UnusedAssetFilters } from '../../types'
 import { FilterPresetDropdown } from './filter-preset-dropdown'
+import { theme } from 'antd'
 
 interface UnusedAssetsFiltersProps {
   filters: UnusedAssetFilters
@@ -9,10 +10,12 @@ interface UnusedAssetsFiltersProps {
 }
 
 const typeOptions = ['', 'image', 'document', 'video', 'audio', 'text', 'archive']
-const confidenceOptions = ['', 'definitely_unused', 'probably_unused', 'recently_uploaded', 'historically_used']
+const confidenceOptions = ['', 'definitely_unused', 'probably_unused', 'recently_uploaded', 'historically_used', 'protected']
 
 export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ filters, onChange }) => {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const controlStyle: React.CSSProperties = { padding: '5px 10px', border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadius, fontSize: token.fontSize, outline: 'none', background: token.colorBgContainer, color: token.colorText }
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
@@ -20,7 +23,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
         <select
           value={filters.type ?? ''}
           onChange={e => onChange({ ...filters, type: e.target.value || undefined, page: 1 })}
-          style={selectStyle}
+          style={controlStyle}
         >
           {typeOptions.map(tp => <option key={tp} value={tp}>{tp || t('asset-pilot.unused.all-types')}</option>)}
         </select>
@@ -32,7 +35,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
           placeholder={t('asset-pilot.unused.extensions-placeholder')}
           value={filters.extension ?? ''}
           onChange={e => onChange({ ...filters, extension: e.target.value || undefined, page: 1 })}
-          style={{ ...inputStyle, width: 120 }}
+          style={{ ...controlStyle, width: 120 }}
         />
       </FilterField>
 
@@ -41,7 +44,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
           type="date"
           value={filters.before ?? ''}
           onChange={e => onChange({ ...filters, before: e.target.value || undefined, page: 1 })}
-          style={inputStyle}
+          style={controlStyle}
         />
       </FilterField>
 
@@ -50,7 +53,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
           type="date"
           value={filters.after ?? ''}
           onChange={e => onChange({ ...filters, after: e.target.value || undefined, page: 1 })}
-          style={inputStyle}
+          style={controlStyle}
         />
       </FilterField>
 
@@ -60,7 +63,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
           placeholder={t('asset-pilot.unused.folder-placeholder')}
           value={filters.folder ?? ''}
           onChange={e => onChange({ ...filters, folder: e.target.value || undefined, page: 1 })}
-          style={{ ...inputStyle, width: 150 }}
+          style={{ ...controlStyle, width: 150 }}
         />
       </FilterField>
 
@@ -68,7 +71,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
         <select
           value={filters.confidence ?? ''}
           onChange={e => onChange({ ...filters, confidence: e.target.value || undefined, page: 1 })}
-          style={selectStyle}
+          style={controlStyle}
         >
           {confidenceOptions.map(c => (
             <option key={c} value={c}>
@@ -78,7 +81,7 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
         </select>
       </FilterField>
 
-      <button onClick={() => onChange({ page: 1, limit: filters.limit })} style={clearBtnStyle}>
+      <button onClick={() => onChange({ page: 1, limit: filters.limit })} style={{ ...controlStyle, cursor: 'pointer', alignSelf: 'flex-end' }}>
         {t('asset-pilot.common.clear')}
       </button>
 
@@ -88,12 +91,16 @@ export const UnusedAssetsFiltersBar: React.FC<UnusedAssetsFiltersProps> = ({ fil
 }
 
 const FilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-    <label style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 500 }}>{label}</label>
-    {children}
-  </div>
+  <ThemedFilterField label={label}>{children}</ThemedFilterField>
 )
 
-const inputStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
-const selectStyle: React.CSSProperties = { padding: '5px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 12, outline: 'none' }
-const clearBtnStyle: React.CSSProperties = { padding: '5px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 12, alignSelf: 'flex-end' }
+const ThemedFilterField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => {
+  const { token } = theme.useToken()
+
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ fontSize: token.fontSize, color: token.colorTextSecondary, fontWeight: 500 }}>{label}</span>
+      {children}
+    </label>
+  )
+}

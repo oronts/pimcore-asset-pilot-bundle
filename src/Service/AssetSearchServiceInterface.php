@@ -8,7 +8,7 @@ interface AssetSearchServiceInterface
 {
     /**
      * @param array<string, mixed> $filters
-     * @return array{items: array<int, array<string, mixed>>, total: int, page: int, pages: int}
+     * @return array{items: array<int, array<string, mixed>>, total: ?int, page: int, pages: ?int, hasMore: bool, truncated: bool}
      */
     public function search(array $filters = [], int $page = 1, int $limit = 50, ?string $sort = null, ?string $order = null): array;
 

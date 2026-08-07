@@ -66,6 +66,17 @@ class OperationResultTest extends TestCase
     }
 
     #[Test]
+    public function observerFailureStillReportsTheCompletedMutation(): void
+    {
+        $op = $this->createOperation(OperationStatus::CompletedWithObserverError);
+        $result = OperationResult::completedWithObserverError('Audit delivery failed', $op);
+
+        self::assertSame(OperationStatus::CompletedWithObserverError, $result->status);
+        self::assertSame('Audit delivery failed', $result->message);
+        self::assertSame($op, $result->operation);
+    }
+
+    #[Test]
     public function resultWithNullDuration(): void
     {
         $op = $this->createOperation(durationMs: null);

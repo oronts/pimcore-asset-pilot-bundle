@@ -5,24 +5,35 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Service;
 
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Oronts\AssetPilotBundle\Event\AssetMutationEvent;
+use Oronts\AssetPilotBundle\Event\AssetPilotEvents;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
 use Oronts\AssetPilotBundle\Service\Query\AssetFilter;
 use Pimcore\Model\Asset;
 use Pimcore\Model\Element\Service as ElementService;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Renames assets whose filename is not a valid/normalized Pimcore asset key to the sanitized form
  * (via the native Element\Service::getValidKey). Destructive (a rename changes the path), so it is
  * dry-run-first, per-asset ACL-checked, content-reference guarded (a hard-coded path reference would
- * break, like a move), and the save is LoopGuard-wrapped so it does not re-enter the organize
- * pipeline. The scan is paged and bounded.
+ * break, like a move), and protected by the same renewable locks as the move pipeline. Preview and
+ * apply evaluate the same safety gates. The scan is paged and bounded.
  */
-class NormalizeFilenamesService
+class NormalizeFilenamesService implements NormalizeFilenamesServiceInterface
 {
+    use MapsObserverDeliveryWarnings;
+
     public function __construct(
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
-        protected readonly ?ContentUsageScanner $contentScanner = null,
+        protected readonly ContentUsageScannerInterface $contentScanner,
+        protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly AssetMutationFingerprintService $fingerprints,
+        protected readonly LoopGuardedAssetSaver $assetSaver,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        protected readonly string $lockProperty = AssetProtection::DEFAULT_LOCK_PROPERTY,
     ) {}
 
     /**
@@ -51,7 +62,7 @@ class NormalizeFilenamesService
      * @param int[] $assetIds
      * @return array{renamed: int, skipped: int, failed: int, errors: array<int, string>, changes: list<array{id: int, from: string, to: string}>}
      */
-    public function normalize(array $assetIds, bool $dryRun = true): array
+    public function normalize(array $assetIds, bool $dryRun = true, ?array $expectedFingerprints = null): array
     {
         $renamed = 0;
         $skipped = 0;
@@ -62,64 +73,130 @@ class NormalizeFilenamesService
         foreach ($assetIds as $id) {
             $id = (int) $id;
             try {
-                $asset = $this->loadAsset($id);
-                if ($asset === null || $asset instanceof Asset\Folder) {
-                    ++$skipped;
-                    continue;
-                }
-
-                $current = (string) $asset->getFilename();
-                $valid = $this->validKey($current);
-                if ($valid === '' || $valid === $current) {
-                    ++$skipped;
-                    continue;
-                }
-
-                if (!$asset->isAllowed('publish')) {
-                    $errors[$id] = 'Not permitted to rename this asset';
-                    ++$failed;
-                    continue;
-                }
-
-                // A rename changes the path, which would break a hard-coded path reference in content.
-                if ($this->isReferencedInContent($asset)) {
-                    $errors[$id] = 'Asset is referenced in object content (text/WYSIWYG)';
-                    ++$failed;
-                    continue;
-                }
-
-                $changes[] = ['id' => $id, 'from' => $current, 'to' => $valid];
-                if ($dryRun) {
-                    continue;
-                }
-
-                $this->renameGuarded($asset, $id, $valid);
-                ++$renamed;
-                $this->logger->info('Asset Pilot: normalized asset {id} filename {from} -> {to}', [
-                    'id' => $id,
-                    'from' => $current,
-                    'to' => $valid,
-                ]);
+                $outcome = $this->normalizeAsset($id, $dryRun, $expectedFingerprints);
             } catch (\Throwable $e) {
                 $errors[$id] = $e->getMessage();
                 ++$failed;
+
+                continue;
+            }
+
+            if ($outcome['state'] === 'skipped') {
+                ++$skipped;
+                continue;
+            }
+            if ($outcome['state'] === 'failed') {
+                $errors[$id] = $outcome['error'];
+                ++$failed;
+                continue;
+            }
+
+            $changes[] = $outcome['change'];
+            if ($outcome['state'] === 'renamed') {
+                ++$renamed;
+                $this->observerWarnings(
+                    new AssetMutationEvent([$id], 'filename_normalized', $outcome['change']),
+                    AssetPilotEvents::FILENAME_NORMALIZED,
+                    'Filename-normalized observer delivery failed.',
+                    ['asset_id' => $id],
+                );
             }
         }
 
         return ['renamed' => $renamed, 'skipped' => $skipped, 'failed' => $failed, 'errors' => $errors, 'changes' => $changes];
     }
 
-    protected function renameGuarded(Asset $asset, int $assetId, string $filename): void
+    /**
+     * @return array{
+     *     state: 'skipped'|'failed'|'planned'|'renamed',
+     *     error?: string,
+     *     change?: array{id: int, from: string, to: string}
+     * }
+     */
+    private function normalizeAsset(int $assetId, bool $dryRun, ?array $expectedFingerprints): array
     {
-        $this->loopGuard->markAssetProcessing($assetId);
+        if (!$this->loopGuard->acquireAsset($assetId)) {
+            return ['state' => 'failed', 'error' => 'Asset is being processed by another job'];
+        }
+
+        $targetPath = null;
         try {
-            $asset->setFilename($filename);
-            $asset->save(['versionNote' => 'Asset Pilot: normalized filename to ' . $filename]);
-            $this->loopGuard->markAssetRecentlyMoved($assetId);
+            $asset = $this->reloadAsset($assetId);
+            if ($asset === null || $asset instanceof Asset\Folder) {
+                return ['state' => 'skipped'];
+            }
+            if ($expectedFingerprints !== null) {
+                $this->fingerprints->assertUnchanged($assetId, $expectedFingerprints);
+            }
+            if (AssetProtection::isLocked($asset, $this->lockProperty)) {
+                return ['state' => 'failed', 'error' => 'Asset is protected from automated changes'];
+            }
+
+            $current = (string) $asset->getFilename();
+            $valid = $this->validKey($current);
+            if ($valid === '' || $valid === $current) {
+                return ['state' => 'skipped'];
+            }
+            if (!$this->authorization->isAllowed($asset, 'publish')) {
+                return ['state' => 'failed', 'error' => 'Not permitted to rename this asset'];
+            }
+            if (!$this->contentScanner->canVerify()) {
+                return ['state' => 'failed', 'error' => 'Content-reference verification is not configured'];
+            }
+            // Fenced fresh re-read inside the apply-time lock: a preview in this same process cached a negative,
+            // and a content reference committed in the window since must not authorize the rename (a rename
+            // breaks a hard-coded path exactly like a move). Matches every other destructive path.
+            if ($this->contentScanner->freshlyReferencedInContent($asset)) {
+                return ['state' => 'failed', 'error' => 'Asset is referenced in object content (text/WYSIWYG)'];
+            }
+
+            $targetPath = $this->targetPath($asset, $valid);
+            if (!$this->loopGuard->acquireTarget($targetPath)) {
+                return ['state' => 'failed', 'error' => 'Target path is being allocated by another job'];
+            }
+
+            $occupant = $this->assetAtPath($targetPath);
+            if ($occupant !== null && (int) $occupant->getId() !== $assetId) {
+                return ['state' => 'failed', 'error' => sprintf('An asset named "%s" already exists in this folder.', $valid)];
+            }
+
+            $change = ['id' => $assetId, 'from' => $current, 'to' => $valid];
+            if ($dryRun) {
+                return ['state' => 'planned', 'change' => $change];
+            }
+
+            $this->renameGuarded($asset, $assetId, $valid, $targetPath);
+            $this->logger->info('Asset Pilot: normalized asset {id} filename {from} -> {to}', [
+                'id' => $assetId,
+                'from' => $current,
+                'to' => $valid,
+            ]);
+
+            return ['state' => 'renamed', 'change' => $change];
+        } finally {
+            if ($targetPath !== null) {
+                $this->loopGuard->releaseTarget($targetPath);
+            }
+            $this->loopGuard->releaseAsset($assetId);
+        }
+    }
+
+    protected function renameGuarded(Asset $asset, int $assetId, string $filename, string $targetPath): void
+    {
+        unset($assetId);
+        try {
+            $this->assetSaver->save(
+                $asset,
+                static function (Asset $mutable) use ($filename): void {
+                    $mutable->setFilename($filename);
+                },
+                ['versionNote' => 'Asset Pilot: normalized filename to ' . $filename],
+                function () use ($targetPath): void {
+                    $this->loopGuard->refreshTarget($targetPath);
+                },
+            );
         } catch (UniqueConstraintViolationException $e) {
             throw new \RuntimeException(sprintf('An asset named "%s" already exists in this folder.', $filename), 0, $e);
-        } finally {
-            $this->loopGuard->unmarkAssetProcessing($assetId);
         }
     }
 
@@ -128,9 +205,19 @@ class NormalizeFilenamesService
         return ElementService::getValidKey($filename, 'asset');
     }
 
-    private function isReferencedInContent(Asset $asset): bool
+    protected function reloadAsset(int $id): ?Asset
     {
-        return $this->contentScanner?->isReferencedInContent($asset) === true;
+        return Asset::getById($id, ['force' => true]);
+    }
+
+    protected function assetAtPath(string $path): ?Asset
+    {
+        return Asset::getByPath($path);
+    }
+
+    private function targetPath(Asset $asset, string $filename): string
+    {
+        return rtrim(dirname($asset->getRealFullPath()), '/') . '/' . $filename;
     }
 
     /**

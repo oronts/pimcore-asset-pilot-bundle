@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Engine;
 
 use Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface;
+use Oronts\AssetPilotBundle\Exception\PathResolutionException;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleEvaluation;
@@ -42,7 +43,14 @@ class RuleEngine implements RuleEngineInterface
             }
         }
         $parsed = array_filter($parsed);
-        usort($parsed, static fn (Rule $a, Rule $b): int => $b->priority <=> $a->priority);
+        $names = [];
+        foreach ($parsed as $rule) {
+            if (isset($names[$rule->name])) {
+                throw new \LogicException(sprintf('Duplicate rule name "%s".', $rule->name));
+            }
+            $names[$rule->name] = true;
+        }
+        usort($parsed, static fn (Rule $a, Rule $b): int => ($b->priority <=> $a->priority) ?: strcmp($a->name, $b->name));
         $this->sortedRules = $parsed;
     }
 
@@ -102,7 +110,20 @@ class RuleEngine implements RuleEngineInterface
                 continue;
             }
 
-            $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
+            try {
+                $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
+            } catch (PathResolutionException $e) {
+                // Fail closed: a template render failure skips the rule, it never misfiles the asset.
+                $this->logger->error('Asset Pilot: rule "{rule}" skipped, target path could not be resolved: {error}', [
+                    'rule' => $rule->name,
+                    'objectId' => $object->getId(),
+                    'assetId' => $asset->getId(),
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+
+                continue;
+            }
 
             $this->logger->debug('Rule "{rule}" matched object {objectId} asset {assetId} (field: {field}) -> {path}', [
                 'rule' => $rule->name,
@@ -133,74 +154,74 @@ class RuleEngine implements RuleEngineInterface
         $evaluations = [];
 
         foreach ($this->sortedRules as $rule) {
-            if (!$rule->enabled) {
-                $evaluations[] = $this->rejected($rule, 'disabled', enabled: false);
-                continue;
+            [$evaluation, $match] = $this->explainRule($rule, $object, $asset, $fieldName, $locale);
+            $evaluations[] = $evaluation;
+            if ($match !== null) {
+                $matches[] = $match;
             }
-
-            if (!$this->matchesClass($rule, $object)) {
-                $evaluations[] = $this->rejected($rule, 'class_mismatch', filterDetails: 'expected ' . $rule->class . ', got ' . ($this->objectClassName($object) ?? 'Folder'));
-                continue;
-            }
-
-            if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
-                $evaluations[] = $this->rejected($rule, 'field_mismatch', filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']');
-                continue;
-            }
-
-            if (!$this->matchesLocale($rule, $locale)) {
-                $evaluations[] = $this->rejected($rule, 'locale_mismatch', filterDetails: 'locale "' . ($locale ?? 'none') . '" not in [' . implode(', ', $rule->locales) . ']');
-                continue;
-            }
-
-            $conditionResult = null;
-            $conditionError = null;
-            if ($rule->condition !== null && $rule->condition !== '') {
-                try {
-                    $conditionResult = $this->conditionEvaluator->evaluateStrict($object, $asset, $rule, $locale);
-                } catch (\Throwable $e) {
-                    $conditionResult = false;
-                    $conditionError = $e->getMessage();
-                }
-            } else {
-                $conditionResult = true;
-            }
-
-            if (!$conditionResult) {
-                $evaluations[] = $this->rejected($rule, 'condition_failed', conditionResult: false, conditionError: $conditionError);
-                continue;
-            }
-
-            if (!$this->filter->accept($asset, $object, $rule)) {
-                $evaluations[] = $this->rejected($rule, 'filter_rejected', filterDetails: 'asset rejected by filter', conditionResult: true);
-                continue;
-            }
-
-            $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
-
-            $evaluations[] = new RuleEvaluation(
-                ruleName: $rule->name,
-                matched: true,
-                rejectionReason: null,
-                conditionExpression: $rule->condition,
-                conditionResult: true,
-                conditionError: null,
-                filterDetails: null,
-                resolvedPath: $resolvedPath,
-                priority: $rule->priority,
-                enabled: true,
-            );
-
-            $matches[] = new RuleMatch(
-                rule: $rule,
-                object: $object,
-                asset: $asset,
-                resolvedPath: $resolvedPath,
-                locale: $locale,
-            );
         }
 
         return ['matches' => $matches, 'evaluations' => $evaluations];
+    }
+
+    /** @return array{RuleEvaluation, ?RuleMatch} */
+    private function explainRule(Rule $rule, AbstractObject $object, Asset $asset, ?string $fieldName, ?string $locale): array
+    {
+        $rejection = $this->structuralRejection($rule, $object, $fieldName, $locale);
+        if ($rejection !== null) {
+            return [$rejection, null];
+        }
+
+        [$conditionPassed, $conditionError] = $this->strictCondition($rule, $object, $asset, $locale);
+        if (!$conditionPassed) {
+            return [$this->rejected($rule, 'condition_failed', conditionResult: false, conditionError: $conditionError), null];
+        }
+        if (!$this->filter->accept($asset, $object, $rule)) {
+            return [$this->rejected($rule, 'filter_rejected', filterDetails: 'asset rejected by filter', conditionResult: true), null];
+        }
+
+        try {
+            $resolvedPath = $this->pathResolver->resolve($object, $asset, $rule, $locale);
+        } catch (PathResolutionException $e) {
+            return [$this->rejected($rule, 'path_resolution_failed', filterDetails: $e->getMessage(), conditionResult: true), null];
+        }
+
+        return [
+            new RuleEvaluation($rule->name, true, null, $rule->condition, true, null, null, $resolvedPath, $rule->priority, true),
+            new RuleMatch($rule, $object, $asset, $resolvedPath, $locale),
+        ];
+    }
+
+    private function structuralRejection(Rule $rule, AbstractObject $object, ?string $fieldName, ?string $locale): ?RuleEvaluation
+    {
+        if (!$rule->enabled) {
+            return $this->rejected($rule, 'disabled', enabled: false);
+        }
+        if (!$this->matchesClass($rule, $object)) {
+            return $this->rejected($rule, 'class_mismatch', filterDetails: 'expected ' . $rule->class . ', got ' . ($this->objectClassName($object) ?? 'Folder'));
+        }
+        if ($fieldName !== null && !$this->matchesFields($rule, $fieldName)) {
+            return $this->rejected($rule, 'field_mismatch', filterDetails: 'field "' . $fieldName . '" not in [' . implode(', ', $rule->fields) . ']');
+        }
+        if (!$this->matchesLocale($rule, $locale)) {
+            return $this->rejected($rule, 'locale_mismatch', filterDetails: 'locale "' . ($locale ?? 'none') . '" not in [' . implode(', ', $rule->locales) . ']');
+        }
+
+        return null;
+    }
+
+    /** @return array{bool, ?string} */
+    private function strictCondition(Rule $rule, AbstractObject $object, Asset $asset, ?string $locale): array
+    {
+        if ($rule->condition === null || $rule->condition === '') {
+            return [true, null];
+        }
+
+        try {
+            return [$this->conditionEvaluator->evaluateStrict($object, $asset, $rule, $locale), null];
+        } catch (\Throwable $e) {
+            return [false, $e->getMessage()];
+        }
     }
 
     protected function rejected(

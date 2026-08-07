@@ -6,8 +6,8 @@ namespace Oronts\AssetPilotBundle\Command;
 
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\Model\RuleSetDiff;
-use Oronts\AssetPilotBundle\Service\ConfigValidator;
-use Oronts\AssetPilotBundle\Service\RulePortability;
+use Oronts\AssetPilotBundle\Service\ConfigValidatorInterface;
+use Oronts\AssetPilotBundle\Service\RulePortabilityInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -24,8 +24,8 @@ use Symfony\Component\Yaml\Yaml;
 class RulesDiffCommand extends Command
 {
     public function __construct(
-        private readonly RulePortability $portability,
-        private readonly ConfigValidator $configValidator,
+        private readonly RulePortabilityInterface $portability,
+        private readonly ConfigValidatorInterface $configValidator,
     ) {
         parent::__construct();
     }

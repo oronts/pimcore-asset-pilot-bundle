@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Command;
 
+use Oronts\AssetPilotBundle\Command\Support\RendersRuleExplain;
 use Oronts\AssetPilotBundle\Engine\RuleEngineInterface;
-use Oronts\AssetPilotBundle\Model\RuleEvaluation;
 use Oronts\AssetPilotBundle\Naming\NamingStrategyInterface;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Pimcore\Model\Asset;
@@ -24,6 +24,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class DebugRuleCommand extends Command
 {
+    use RendersRuleExplain;
+
     public function __construct(
         private readonly RuleEngineInterface $ruleEngine,
         private readonly AssetFieldExtractorInterface $fieldExtractor,
@@ -107,42 +109,6 @@ class DebugRuleCommand extends Command
         ?string $locale,
         ?string $ruleFilter,
     ): void {
-        $io->text(sprintf('  Asset #%d: %s', $asset->getId(), $asset->getRealFullPath()));
-        $io->newLine();
-
-        $result = $this->ruleEngine->explain($object, $asset, $fieldName, $locale);
-        $evaluations = $result['evaluations'];
-        $matches = $result['matches'];
-
-        if ($ruleFilter !== null) {
-            $evaluations = array_filter($evaluations, static fn (RuleEvaluation $e) => $e->ruleName === $ruleFilter);
-            $evaluations = array_values($evaluations);
-        }
-
-        if (empty($evaluations)) {
-            $io->text('  No rules to evaluate.');
-            $io->newLine();
-
-            return;
-        }
-
-        $rows = [];
-        foreach ($evaluations as $eval) {
-            $resultLabel = $eval->matched ? '<fg=green>MATCHED</>' : '<fg=yellow>SKIPPED</>';
-            $rows[] = [$eval->ruleName, $resultLabel, $eval->describe()];
-        }
-
-        $io->table(['Rule', 'Result', 'Detail'], $rows);
-
-        if (!empty($matches)) {
-            $match = $matches[0];
-            $targetFilename = $this->namingStrategy->generateName($match->asset, $match->resolvedPath);
-            $fullPath = rtrim($match->resolvedPath, '/') . '/' . $targetFilename;
-            $io->text(sprintf('  Decision: Rule "%s" matched -> %s', $match->rule->name, $fullPath));
-        } else {
-            $io->text('  Decision: No rules matched this asset.');
-        }
-
-        $io->newLine();
+        $this->renderRuleExplain($io, $object, $asset, $fieldName, $locale, $ruleFilter, announceEmptyEvaluations: true);
     }
 }

@@ -13,6 +13,9 @@ const SKELETON_CSS = `
   50% { opacity: 0.4; }
   100% { opacity: 1; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .ap-skeleton { animation: none !important; }
+}
 `
 
 export const TableSkeleton: React.FC<TableSkeletonProps> = ({ rows = 5, columns = 5, hasCheckbox = false }) => {
@@ -23,7 +26,7 @@ export const TableSkeleton: React.FC<TableSkeletonProps> = ({ rows = 5, columns 
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
       <thead>
-        <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+        <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
           {hasCheckbox && (
             <th style={thStyle}><Bar w={16} h={16} /></th>
           )}
@@ -34,7 +37,7 @@ export const TableSkeleton: React.FC<TableSkeletonProps> = ({ rows = 5, columns 
       </thead>
       <tbody>
         {Array.from({ length: rows }, (_, ri) => (
-          <tr key={ri} style={{ borderBottom: '1px solid #f5f5f5' }}>
+          <tr key={ri} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
             {hasCheckbox && (
               <td style={tdStyle}><Bar w={16} h={16} /></td>
             )}
@@ -51,11 +54,11 @@ export const TableSkeleton: React.FC<TableSkeletonProps> = ({ rows = 5, columns 
 }
 
 const Bar: React.FC<{ w: number; h: number }> = ({ w, h }) => (
-  <div style={{
+  <div className="ap-skeleton" style={{
     width: w,
     height: h,
     borderRadius: 4,
-    background: '#f0f0f0',
+    background: 'var(--ap-color-border-secondary)',
     animation: 'ap-skeleton-pulse 1.5s ease-in-out infinite',
   }} />
 )

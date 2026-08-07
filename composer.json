@@ -1,7 +1,7 @@
 {
     "name": "oronts/asset-pilot-bundle",
     "description": "Intelligent rule-based asset organization engine for Pimcore 12 with expression language conditions, pluggable strategies, async processing, and Studio UI integration.",
-    "version": "1.1.0",
+    "version": "2.0.0",
     "type": "pimcore-bundle",
     "license": "AGPL-3.0-or-later",
     "keywords": ["pimcore", "assets", "organization", "automation", "pimcore-12", "studio-ui"],
@@ -19,12 +19,38 @@
     ],
     "require": {
         "php": ">=8.4",
-        "pimcore/pimcore": "^12.0",
-        "pimcore/studio-backend-bundle": ">=0.15 <1.0 || ^1.0 || >=2025.4 <2027.0",
-        "pimcore/studio-ui-bundle": ">=0.15 <1.0 || ^1.0 || >=2025.4 <2027.0",
-        "symfony/expression-language": "^7.0",
+        "ext-ctype": "*",
+        "ext-filter": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-zip": "*",
+        "doctrine/dbal": "^4.0",
+        "league/flysystem": "^3.0",
+        "pimcore/pimcore": "^12.3.11",
+        "pimcore/static-resolver-bundle": "^3.6",
+        "pimcore/studio-backend-bundle": "^2025.4.7",
+        "pimcore/studio-ui-bundle": "^2025.4.8",
+        "psr/cache": "^3.0",
+        "psr/container": "^2.0",
+        "psr/event-dispatcher": "^1.0",
+        "psr/log": "^3.0",
+        "symfony/cache-contracts": "^3.5",
+        "symfony/config": "^7.3",
+        "symfony/console": "^7.3",
+        "symfony/dependency-injection": "^7.3",
+        "symfony/event-dispatcher": "^7.3",
+        "symfony/event-dispatcher-contracts": "^3.5",
+        "symfony/expression-language": "^7.3",
+        "symfony/http-foundation": "^7.3",
+        "symfony/http-kernel": "^7.3",
         "symfony/lock": "^7.3",
-        "symfony/messenger": "^7.3"
+        "symfony/messenger": "^7.3",
+        "symfony/routing": "^7.3",
+        "symfony/security-http": "^7.3",
+        "symfony/service-contracts": "^3.5",
+        "symfony/yaml": "^7.3",
+        "twig/twig": "^3.26.1",
+        "zircote/swagger-php": "^5.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.50",
@@ -51,10 +77,35 @@
     "config": {
         "sort-packages": true
     },
+    "suggest": {
+        "ext-imagick": "Enables image integrity verification and recovery checks."
+    },
+    "archive": {
+        "exclude": [
+            "/.*",
+            "/node_modules",
+            "/assets/studio/e2e",
+            "/assets/studio/node_modules",
+            "/public/studio/build/.active-*.json",
+            "/public/studio/build/.staging",
+            "/public/studio/build/development",
+            "/tests",
+            "/vendor"
+        ]
+    },
     "scripts": {
+        "audit-production": "composer audit --locked --no-dev",
+        "ci": [
+            "@validate-project",
+            "@audit-production",
+            "@cs",
+            "@stan",
+            "@test"
+        ],
         "test": "phpunit",
         "cs": "php-cs-fixer fix --dry-run --diff",
         "cs-fix": "php-cs-fixer fix",
-        "stan": "phpstan analyse"
+        "stan": "phpstan analyse",
+        "validate-project": "composer validate --no-check-publish"
     }
 }

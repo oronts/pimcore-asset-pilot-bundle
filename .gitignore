@@ -5,7 +5,12 @@
 /.php-cs-fixer.cache
 /assets/studio/node_modules/
 /assets/studio/dist/
-/public/studio/build/
+/public/studio/build/.staging/
+/public/studio/build/.active-*.json
+/public/studio/build/development/
 *.DS_Store
 .idea/
 .vscode/
+
+# Playwright MCP browser-testing scratch output
+.playwright-mcp/

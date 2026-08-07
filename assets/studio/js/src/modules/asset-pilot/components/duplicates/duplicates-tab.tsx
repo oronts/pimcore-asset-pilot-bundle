@@ -27,15 +27,16 @@ export const DuplicatesTab: React.FC = () => {
 
   const onFilters = (next: DuplicateFilters): void => { setFilters(next); setPage(1) }
 
-  const pages = data != null ? Math.max(1, Math.ceil(data.total / limit)) : 1
+  // total is null for a scoped/admin actor (authorized cursor); null pages puts Pagination in cursor mode.
+  const pages = data?.total != null ? Math.max(1, Math.ceil(data.total / limit)) : null
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.duplicates.title', { count: data?.total ?? 0 })}</h4>
+        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('asset-pilot.duplicates.title', { count: data?.total ?? data?.items.length ?? 0 })}</h4>
         <button onClick={() => assetPilotApi.exportDuplicates(filters)} style={exportBtnStyle}>{t('asset-pilot.common.export-csv')}</button>
       </div>
-      <p style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 16 }}>{t('asset-pilot.duplicates.scan-hint')}</p>
+      <p style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', marginBottom: 16 }}>{t('asset-pilot.duplicates.scan-hint')}</p>
 
       <DuplicatesFilters filters={filters} onChange={onFilters} />
 
@@ -47,9 +48,12 @@ export const DuplicatesTab: React.FC = () => {
             data={data}
             loading={loading}
             error={error != null ? t('asset-pilot.common.error', { message: error }) : null}
+            onRetry={refetch}
             empty={<EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />}
             page={data?.page ?? 1}
             pages={pages}
+            hasMore={data?.hasMore ?? false}
+            truncated={data?.truncated}
             onPage={setPage}
             limit={limit}
             onLimit={n => { setLimit(n); setPage(1) }}
@@ -57,12 +61,12 @@ export const DuplicatesTab: React.FC = () => {
             toCard={group => ({
               key: group.checksum,
               thumbnailId: group.representative?.id,
-              type: group.representative?.type ?? 'unknown',
-              fallbackLabel: group.representative?.filename.split('.').pop() ?? 'DUP',
+              type: group.representative?.type ?? t('asset-pilot.common.unknown'),
+              fallbackLabel: group.representative?.filename.split('.').pop() ?? t('asset-pilot.common.duplicate'),
               title: group.representative != null
                 ? <OpenButton id={group.representative.id} type="asset" label={group.representative.filename} />
-                : <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{truncate(group.checksum, 16)}</span>,
-              meta: <span style={{ fontSize: 11, color: '#8c8c8c' }}>{t('asset-pilot.columns.copies')}: {group.count} · {formatBytes(group.representative?.fileSize ?? group.fileSize)}</span>,
+                : <span style={{ fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{truncate(group.checksum, 16)}</span>,
+              meta: <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)' }}>{t('asset-pilot.columns.copies')}: {group.count} · {formatBytes(group.representative?.fileSize ?? group.fileSize)}</span>,
               actions: perms.admin ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button> : undefined,
             })}
           />
@@ -70,20 +74,23 @@ export const DuplicatesTab: React.FC = () => {
         : error != null
         ? (
           <div>
-            <p style={{ color: '#ff4d4f', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
+            <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13 }}>{t('asset-pilot.common.error', { message: error })}</p>
             <button onClick={refetch} style={btnStyle}>{t('asset-pilot.common.retry')}</button>
           </div>
         )
         : loading
           ? <TableSkeleton rows={4} columns={5} />
-          : data == null || data.items.length === 0
+          : data == null || (data.items.length === 0 && data.truncated !== true && data.hasMore !== true)
             ? <EmptyState variant="no-data" title={t('asset-pilot.duplicates.empty')} description={t('asset-pilot.duplicates.empty-desc')} />
             : (
             <>
-              <ResponsiveTableWrapper>
+              {data.items.length === 0
+                ? <p role="status" style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', padding: '12px 0' }}>{t('asset-pilot.common.none-on-page')}</p>
+                : (
+              <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
                   <thead>
-                    <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+                    <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
                       <th style={thStyle}>{t('asset-pilot.duplicates.checksum')}</th>
                       <th style={thStyle}>{t('asset-pilot.columns.size')}</th>
                       <th style={{ ...thStyle, textAlign: 'center' }}>{t('asset-pilot.columns.copies')}</th>
@@ -93,27 +100,28 @@ export const DuplicatesTab: React.FC = () => {
                   </thead>
                   <tbody>
                     {data.items.map(group => (
-                      <tr key={group.checksum} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{truncate(group.checksum, 16)}</td>
+                      <tr key={group.checksum} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{truncate(group.checksum, 16)}</td>
                         <td style={tdStyle}>{formatBytes(group.representative?.fileSize ?? group.fileSize)}</td>
                         <td style={{ ...tdStyle, textAlign: 'center' }}>{group.count}</td>
                         <td style={tdStyle}>
                           {group.representative != null
                             ? <OpenButton id={group.representative.id} type="asset" label={group.representative.filename} />
-                            : <span style={{ color: '#bfbfbf' }}>-</span>}
+                            : <span style={{ color: 'var(--ap-color-text-tertiary)' }}>-</span>}
                         </td>
                         <td style={tdStyle}>
                           {perms.admin
                             ? <button onClick={() => setSelected(group)} style={actionBtnStyle}>{t('asset-pilot.duplicates.merge')}</button>
-                            : <span style={{ color: '#bfbfbf', fontSize: 12 }}>-</span>}
+                            : <span style={{ color: 'var(--ap-color-text-tertiary)', fontSize: 'var(--ap-font-size)' }}>-</span>}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </ResponsiveTableWrapper>
+                )}
 
-              <Pagination page={data.page} pages={pages} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} pageSizeOptions={[20, 50, 100]} />
+              <Pagination page={data.page} pages={pages} hasMore={data.hasMore} truncated={data.truncated} onPage={setPage} limit={limit} onLimit={n => { setLimit(n); setPage(1) }} pageSizeOptions={[20, 50, 100]} />
             </>
           )}
 
@@ -121,8 +129,10 @@ export const DuplicatesTab: React.FC = () => {
         <MergeModal
           group={selected}
           strategies={strategies.data}
+          strategiesLoading={strategies.loading}
+          strategiesError={strategies.error}
           canApply={perms.admin}
-          onClose={() => setSelected(null)}
+          onClose={() => { setSelected(null); refetch() }}
           onMerged={() => { setSelected(null); refetch() }}
         />
       )}
@@ -130,14 +140,14 @@ export const DuplicatesTab: React.FC = () => {
   )
 }
 
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 12, color: '#8c8c8c', fontWeight: 500 }
+const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500 }
 const tdStyle: React.CSSProperties = { padding: '8px 6px' }
-const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 13 }
+const btnStyle: React.CSSProperties = { padding: '6px 16px', border: '1px solid var(--ap-color-border)', borderRadius: 6, background: 'var(--ap-color-bg-container)', cursor: 'pointer', fontSize: 13 }
 const actionBtnStyle: React.CSSProperties = {
-  padding: '3px 10px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff',
-  cursor: 'pointer', fontSize: 12, color: '#1677ff',
+  padding: '3px 10px', border: '1px solid var(--ap-color-border)', borderRadius: 4, background: 'var(--ap-color-bg-container)',
+  cursor: 'pointer', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-primary)',
 }
 const exportBtnStyle: React.CSSProperties = {
-  padding: '5px 12px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff',
-  cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  padding: '5px 12px', border: '1px solid var(--ap-color-border)', borderRadius: 6, background: 'var(--ap-color-bg-container)',
+  cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }

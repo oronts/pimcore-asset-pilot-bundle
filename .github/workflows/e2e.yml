@@ -1,0 +1,173 @@
+# Deployment-level end-to-end acceptance (see docs/e2e-acceptance.md).
+#
+# REAL STEPS, NOT YET A VALIDATED GATE: the four former TODO(operator) echo stubs are replaced with
+# real steps grounded in the documented install flow (docs/installation.md) and the reference
+# test-project. It stays on workflow_dispatch until it passes once on the target runner: a full Pimcore
+# skeleton install has environment-specific details (chiefly the Studio security/firewall configuration
+# applied by the Studio bundles' Flex recipes, and the installer secrets) that only a first live run
+# confirms. Promote it to a required gate (add push/pull_request triggers + branch protection) after
+# that first green run.
+name: E2E acceptance (real steps; promote to a gate after first green run)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Doctrine (DB-backed) transport keeps CI to one broker (MariaDB); production may use AMQP/Redis.
+  DATABASE_URL: 'mysql://root:pimcore@127.0.0.1:3306/pimcore'
+  MESSENGER_TRANSPORT_DSN: 'doctrine://default'
+  REDIS_URL: 'redis://127.0.0.1:6379'
+  # Non-interactive pimcore-install reads these; interactive mode would otherwise generate them.
+  PIMCORE_INSTALL_ENCRYPTION_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  PIMCORE_INSTALL_INSTANCE_IDENTIFIER: 'asset-pilot-e2e'
+  E2E_BASE_URL: 'http://127.0.0.1:8080'
+  E2E_ADMIN_USER: 'admin'
+  E2E_ADMIN_PASS: 'Admin-Pass123!'
+  E2E_OPERATE_USER: 'e2e-operate'
+  E2E_OPERATE_PASS: 'e2e-operate-Pass123!'
+  E2E_VIEW_USER: 'e2e-view'
+  E2E_VIEW_PASS: 'e2e-view-Pass123!'
+
+jobs:
+  acceptance:
+    name: Pimcore E2E (Admin/Operate/View + a11y)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: pimcore
+          MARIADB_DATABASE: pimcore
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+
+    steps:
+      - name: Checkout bundle
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: bundle
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, redis, gd, exif, intl, zip
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      # (1) Create a Pimcore skeleton (calendar-versioned; ^2025.4 requires Pimcore ^12.3) and require
+      # this checkout as a path repository. Flex recipes run on `require` so the Studio bundles register
+      # themselves and install their security/firewall configuration.
+      - name: Install Pimcore application with the bundle
+        run: |
+          composer create-project pimcore/skeleton:^2025.4 app --no-install --no-interaction
+          cd app
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config repositories.asset-pilot path "$GITHUB_WORKSPACE/bundle"
+          composer require --no-interaction \
+            pimcore/admin-ui-classic-bundle:^2.3 \
+            oronts/asset-pilot-bundle:@dev
+          # The path-repo bundle has no Flex recipe, so register it explicitly (idempotent).
+          php <<'PHP'
+          <?php
+          $file = 'config/bundles.php';
+          $src = file_get_contents($file);
+          if (!str_contains($src, 'OrontsAssetPilotBundle')) {
+              $line = "    Oronts\\AssetPilotBundle\\OrontsAssetPilotBundle::class => ['all' => true],\n";
+              file_put_contents($file, preg_replace('/\n\];\s*$/', "\n" . $line . "];\n", $src));
+          }
+          PHP
+          ./vendor/bin/pimcore-install --no-interaction \
+            --mysql-host-socket=127.0.0.1 --mysql-port=3306 --mysql-username=root \
+            --mysql-password=pimcore --mysql-database=pimcore \
+            --admin-username="$E2E_ADMIN_USER" --admin-password="$E2E_ADMIN_PASS"
+
+      # (1b) Build the Studio remote BEFORE assets:install so the copied public/bundles tree matches the
+      # active generation, then install the bundle-owned tables/permissions and the transports.
+      - name: Build Studio remote
+        run: npm --prefix bundle/assets/studio ci && npm --prefix bundle/assets/studio run build && npm --prefix bundle/assets/studio run prepare-release-build
+
+      - name: Install and configure Studio + Asset Pilot
+        working-directory: app
+        run: |
+          for b in PimcoreGenericExecutionEngineBundle PimcoreGenericDataIndexBundle \
+                   PimcoreStudioBackendBundle PimcoreStudioUiBundle OrontsAssetPilotBundle; do
+            bin/console pimcore:bundle:install "$b"
+          done
+          mkdir -p config/packages
+          cat > config/packages/asset_pilot_messenger.yaml <<'YAML'
+          framework:
+              messenger:
+                  transports:
+                      asset_pilot:
+                          dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                          failure_transport: asset_pilot_failed
+                          options: { queue_name: asset_pilot }
+                      asset_pilot_failed:
+                          dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                          options: { queue_name: asset_pilot_failed }
+                  routing:
+                      'Oronts\AssetPilotBundle\Message\OrganizeAssetsMessage': asset_pilot
+                      'Oronts\AssetPilotBundle\Message\BulkOrganizeMessage': asset_pilot
+                      'Oronts\AssetPilotBundle\Message\OperationDeliveryMessage': asset_pilot
+                      'Oronts\AssetPilotBundle\Message\DependencyProjectionRefreshMessage': asset_pilot
+          YAML
+          bin/console assets:install
+          bin/console pimcore:cache:clear
+
+      # (2) Migrate and validate. --allow-no-migration handles an empty set; real failures must surface.
+      - name: Migrate and validate config
+        working-directory: app
+        run: |
+          bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
+          bin/console asset-pilot:validate-config
+
+      # (3) Seed Admin (install admin) + Operate + View users on disjoint workspaces.
+      - name: Seed Admin/Operate/View users on disjoint workspaces
+        working-directory: app
+        run: |
+          cp "$GITHUB_WORKSPACE/bundle/.github/e2e/SeedAcceptanceUsersCommand.php" src/Command/SeedAcceptanceUsersCommand.php
+          bin/console cache:clear
+          bin/console app:asset-pilot:seed-acceptance-users
+
+      # (4) Start the required Messenger consumers + a web server, then wait for health to go green.
+      - name: Start Messenger consumers and wait for health
+        working-directory: app
+        run: |
+          bin/console messenger:consume asset_pilot --time-limit=900 --limit=1000 > "$RUNNER_TEMP/asset_pilot.log" 2>&1 &
+          bin/console messenger:consume pimcore_maintenance --time-limit=900 --limit=1000 > "$RUNNER_TEMP/maintenance.log" 2>&1 &
+          php -S 127.0.0.1:8080 -t public > "$RUNNER_TEMP/webserver.log" 2>&1 &
+          for i in $(seq 1 12); do
+            if bin/console asset-pilot:health; then echo "health green"; exit 0; fi
+            echo "waiting for consumers to report healthy ($i/12)"; sleep 5
+          done
+          echo "consumers did not report healthy in time"; exit 1
+
+      - name: Install Playwright
+        run: |
+          cd bundle/assets/studio/e2e
+          npm ci
+          npm run install-browsers
+
+      - name: Run acceptance matrix
+        run: npm --prefix bundle/assets/studio/e2e test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: bundle/assets/studio/playwright-report
+          retention-days: 7

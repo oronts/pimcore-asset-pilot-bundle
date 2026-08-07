@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Maintenance;
 
-use Oronts\AssetPilotBundle\Audit\AuditLoggerInterface;
+use Oronts\AssetPilotBundle\Audit\AuditRetentionInterface;
 use Pimcore\Maintenance\TaskInterface;
 use Psr\Log\LoggerInterface;
 
@@ -16,16 +16,12 @@ use Psr\Log\LoggerInterface;
 class AuditRetentionTask implements TaskInterface
 {
     public function __construct(
-        protected readonly AuditLoggerInterface $auditLogger,
+        protected readonly AuditRetentionInterface $auditLogger,
         protected readonly LoggerInterface $logger,
     ) {}
 
     public function execute(): void
     {
-        if (!$this->auditLogger->isEnabled()) {
-            return;
-        }
-
         try {
             $deleted = $this->auditLogger->cleanup($this->auditLogger->getRetentionDays());
             $this->logger->info('Asset Pilot: audit retention task pruned {count} entries.', ['count' => $deleted]);

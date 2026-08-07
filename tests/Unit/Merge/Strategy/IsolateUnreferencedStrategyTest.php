@@ -9,6 +9,7 @@ use Oronts\AssetPilotBundle\Merge\RepointReport;
 use Oronts\AssetPilotBundle\Merge\Strategy\IsolateUnreferencedStrategy;
 use Oronts\AssetPilotBundle\Service\AssetDependencyResolver;
 use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Tests\Unit\Merge\MergeContextStub;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -37,7 +38,7 @@ class IsolateUnreferencedStrategyTest extends TestCase
             ->willReturn(['quarantined' => 1, 'failed' => 0, 'errors' => []]);
 
         $disposition = (new IsolateUnreferencedStrategy($resolver, $quarantine))
-            ->disposeCopy(9, new RepointReport(9, 5, 0, []));
+            ->disposeCopy(new RepointReport(9, 5, 0, []), new MergeContextStub(9));
 
         self::assertSame(9, $disposition->copyId);
         self::assertSame(DispositionOutcome::Quarantined, $disposition->outcome);
@@ -52,9 +53,25 @@ class IsolateUnreferencedStrategyTest extends TestCase
         $quarantine->expects(self::never())->method('quarantine');
 
         $disposition = (new IsolateUnreferencedStrategy($resolver, $quarantine))
-            ->disposeCopy(9, new RepointReport(9, 5, 0, []));
+            ->disposeCopy(new RepointReport(9, 5, 0, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftReferenced, $disposition->outcome);
+    }
+
+    #[Test]
+    public function recoversACommittedIsolationMove(): void
+    {
+        $quarantine = $this->createMock(QuarantineService::class);
+        $quarantine->expects(self::once())->method('recoverQuarantine')->with(9)->willReturn(true);
+        $strategy = new IsolateUnreferencedStrategy(
+            $this->createMock(AssetDependencyResolver::class),
+            $quarantine,
+        );
+
+        $disposition = $strategy->recoverDisposition(9, new RepointReport(9, 5, 0, []));
+
+        self::assertNotNull($disposition);
+        self::assertSame(DispositionOutcome::Quarantined, $disposition->outcome);
     }
 
     #[Test]
@@ -66,7 +83,7 @@ class IsolateUnreferencedStrategyTest extends TestCase
         $quarantine->method('quarantine')->willReturn(['quarantined' => 0, 'failed' => 1, 'errors' => ['nope']]);
 
         $disposition = (new IsolateUnreferencedStrategy($resolver, $quarantine))
-            ->disposeCopy(9, new RepointReport(9, 5, 0, []));
+            ->disposeCopy(new RepointReport(9, 5, 0, []), new MergeContextStub(9));
 
         self::assertSame(DispositionOutcome::LeftError, $disposition->outcome);
     }

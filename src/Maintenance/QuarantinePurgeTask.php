@@ -4,20 +4,20 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Maintenance;
 
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 use Pimcore\Maintenance\TaskInterface;
 use Psr\Log\LoggerInterface;
 
 /**
  * Hard-deletes quarantined assets past the grace period on every maintenance run (only those still
- * unused; QuarantineService re-verifies). This is the safe, scheduled cleanup the audit-retention
+ * unused; QuarantineServiceInterface re-verifies). This is the safe, scheduled cleanup the audit-retention
  * task could not be for assets: nothing is deleted that was not first quarantined and left untouched
  * for the grace period. Exceptions are logged, never rethrown.
  */
 class QuarantinePurgeTask implements TaskInterface
 {
     public function __construct(
-        protected readonly QuarantineService $quarantineService,
+        protected readonly QuarantineServiceInterface $quarantineService,
         protected readonly LoggerInterface $logger,
     ) {}
 

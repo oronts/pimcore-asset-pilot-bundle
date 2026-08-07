@@ -23,9 +23,9 @@ class RuleOverlapAnalyzerTest extends TestCase
         return new RuleOverlapAnalyzer($engine);
     }
 
-    private function rule(string $name, string $class, array $fields, int $priority, bool $enabled = true): Rule
+    private function rule(string $name, string $class, array $fields, int $priority, bool $enabled = true, array $filters = [], array $locales = []): Rule
     {
-        return new Rule($name, $class, $fields, null, '/P', \Oronts\AssetPilotBundle\Enum\MoveStrategy::Always, null, $priority, $enabled, []);
+        return new Rule($name, $class, $fields, null, '/P', \Oronts\AssetPilotBundle\Enum\MoveStrategy::Always, null, $priority, $enabled, $filters, locales: $locales);
     }
 
     #[Test]
@@ -110,5 +110,33 @@ class RuleOverlapAnalyzerTest extends TestCase
         self::assertCount(1, $overlaps);
         self::assertTrue($overlaps[0]->samePriority);
         self::assertNull($overlaps[0]->higherPriority);
+    }
+
+    #[Test]
+    public function disjointLocalesDoNotOverlap(): void
+    {
+        $overlaps = $this->analyzer([
+            $this->rule('de', 'Product', [], 20, locales: ['de']),
+            $this->rule('en', 'Product', [], 10, locales: ['en']),
+        ])->analyze();
+
+        self::assertSame([], $overlaps);
+    }
+
+    #[Test]
+    public function disjointTypesExtensionsAndSizesDoNotOverlap(): void
+    {
+        self::assertSame([], $this->analyzer([
+            $this->rule('image', 'Product', [], 20, filters: ['types' => ['image']]),
+            $this->rule('video', 'Product', [], 10, filters: ['types' => ['video']]),
+        ])->analyze());
+        self::assertSame([], $this->analyzer([
+            $this->rule('jpg', 'Product', [], 20, filters: ['extensions' => ['jpg']]),
+            $this->rule('png', 'Product', [], 10, filters: ['extensions' => ['png']]),
+        ])->analyze());
+        self::assertSame([], $this->analyzer([
+            $this->rule('small', 'Product', [], 20, filters: ['max_size' => 100]),
+            $this->rule('large', 'Product', [], 10, filters: ['min_size' => 101]),
+        ])->analyze());
     }
 }

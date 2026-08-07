@@ -7,7 +7,7 @@ namespace Oronts\AssetPilotBundle\Zip;
 use Pimcore\Model\Asset;
 
 /** All assets at the archive root, by filename (collisions de-duplicated by the builder). */
-final class FlatZipStrategy implements ZipEntryStrategyInterface
+class FlatZipStrategy implements ZipEntryStrategyInterface
 {
     public function getName(): string
     {

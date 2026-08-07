@@ -1,0 +1,13 @@
+{
+  "note": "Shared JS<->PHP source-hash parity contract. Regenerate via scripts if inputs change.",
+  "files": {
+    "js/src/main.ts": "export const boot = 1\n",
+    "js/src/app/index.ts": "export const app = 2\n",
+    "rsbuild.config.ts": "export default {}\n",
+    "tsconfig.json": "{\"compilerOptions\":{\"baseUrl\":\".\"}}\n",
+    "package.json": "{\"name\":\"studio\"}\n",
+    "package-lock.json": "{\"lockfileVersion\":3}\n",
+    "scripts/manifest-assets.mjs": "export const isValidBuildId = () => true\n"
+  },
+  "sha256": "1ec277089ff4b4c9f9867a0cc363e4c05531a77b6ec9968b6236fb7558c617b3"
+}

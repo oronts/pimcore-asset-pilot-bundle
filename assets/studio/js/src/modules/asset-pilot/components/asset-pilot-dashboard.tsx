@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ToastProvider } from './shared/toast/toast-context'
 import { DashboardTab } from './dashboard/dashboard-tab'
@@ -13,6 +13,10 @@ import { StorageTrendsTab } from './storage/storage-trends-tab'
 import { EmptyFoldersTab } from './folders/empty-folders-tab'
 import { DriftTab } from './drift/drift-tab'
 import { AssetManagementTab } from './asset-management/asset-management-tab'
+import { theme } from 'antd'
+import { assetPilotThemeVariables } from './shared/theme-variables'
+import { usePermissions } from '../hooks/use-permissions'
+import { organizeTargetStore } from '../services/organize-target-store'
 
 const DOCS_URL = 'https://github.com/oronts/pimcore-asset-pilot-bundle/tree/main/docs'
 
@@ -36,18 +40,45 @@ const tabLabelKeys: Record<TabKey, string> = {
 
 export const AssetPilotDashboard: React.FC = () => {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const { admin } = usePermissions()
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard')
+  // Storage trends read an admin-only endpoint; hide the tab from non-admins so it is neither shown nor fetched.
+  const visibleTabKeys = tabKeys.filter(key => key !== 'storage' || admin)
+
+  useEffect(() => {
+    // F9: when a tree context action requested an organize, land on the Operations tab. Peek (do not consume)
+    // so the Reorganize form stays the sole consumer of the target folder; a plain tab remount then carries none.
+    const focusOperations = (): void => {
+      if (organizeTargetStore.peek() !== null) setActiveTab('operations')
+    }
+    focusOperations()
+    return organizeTargetStore.subscribe(focusOperations)
+  }, [])
+
+  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, current: number): void => {
+    const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End']
+    if (!keys.includes(event.key)) return
+    event.preventDefault()
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? visibleTabKeys.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + visibleTabKeys.length) % visibleTabKeys.length
+    setActiveTab(visibleTabKeys[next])
+    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+  }
 
   return (
     <ToastProvider>
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-      <div style={{ padding: '16px 24px 0', borderBottom: '1px solid #f0f0f0' }}>
+    <div data-testid="asset-pilot-root" style={{ ...assetPilotThemeVariables(token), height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+      <div style={{ padding: '16px 24px 0', borderBottom: '1px solid var(--ap-color-border-secondary)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.nav.title')}</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--ap-color-text)' }}>{t('asset-pilot.nav.title')}</h2>
           <span style={{
-            fontSize: 11,
-            color: '#8c8c8c',
-            background: '#f5f5f5',
+            fontSize: 'var(--ap-font-size)',
+            color: 'var(--ap-color-text-secondary)',
+            background: 'var(--ap-color-fill-secondary)',
             padding: '2px 8px',
             borderRadius: 4,
             fontWeight: 500,
@@ -59,27 +90,34 @@ export const AssetPilotDashboard: React.FC = () => {
             target="_blank"
             rel="noopener noreferrer"
             aria-label={t('asset-pilot.nav.docs-aria')}
-            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: '#1677ff', textDecoration: 'none' }}
+            style={{ marginLeft: 'auto', fontSize: 'var(--ap-font-size)', fontWeight: 500, color: 'var(--ap-color-primary)', textDecoration: 'none' }}
           >
             {t('asset-pilot.nav.docs')} ↗
           </a>
         </div>
 
-        <div style={{ display: 'flex', gap: 0 }}>
-          {tabKeys.map(key => (
+        <div role="tablist" aria-label={t('asset-pilot.nav.title')} style={{ display: 'flex', gap: 0, overflowX: 'auto', scrollbarWidth: 'thin' }}>
+          {visibleTabKeys.map((key, index) => (
             <button
               key={key}
+              id={`asset-pilot-tab-${key}`}
+              role="tab"
+              aria-selected={activeTab === key}
+              aria-controls="asset-pilot-tabpanel"
+              tabIndex={activeTab === key ? 0 : -1}
               onClick={() => setActiveTab(key)}
+              onKeyDown={event => moveTabFocus(event, index)}
               style={{
                 padding: '8px 16px',
                 border: 'none',
-                borderBottom: activeTab === key ? '2px solid #1677ff' : '2px solid transparent',
+                borderBottom: activeTab === key ? '2px solid var(--ap-color-primary)' : '2px solid transparent',
                 background: 'none',
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: activeTab === key ? 600 : 400,
-                color: activeTab === key ? '#1677ff' : '#595959',
-                transition: 'all 0.2s',
+                color: activeTab === key ? 'var(--ap-color-primary)' : 'var(--ap-color-text-secondary)',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
               {t(tabLabelKeys[key])}
@@ -88,7 +126,7 @@ export const AssetPilotDashboard: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+      <div id="asset-pilot-tabpanel" role="tabpanel" aria-labelledby={`asset-pilot-tab-${activeTab}`} tabIndex={0} style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {activeTab === 'dashboard' && <DashboardTab onNavigateToAudit={() => setActiveTab('audit')} />}
         {activeTab === 'rules' && <RulesTab />}
         {activeTab === 'operations' && <OperationsTab />}
@@ -97,7 +135,7 @@ export const AssetPilotDashboard: React.FC = () => {
         {activeTab === 'duplicates' && <DuplicatesTab />}
         {activeTab === 'integrity' && <IntegrityTab />}
         {activeTab === 'quarantine' && <QuarantineTab />}
-        {activeTab === 'storage' && <StorageTrendsTab />}
+        {activeTab === 'storage' && admin && <StorageTrendsTab />}
         {activeTab === 'folders' && <EmptyFoldersTab />}
         {activeTab === 'drift' && <DriftTab />}
         {activeTab === 'management' && <AssetManagementTab />}

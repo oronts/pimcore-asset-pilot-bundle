@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { assetPilotApi } from '../../services/api'
 import type { RuleSetDiff } from '../../types'
 import { useModalDismiss } from '../../hooks/use-modal-dismiss'
+import { modalOverlayStyle, modalSurfaceStyle } from '../shared/modal-styles'
 
 interface RuleDiffModalProps {
   onClose: () => void
@@ -34,27 +35,27 @@ export const RuleDiffModal: React.FC<RuleDiffModalProps> = ({ onClose }) => {
   }
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
+    <div role="presentation" style={modalOverlayStyle} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label={t('asset-pilot.rules.diff.title')} tabIndex={-1} style={modalStyle}>
         <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.rules.diff.title')}</h3>
-        <p style={{ fontSize: 13, color: '#595959', margin: '0 0 16px' }}>{t('asset-pilot.rules.diff.desc')}</p>
+        <p style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', margin: '0 0 16px' }}>{t('asset-pilot.rules.diff.desc')}</p>
 
         <label style={fileLabelStyle}>
           {t('asset-pilot.rules.diff.choose-file')}
           <input type="file" accept="application/json,.json" onChange={e => { void onFile(e) }} style={{ display: 'none' }} />
         </label>
-        {fileName != null && <span style={{ fontSize: 12, color: '#8c8c8c', marginLeft: 8 }}>{fileName}</span>}
+        {fileName != null && <span style={{ fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', marginLeft: 8 }}>{fileName}</span>}
 
-        {loading && <p style={{ fontSize: 13, color: '#8c8c8c', marginTop: 16 }}>{t('asset-pilot.common.loading')}</p>}
-        {error != null && <p style={{ color: '#ff4d4f', fontSize: 13, marginTop: 16 }}>{error}</p>}
+        {loading && <p style={{ fontSize: 13, color: 'var(--ap-color-text-secondary)', marginTop: 16 }}>{t('asset-pilot.common.loading')}</p>}
+        {error != null && <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13, marginTop: 16 }}>{error}</p>}
 
         {diff != null && (
           <div style={{ marginTop: 16 }}>
-            {!diff.hasChanges && <p style={{ fontSize: 13, color: '#52c41a' }}>{t('asset-pilot.rules.diff.identical')}</p>}
-            <DiffGroup color="#52c41a" label={t('asset-pilot.rules.diff.added')} names={Object.keys(diff.added)} />
-            <DiffGroup color="#ff4d4f" label={t('asset-pilot.rules.diff.removed')} names={Object.keys(diff.removed)} />
-            <DiffGroup color="#fa8c16" label={t('asset-pilot.rules.diff.changed')} names={Object.keys(diff.changed)} />
-            <DiffGroup color="#8c8c8c" label={t('asset-pilot.rules.diff.unchanged')} names={diff.unchanged} />
+            {!diff.hasChanges && <p style={{ fontSize: 13, color: 'var(--ap-color-success-text)' }}>{t('asset-pilot.rules.diff.identical')}</p>}
+            <DiffGroup color="var(--ap-color-success-text)" label={t('asset-pilot.rules.diff.added')} names={Object.keys(diff.added)} />
+            <DiffGroup color="var(--ap-color-error-text)" label={t('asset-pilot.rules.diff.removed')} names={Object.keys(diff.removed)} />
+            <ChangedRules label={t('asset-pilot.rules.diff.changed')} changes={diff.changed} />
+            <DiffGroup color="var(--ap-color-text-secondary)" label={t('asset-pilot.rules.diff.unchanged')} names={diff.unchanged} />
           </div>
         )}
 
@@ -66,33 +67,56 @@ export const RuleDiffModal: React.FC<RuleDiffModalProps> = ({ onClose }) => {
   )
 }
 
+const ChangedRules: React.FC<{
+  label: string
+  changes: RuleSetDiff['changed']
+}> = ({ label, changes }) => {
+  const { t } = useTranslation()
+  const entries = Object.entries(changes)
+  if (entries.length === 0) return null
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 'var(--ap-font-size)', fontWeight: 600, color: 'var(--ap-color-warning-text)', marginBottom: 4 }}>{label} ({entries.length})</div>
+      {entries.map(([name, change]) => (
+        <details key={name} style={{ marginBottom: 6 }}>
+          <summary style={{ cursor: 'pointer', fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{name}</summary>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, marginTop: 4 }}>
+            <div><strong style={diffLabelStyle}>{t('asset-pilot.rules.diff.current')}</strong><pre style={diffCodeStyle}>{JSON.stringify(change.current, null, 2)}</pre></div>
+            <div><strong style={diffLabelStyle}>{t('asset-pilot.rules.diff.imported')}</strong><pre style={diffCodeStyle}>{JSON.stringify(change.imported, null, 2)}</pre></div>
+          </div>
+        </details>
+      ))}
+    </div>
+  )
+}
+
 const DiffGroup: React.FC<{ color: string; label: string; names: string[] }> = ({ color, label, names }) => {
   if (names.length === 0) return null
 
   return (
     <div style={{ marginBottom: 10 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color, marginBottom: 4 }}>{label} ({names.length})</div>
+      <div style={{ fontSize: 'var(--ap-font-size)', fontWeight: 600, color, marginBottom: 4 }}>{label} ({names.length})</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {names.map(name => (
-          <span key={name} style={{ fontSize: 12, background: '#f5f5f5', borderRadius: 4, padding: '2px 8px', fontFamily: 'monospace' }}>{name}</span>
+          <span key={name} style={{ fontSize: 'var(--ap-font-size)', background: 'var(--ap-color-fill-secondary)', borderRadius: 4, padding: '2px 8px', fontFamily: 'monospace' }}>{name}</span>
         ))}
       </div>
     </div>
   )
 }
 
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex',
-  alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-}
 const modalStyle: React.CSSProperties = {
-  background: '#fff', borderRadius: 12, padding: 24, width: 520, maxHeight: '80vh', overflow: 'auto',
-  boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+  ...modalSurfaceStyle, width: 520, maxWidth: 'calc(100vw - 32px)', maxHeight: '80vh', overflow: 'auto',
 }
 const fileLabelStyle: React.CSSProperties = {
-  display: 'inline-block', padding: '6px 16px', border: '1px solid #1677ff', borderRadius: 6,
-  background: '#fff', color: '#1677ff', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+  display: 'inline-block', padding: '6px 16px', border: '1px solid var(--ap-color-primary)', borderRadius: 6,
+  background: 'var(--ap-color-bg-container)', color: 'var(--ap-color-primary)', cursor: 'pointer', fontSize: 13, fontWeight: 500,
 }
 const cancelBtnStyle: React.CSSProperties = {
-  padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 13,
+  padding: '6px 16px', border: '1px solid var(--ap-color-border)', borderRadius: 6, background: 'var(--ap-color-bg-container)', cursor: 'pointer', fontSize: 13,
 }
+const diffCodeStyle: React.CSSProperties = {
+  margin: 0, padding: 8, overflow: 'auto', maxHeight: 220, background: 'var(--ap-color-fill-alter)', border: '1px solid var(--ap-color-border-secondary)', borderRadius: 4, fontSize: 'var(--ap-font-size)',
+}
+const diffLabelStyle: React.CSSProperties = { display: 'block', marginBottom: 2, color: 'var(--ap-color-text-secondary)', fontSize: 'var(--ap-font-size)' }

@@ -3,26 +3,22 @@ import { pluginReact } from '@rsbuild/plugin-react'
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginGenerateEntrypoints } from '@pimcore/studio-ui-bundle/rsbuild/plugins';
 import path from 'path'
-import fs from 'fs';
-import { v4 } from 'uuid';
+import { fileURLToPath } from 'url'
 import packages from './package.json'
+import { isValidBuildId } from './scripts/manifest-assets.mjs'
 
-const buildId = v4();
-const buildPath = path.resolve(__dirname, '..', '..', 'public', 'studio', 'build', buildId);
-
-if (fs.existsSync( path.resolve(__dirname, '..', '..', 'public', 'studio', 'build'))) {
-  fs.readdirSync(path.resolve(__dirname, '..', '..', 'public', 'studio', 'build')).forEach((file) => {
-    if (file !== 'studio-npm-package.tgz') {
-      fs.rmSync(path.resolve(__dirname, '..', '..', 'public', 'studio', 'build', file), { recursive: true });
-    }
-  })
+const currentDir = path.dirname(fileURLToPath(import.meta.url))
+const buildId = process.env.ASSET_PILOT_BUILD_ID ?? 'development'
+if (!isValidBuildId(buildId)) {
+  throw new Error('ASSET_PILOT_BUILD_ID contains unsupported characters')
 }
+const buildPath = process.env.ASSET_PILOT_BUILD_PATH
+  ? path.resolve(process.env.ASSET_PILOT_BUILD_PATH)
+  : path.resolve(currentDir, '..', '..', 'public', 'studio', 'build', buildId)
+const assetBase = (process.env.ASSET_PILOT_ASSET_BASE ?? '/bundles/orontsassetpilot/studio/build').replace(/\/$/, '')
+const assetPrefix = `${assetBase}/${buildId}`
 
-if (!fs.existsSync(buildPath)) {
-  fs.mkdirSync(buildPath, { recursive: true });
-}
-
-let nodeEnv = process.env.NODE_ENV;
+const nodeEnv = process.env.NODE_ENV;
 let env: 'development' | 'production' = 'production';
 
 const isDevServer = nodeEnv === 'dev-server';
@@ -39,33 +35,36 @@ export default defineConfig({
     buildCache: false,
   },
   server: {
-    port: 3040,
+    host: process.env.ASSET_PILOT_DEV_HOST ?? 'localhost',
+    port: Number(process.env.ASSET_PILOT_DEV_PORT ?? 3040),
+    cors: {
+      origin: process.env.ASSET_PILOT_DEV_ORIGIN ?? 'http://localhost:3000',
+      credentials: true,
+    },
   },
   dev: {
-    ...(!isDevServer ? {assetPrefix: '/bundles/orontsassetpilot/studio/build/' + buildId} : {}),
+    ...(!isDevServer ? {assetPrefix} : {}),
     client: {
-      host: 'localhost',
-      port: 3040,
-      protocol: 'ws'
+      host: process.env.ASSET_PILOT_DEV_HOST ?? 'localhost',
+      port: Number(process.env.ASSET_PILOT_DEV_PORT ?? 3040),
+      protocol: process.env.ASSET_PILOT_DEV_PROTOCOL ?? 'ws'
     }
   },
   source: {
     entry: {
       main: './js/src/main.ts'
-    },
-    decorators: {
-      version: 'legacy'
     }
   },
   output: {
     manifest: true,
-    assetPrefix: '/bundles/orontsassetpilot/studio/build/' + buildId,
+    cleanDistPath: false,
+    assetPrefix,
     distPath: {
       root: buildPath
     },
   },
   tools: {
-    bundlerChain: (chain, { env }) => {
+    bundlerChain: (chain) => {
       chain.output.uniqueName('oronts_asset_pilot_bundle');
     },
   },
@@ -80,51 +79,75 @@ export default defineConfig({
       },
       dts: false,
       remotes: {
-        '@pimcore/studio-ui-bundle': `promise new Promise(resolve => {
+        '@pimcore/studio-ui-bundle': `promise new Promise((resolve, reject) => {
           const studioUIBundleRemoteUrl = window.StudioUIBundleRemoteUrl
-          const script = document.createElement('script')
+          if (typeof studioUIBundleRemoteUrl !== 'string' || studioUIBundleRemoteUrl.length === 0) {
+            throw new Error('Studio UI remote URL is unavailable')
+          }
 
-          let hasScript = false;
+          const isAlreadyInitializedError = (error) => {
+            return typeof error === 'object'
+              && error !== null
+              && typeof error.message === 'string'
+              && error.message.toLowerCase().includes('already been initialized')
+          }
 
-          document.querySelectorAll('script').forEach((el) => {
-            const elPathname = el.src.replace(/https?:\\/\\/[^/]+/, '')
-            const studioUIBundleRemoteUrlPathname = studioUIBundleRemoteUrl.replace(/https?:\\/\\/[^/]+/, '')
-
-            if (elPathname === studioUIBundleRemoteUrlPathname) {
-              hasScript = true;
-              return;
+          const resolveContainer = () => {
+            const container = window['pimcore_studio_ui_bundle']
+            if (!container || typeof container.get !== 'function' || typeof container.init !== 'function') {
+              throw new Error('Studio UI remote container did not initialize')
             }
-          })
-
-          if (hasScript) {
             resolve({
-              get: (request) => window['pimcore_studio_ui_bundle'].get(request),
-              init: (...arg) => {
+              get: (request) => container.get(request),
+              init: (...args) => {
                 try {
-                  return window['pimcore_studio_ui_bundle'].init(...arg)
-                } catch(e) {
-                  console.log('remote container already initialized')
+                  const result = container.init(...args)
+                  if (result && typeof result.catch === 'function') {
+                    return result.catch((error) => {
+                      if (isAlreadyInitializedError(error)) return undefined
+                      throw error
+                    })
+                  }
+                  return result
+                } catch (error) {
+                  if (isAlreadyInitializedError(error)) return undefined
+                  throw error
                 }
               }
             })
+          }
+
+          const absoluteRemoteUrl = new URL(studioUIBundleRemoteUrl, document.baseURI).href
+          const existing = Array.from(document.scripts).find((script) => script.src === absoluteRemoteUrl)
+          if (existing && window['pimcore_studio_ui_bundle']) {
+            try {
+              resolveContainer()
+            } catch (error) {
+              reject(error)
+            }
             return
           }
 
-          script.src = studioUIBundleRemoteUrl
-          script.onload = () => {
-            const proxy = {
-              get: (request) => window['pimcore_studio_ui_bundle'].get(request),
-              init: (...arg) => {
-                try {
-                  return window['pimcore_studio_ui_bundle'].init(...arg)
-                } catch(e) {
-                  console.log('remote container already initialized')
-                }
-              }
+          const script = existing ?? document.createElement('script')
+          const timeout = window.setTimeout(() => {
+            reject(new Error('Studio UI remote loading timed out'))
+          }, 15000)
+          script.addEventListener('load', () => {
+            window.clearTimeout(timeout)
+            try {
+              resolveContainer()
+            } catch (error) {
+              reject(error)
             }
-            resolve(proxy)
+          }, { once: true })
+          script.addEventListener('error', () => {
+            window.clearTimeout(timeout)
+            reject(new Error('Studio UI remote failed to load'))
+          }, { once: true })
+          if (!existing) {
+            script.src = absoluteRemoteUrl
+            document.head.appendChild(script)
           }
-          document.head.appendChild(script);
         })
         `,
       },
@@ -149,11 +172,6 @@ export default defineConfig({
           singleton: true,
           eager: true,
           requiredVersion: false,
-        },
-        'inversify': {
-          eager: true,
-          version: '6.1.x',
-          requiredVersion: '6.1.x',
         },
       },
     })

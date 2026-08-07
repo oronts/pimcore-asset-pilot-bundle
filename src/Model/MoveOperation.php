@@ -22,5 +22,6 @@ readonly class MoveOperation
         public ?int $durationMs = null,
         public ?int $userId = null,
         public \DateTimeImmutable $createdAt = new \DateTimeImmutable(),
+        public ?string $executionFingerprint = null,
     ) {}
 }

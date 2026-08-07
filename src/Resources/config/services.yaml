@@ -6,17 +6,12 @@ services:
         bind:
             int $defaultBatchSize: '%oronts_asset_pilot.async.batch_size%'
 
-    # Bundle-owned interface seams (rule_action, health_check, integrity_checker, notifier,
-    # duplicate_merge_strategy, rule_provider, zip_strategy, context_provider) are auto-tagged
-    # container-wide via registerForAutoconfiguration() in OrontsAssetPilotExtension, so a consumer
-    # service implementing one is picked up without touching this file. The `_instanceof` block below
-    # tags `filter` and `strategy` instead (built-in strategies add their `alias` on the per-service tag).
-    _instanceof:
-        Oronts\AssetPilotBundle\Filter\AssetFilterInterface:
-            tags: ['oronts_asset_pilot.filter']
-
-        Oronts\AssetPilotBundle\Strategy\ConflictStrategyInterface:
-            tags: ['oronts_asset_pilot.strategy']
+    # Bundle-owned interface seams (callback, rule_action, health_check, integrity_checker, notifier,
+    # duplicate_merge_strategy, rule_provider, zip_strategy, context_provider, operation_observer) are
+    # auto-tagged container-wide via registerForAutoconfiguration() in OrontsAssetPilotExtension, so a
+    # consumer service implementing one is picked up without touching this file. Filters, Twig
+    # extensions, expression-function providers, and keyed conflict strategies remain explicit because
+    # their registration needs deliberate membership, a third-party interface, or an alias.
 
     # -- Core services ----------------------------------------------------------
 
@@ -31,9 +26,13 @@ services:
             - '../../Dto/'
             - '../../Message/'
             - '../../Event/'
+            - '../../Controller/Api/OpenApiSpecification.php'
+            - '../../Controller/Api/OpenApiPaths.php'
             - '../../Merge/RepointReport.php'
             - '../../Merge/CopyDisposition.php'
             - '../../Merge/MergeOutcome.php'
+            - '../../Merge/ReferrerSnapshot.php'
+            - '../../Merge/RepointPreflight.php'
             - '../../OrontsAssetPilotBundle.php'
             - '../../Installer.php'
             - '../../Webpack/'
@@ -44,20 +43,127 @@ services:
         arguments:
             $bundle: "@=service('kernel').getBundle('OrontsAssetPilotBundle')"
             $db: '@doctrine.dbal.default_connection'
+            $cacheResolver: '@Pimcore\Bundle\StaticResolverBundle\Lib\CacheResolverInterface'
 
     # -- Interface aliases (autowiring) ------------------------------------------
 
+    Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatterInterface: '@Oronts\AssetPilotBundle\Api\Serialization\ApiDateFormatter'
     Oronts\AssetPilotBundle\Filter\AssetFilterInterface: '@Oronts\AssetPilotBundle\Filter\CompositeFilter'
     Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface: '@Oronts\AssetPilotBundle\Condition\ExpressionConditionEvaluator'
     Oronts\AssetPilotBundle\PathResolver\PathResolverInterface: '@Oronts\AssetPilotBundle\PathResolver\TemplatePathResolver'
     Oronts\AssetPilotBundle\Naming\NamingStrategyInterface: '@Oronts\AssetPilotBundle\Naming\SafeNamingStrategy'
+    Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface: '@Oronts\AssetPilotBundle\Security\ElementAuthorization'
+    Oronts\AssetPilotBundle\Integrity\IntegrityCheckerResolverInterface: '@Oronts\AssetPilotBundle\Integrity\CompositeIntegrityChecker'
 
     Oronts\AssetPilotBundle\Engine\RuleEngineInterface: '@Oronts\AssetPilotBundle\Engine\RuleEngine'
+    Oronts\AssetPilotBundle\Service\AssetDependencyTargetExtractorInterface: '@Oronts\AssetPilotBundle\Service\AssetDependencyTargetExtractor'
     Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface: '@Oronts\AssetPilotBundle\Service\AssetFieldExtractor'
     Oronts\AssetPilotBundle\Service\UnusedAssetFinderInterface: '@Oronts\AssetPilotBundle\Service\UnusedAssetFinder'
+    Oronts\AssetPilotBundle\Service\AssetZipServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetZipService'
+    Oronts\AssetPilotBundle\Service\ObjectSaveDrainInterface: '@Oronts\AssetPilotBundle\Service\ObjectSaveDrain'
     Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetSearchService'
     Oronts\AssetPilotBundle\Service\ConfidenceScorerInterface: '@Oronts\AssetPilotBundle\Service\ConfidenceScorer'
-    Oronts\AssetPilotBundle\Audit\AuditLoggerInterface: '@Oronts\AssetPilotBundle\Audit\AuditLogger'
+    Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetIntegrityService'
+    Oronts\AssetPilotBundle\Service\AssetMetadataMutationServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetMetadataMutationService'
+    Oronts\AssetPilotBundle\Service\AssetPropertyServiceInterface: '@Oronts\AssetPilotBundle\Service\AssetPropertyService'
+    Oronts\AssetPilotBundle\Service\ConfigValidatorInterface: '@Oronts\AssetPilotBundle\Service\ConfigValidator'
+    Oronts\AssetPilotBundle\Service\ContentUsageScannerInterface: '@Oronts\AssetPilotBundle\Service\ContentUsageScanner'
+    Oronts\AssetPilotBundle\Service\DuplicateDetectionServiceInterface: '@Oronts\AssetPilotBundle\Service\DuplicateDetectionService'
+    Oronts\AssetPilotBundle\Service\DuplicateMergeServiceInterface: '@Oronts\AssetPilotBundle\Service\DuplicateMergeService'
+    Oronts\AssetPilotBundle\Service\EmptyFolderSweepServiceInterface: '@Oronts\AssetPilotBundle\Service\EmptyFolderSweepService'
+    Oronts\AssetPilotBundle\Service\LocationDriftServiceInterface: '@Oronts\AssetPilotBundle\Service\LocationDriftService'
+    Oronts\AssetPilotBundle\Service\MetricsServiceInterface: '@Oronts\AssetPilotBundle\Service\MetricsService'
+    Oronts\AssetPilotBundle\Service\NormalizeFilenamesServiceInterface: '@Oronts\AssetPilotBundle\Service\NormalizeFilenamesService'
+    Oronts\AssetPilotBundle\Service\OperationReverterInterface: '@Oronts\AssetPilotBundle\Service\OperationReverter'
+    Oronts\AssetPilotBundle\Service\QuarantineServiceInterface: '@Oronts\AssetPilotBundle\Service\QuarantineService'
+    Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzerInterface: '@Oronts\AssetPilotBundle\Service\RuleOverlapAnalyzer'
+    Oronts\AssetPilotBundle\Service\RulePortabilityInterface: '@Oronts\AssetPilotBundle\Service\RulePortability'
+    Oronts\AssetPilotBundle\Service\StorageTrendServiceInterface: '@Oronts\AssetPilotBundle\Service\StorageTrendService'
+    Oronts\AssetPilotBundle\Service\AssetDependencyResolverInterface: '@Oronts\AssetPilotBundle\Service\AssetDependencyResolver'
+    Oronts\AssetPilotBundle\Service\AssetReorganizerInterface: '@Oronts\AssetPilotBundle\Service\AssetReorganizer'
+    Oronts\AssetPilotBundle\Service\DuplicateReferenceRepointerInterface: '@Oronts\AssetPilotBundle\Service\DuplicateReferenceRepointer'
+    Oronts\AssetPilotBundle\Service\FailureReplayServiceInterface: '@Oronts\AssetPilotBundle\Service\FailureReplayService'
+    Oronts\AssetPilotBundle\Service\IntegrityHealHistoryServiceInterface: '@Oronts\AssetPilotBundle\Service\IntegrityHealHistoryService'
+    Oronts\AssetPilotBundle\Service\PrometheusFormatterInterface: '@Oronts\AssetPilotBundle\Service\PrometheusFormatter'
+    Oronts\AssetPilotBundle\Service\VersionRollbackHealerInterface: '@Oronts\AssetPilotBundle\Service\VersionRollbackHealer'
+    Oronts\AssetPilotBundle\Service\ApplyPlanClaimStoreInterface: '@Oronts\AssetPilotBundle\Service\DbalApplyPlanClaimStore'
+    Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface: '@Oronts\AssetPilotBundle\Service\ApplyPlanService'
+    Oronts\AssetPilotBundle\Service\RulePreviewPlanServiceInterface: '@Oronts\AssetPilotBundle\Service\RulePreviewPlanService'
+    Oronts\AssetPilotBundle\Service\ZipDownloadTokenStoreInterface: '@Oronts\AssetPilotBundle\Service\ZipDownloadTokenStore'
+    Oronts\AssetPilotBundle\Service\OperationRunStoreInterface: '@Oronts\AssetPilotBundle\Service\OperationRunStore'
+    Oronts\AssetPilotBundle\Service\OperationRunExecutorInterface: '@Oronts\AssetPilotBundle\Service\OperationRunExecutor'
+    Oronts\AssetPilotBundle\Service\OperationRunRetentionInterface: '@Oronts\AssetPilotBundle\Service\OperationRunRetention'
+    Oronts\AssetPilotBundle\Service\ReviewedObjectOperationServiceInterface: '@Oronts\AssetPilotBundle\Service\ReviewedObjectOperationService'
+    Oronts\AssetPilotBundle\Service\OperationDeliveryStoreInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryStore'
+    Oronts\AssetPilotBundle\Service\OperationDeliveryProcessorInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryProcessor'
+    Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface: '@Oronts\AssetPilotBundle\Service\OrganizeDispatcher'
+    Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolverInterface: '@Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolver'
+    Oronts\AssetPilotBundle\Service\CsvDistributionServiceInterface: '@Oronts\AssetPilotBundle\Service\CsvDistributionService'
+    Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface: '@Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStore'
+    Oronts\AssetPilotBundle\Service\DependencyProjectionInterface: '@Oronts\AssetPilotBundle\Service\DbalDependencyProjection'
+    Oronts\AssetPilotBundle\Service\DependencyProjectionFreshnessInterface: '@Oronts\AssetPilotBundle\Service\DbalDependencyProjectionFreshness'
+    Oronts\AssetPilotBundle\Service\DependencyProjectionRebuilderInterface: '@Oronts\AssetPilotBundle\Service\DependencyProjectionRebuilder'
+    Oronts\AssetPilotBundle\Service\DependencyUsageVerifierInterface: '@Oronts\AssetPilotBundle\Service\DependencyUsageVerifier'
+    Oronts\AssetPilotBundle\Service\AssetDeletionFenceInterface: '@Oronts\AssetPilotBundle\Service\DbalAssetDeletionFence'
+    Oronts\AssetPilotBundle\Service\ProjectionMarkerConnectionInterface: '@Oronts\AssetPilotBundle\Service\ProjectionMarkerConnection'
+
+    Oronts\AssetPilotBundle\Service\OperationDeliveryDispatcherInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryDispatcher'
+    Oronts\AssetPilotBundle\Service\OperationJournalInterface: '@Oronts\AssetPilotBundle\Service\OperationJournal'
+    Oronts\AssetPilotBundle\Audit\AuditWriterInterface: '@Oronts\AssetPilotBundle\Audit\AuditLogger'
+    Oronts\AssetPilotBundle\Audit\AuditQueryInterface: '@Oronts\AssetPilotBundle\Audit\AuditLogger'
+    Oronts\AssetPilotBundle\Audit\AuditExportInterface: '@Oronts\AssetPilotBundle\Audit\AuditLogger'
+    Oronts\AssetPilotBundle\Audit\AuditRetentionInterface: '@Oronts\AssetPilotBundle\Audit\AuditLogger'
+    Oronts\AssetPilotBundle\Service\UndoHealEligibilityProbeInterface: '@Oronts\AssetPilotBundle\Service\VersionRollbackHealer'
+
+    Oronts\AssetPilotBundle\Service\OperationRunStore:
+        arguments:
+            $leaseSeconds: '%oronts_asset_pilot.operation_runs.lease_seconds%'
+
+    Oronts\AssetPilotBundle\Health\Check\StuckOperationRunHealthCheck:
+        arguments:
+            $warningAfterSeconds: '%oronts_asset_pilot.operation_runs.stale_queued_warning_seconds%'
+
+    Oronts\AssetPilotBundle\Service\OperationRunRetention:
+        arguments:
+            $retentionDays: '%oronts_asset_pilot.operation_runs.retention_days%'
+            $batchSize: '%oronts_asset_pilot.operation_runs.retention_batch_size%'
+
+    Oronts\AssetPilotBundle\Observer\OperationObserverRegistry:
+        arguments:
+            $observers: !tagged_iterator oronts_asset_pilot.operation_observer
+
+    Oronts\AssetPilotBundle\Service\OperationDeliveryDispatcher:
+        arguments:
+            $deduplicationTtl: '%oronts_asset_pilot.operation_journal.dispatch_deduplication_seconds%'
+
+    Oronts\AssetPilotBundle\Service\OperationDeliveryProcessor:
+        arguments:
+            $maxAttempts: '%oronts_asset_pilot.operation_journal.max_attempts%'
+            $baseRetrySeconds: '%oronts_asset_pilot.operation_journal.base_retry_seconds%'
+            $maxRetrySeconds: '%oronts_asset_pilot.operation_journal.max_retry_seconds%'
+            $leaseSeconds: '%oronts_asset_pilot.operation_journal.lease_seconds%'
+
+    Oronts\AssetPilotBundle\Service\OperationRecoveryService:
+        arguments:
+            $recoveryAfterSeconds: '%oronts_asset_pilot.operation_journal.recovery_after_seconds%'
+
+    Oronts\AssetPilotBundle\Service\OperationRecoveryCoordinatorInterface: '@Oronts\AssetPilotBundle\Service\OperationRecoveryCoordinator'
+    Oronts\AssetPilotBundle\Service\OperationDeliveryRetryCoordinatorInterface: '@Oronts\AssetPilotBundle\Service\OperationDeliveryRetryCoordinator'
+
+    Oronts\AssetPilotBundle\Service\OperationDeliveryRetryCoordinator:
+        arguments:
+            $planConfiguration:
+                operation_journal:
+                    max_attempts: '%oronts_asset_pilot.operation_journal.max_attempts%'
+                    base_retry_seconds: '%oronts_asset_pilot.operation_journal.base_retry_seconds%'
+                    max_retry_seconds: '%oronts_asset_pilot.operation_journal.max_retry_seconds%'
+                    lease_seconds: '%oronts_asset_pilot.operation_journal.lease_seconds%'
+
+    Oronts\AssetPilotBundle\Service\OperationRecoveryCoordinator:
+        arguments:
+            $planConfiguration:
+                operation_journal:
+                    recovery_after_seconds: '%oronts_asset_pilot.operation_journal.recovery_after_seconds%'
 
     # -- Engine -----------------------------------------------------------------
 
@@ -131,6 +237,7 @@ services:
     Oronts\AssetPilotBundle\Service\ConfigValidator:
         arguments:
             $callbacks: !tagged_locator { tag: 'oronts_asset_pilot.callback' }
+            $actionResolver: '@Oronts\AssetPilotBundle\Action\RuleActionResolver'
 
     # -- Audit ------------------------------------------------------------------
 
@@ -140,7 +247,6 @@ services:
 
     Oronts\AssetPilotBundle\Audit\AuditLogger:
         arguments:
-            $enabled: '%oronts_asset_pilot.audit.enabled%'
             $retentionDays: '%oronts_asset_pilot.audit.retention_days%'
             $statsCache: '@Oronts\AssetPilotBundle\Cache\StatsCache'
             $statsTtl: '%oronts_asset_pilot.cache.stats_ttl%'
@@ -152,9 +258,15 @@ services:
 
     # -- Move planner (shared gate-decision source for dry-run + live) ----------
 
+    Oronts\AssetPilotBundle\Service\MovePlannerInterface: '@Oronts\AssetPilotBundle\Service\MovePlanner'
+
     Oronts\AssetPilotBundle\Service\MovePlanner:
         arguments:
             $excludeFolders: '%oronts_asset_pilot.protection.exclude_folders%'
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\EmptyFolderSweepService:
+        arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
     # -- Unused asset finder (with lock property) ------------------------------
@@ -167,10 +279,47 @@ services:
 
     Oronts\AssetPilotBundle\Service\ContentUsageScanner:
         arguments:
-            $classes: '%oronts_asset_pilot.content_scan.classes%'
             $enabled: '%oronts_asset_pilot.content_scan.enabled%'
         tags:
             - { name: 'kernel.reset', method: 'reset' }
+
+    Oronts\AssetPilotBundle\Service\LiveDependencyUsageScanner:
+        arguments:
+            $maxSources: '%oronts_asset_pilot.dependency_projection.bootstrap_max_sources%'
+        tags:
+            - { name: 'kernel.reset', method: 'reset' }
+
+    Oronts\AssetPilotBundle\Service\DependencyUsageVerifier:
+        arguments:
+            $bootstrapFallback: '%oronts_asset_pilot.dependency_projection.bootstrap_live_scan%'
+
+    Oronts\AssetPilotBundle\Service\DbalAssetDeletionFence:
+        arguments:
+            $leaseSeconds: '%oronts_asset_pilot.dependency_projection.deletion_fence_lease_seconds%'
+
+    Oronts\AssetPilotBundle\Command\RebuildDependencyProjectionCommand:
+        arguments:
+            $defaultRebuildBatchSize: '%oronts_asset_pilot.dependency_projection.rebuild_batch_size%'
+
+    Oronts\AssetPilotBundle\Service\AssetMutationFingerprintService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+        tags:
+            - { name: 'kernel.reset', method: 'reset' }
+
+    Oronts\AssetPilotBundle\Service\AssetMetadataMutationService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\AssetMetadataFingerprintService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\StorageTrendService:
+        arguments:
+            $enabled: '%oronts_asset_pilot.storage_snapshots.enabled%'
+            $minimumIntervalSeconds: '%oronts_asset_pilot.storage_snapshots.minimum_interval_seconds%'
+            $retentionDays: '%oronts_asset_pilot.storage_snapshots.retention_days%'
 
     # -- Asset download archive (zip) -------------------------------------------
 
@@ -179,6 +328,13 @@ services:
             $strategies: !tagged_iterator oronts_asset_pilot.zip_strategy
             $defaultStrategy: '%oronts_asset_pilot.zip.default_strategy%'
             $maxAssets: '%oronts_asset_pilot.zip.max_assets%'
+            $maxUncompressedBytes: '%oronts_asset_pilot.zip.max_uncompressed_bytes%'
+
+    Oronts\AssetPilotBundle\Service\ZipDownloadTokenStore:
+        arguments:
+            $cache: '@cache.app'
+            $lockFactory: '@lock.factory'
+            $ttlSeconds: '%oronts_asset_pilot.zip.download_token_ttl%'
 
     # -- Integrity (broken-asset detection) -------------------------------------
 
@@ -194,6 +350,13 @@ services:
     Oronts\AssetPilotBundle\Service\VersionRollbackHealer:
         arguments:
             $onUnrecoverable: '%oronts_asset_pilot.integrity.on_unrecoverable%'
+            $excludeFolders: '%oronts_asset_pilot.protection.exclude_folders%'
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService:
+        arguments:
+            $planConfiguration: '%oronts_asset_pilot.config%'
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
     # -- Notifications ----------------------------------------------------------
 
@@ -201,6 +364,8 @@ services:
         arguments:
             $notifiers: !tagged_iterator oronts_asset_pilot.notifier
             $enabled: '%oronts_asset_pilot.notifications.enabled%'
+
+    Oronts\AssetPilotBundle\Notification\NotificationDispatcherInterface: '@Oronts\AssetPilotBundle\Notification\NotificationDispatcher'
 
     Oronts\AssetPilotBundle\Notification\PimcoreNotificationNotifier:
         arguments:
@@ -220,6 +385,24 @@ services:
         arguments:
             $strategies: !tagged_iterator oronts_asset_pilot.duplicate_merge_strategy
             $defaultStrategy: '%oronts_asset_pilot.duplicates.merge_strategy%'
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Merge\Strategy\RepointAndDeleteStrategy:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\OperationReverter:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\NormalizeFilenamesService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+
+    Oronts\AssetPilotBundle\Service\CsvDistributionService:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+            $excludeFolders: '%oronts_asset_pilot.protection.exclude_folders%'
 
     # -- Quarantine -------------------------------------------------------------
 
@@ -235,9 +418,11 @@ services:
         arguments:
             $actions: !tagged_iterator oronts_asset_pilot.rule_action
 
-    Oronts\AssetPilotBundle\EventListener\RuleActionListener:
-        tags:
-            - { name: 'kernel.event_listener', event: !php/const Oronts\AssetPilotBundle\Event\AssetPilotEvents::POST_MOVE, method: 'onPostMove' }
+    # -- Asset format converters (pluggable seam) -------------------------------
+
+    Oronts\AssetPilotBundle\Service\Conversion\AssetConverterResolver:
+        arguments:
+            $converters: !tagged_iterator oronts_asset_pilot.asset_converter
 
     # -- Maintenance tasks ------------------------------------------------------
 
@@ -253,20 +438,73 @@ services:
         tags:
             - { name: 'pimcore.maintenance.task', type: 'assetPilotStorageSnapshot' }
 
+    Oronts\AssetPilotBundle\Maintenance\OperationDeliveryTask:
+        arguments:
+            $defaultBatchSize: '%oronts_asset_pilot.operation_journal.delivery_batch_size%'
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotOperationDelivery' }
+    Oronts\AssetPilotBundle\Maintenance\OperationRunRetentionTask:
+        arguments:
+            $staleRunSeconds: '%oronts_asset_pilot.operation_runs.abandoned_run_failover_seconds%'
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotOperationRunRetention' }
+    Oronts\AssetPilotBundle\Maintenance\OrganizeDispatchRelayTask:
+        arguments:
+            $batchSize: '%oronts_asset_pilot.async.batch_size%'
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotOrganizeDispatchRelay' }
+
+    Oronts\AssetPilotBundle\Maintenance\DeletionFenceReaperTask:
+        arguments:
+            $batchSize: '%oronts_asset_pilot.dependency_projection.deletion_fence_reap_batch_size%'
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotDeletionFenceReaper' }
+
+    Oronts\AssetPilotBundle\Maintenance\DependencyProjectionReconcileTask:
+        arguments:
+            $staleSeconds: '%oronts_asset_pilot.dependency_projection.reconcile_stale_seconds%'
+        tags:
+            - { name: 'pimcore.maintenance.task', type: 'assetPilotDependencyReconcile' }
+
+
     # -- Health checks ----------------------------------------------------------
 
     Oronts\AssetPilotBundle\Health\HealthChecker:
         arguments:
             $checks: !tagged_iterator oronts_asset_pilot.health_check
 
+    Oronts\AssetPilotBundle\Health\HealthCheckerInterface: '@Oronts\AssetPilotBundle\Health\HealthChecker'
+
     Oronts\AssetPilotBundle\Health\Check\SharedCacheHealthCheck:
         arguments:
             $cache: '@cache.app'
+            $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
+            $heartbeatMaxAge: '%oronts_asset_pilot.async.worker_heartbeat_max_age%'
+            $transportName: '%oronts_asset_pilot.async.transport%'
 
     Oronts\AssetPilotBundle\Health\Check\AsyncTransportHealthCheck:
         arguments:
             $asyncEnabled: '%oronts_asset_pilot.async.enabled%'
             $batchSize: '%oronts_asset_pilot.async.batch_size%'
+            $cache: '@cache.app'
+            $heartbeatMaxAge: '%oronts_asset_pilot.async.worker_heartbeat_max_age%'
+            $receivers: '@messenger.receiver_locator'
+            $senders: '@messenger.senders_locator'
+            $transportName: '%oronts_asset_pilot.async.transport%'
+            $failureTransportName: '%oronts_asset_pilot.async.failure_transport%'
+            $maxQueueDepth: '%oronts_asset_pilot.async.max_queue_depth%'
+
+    Oronts\AssetPilotBundle\Health\Check\OperationJournalHealthCheck:
+        arguments:
+            $recoveryAfterSeconds: '%oronts_asset_pilot.operation_journal.recovery_after_seconds%'
+
+    Oronts\AssetPilotBundle\Health\WorkerHeartbeatRecorder:
+        arguments:
+            $cache: '@cache.app'
+            $heartbeatMaxAge: '%oronts_asset_pilot.async.worker_heartbeat_max_age%'
+            $transportName: '%oronts_asset_pilot.async.transport%'
+        tags:
+            - { name: 'kernel.event_listener', event: 'Symfony\Component\Messenger\Event\WorkerRunningEvent', method: 'onWorkerRunning' }
 
     # -- Loop guard (Redis-backed for horizontal scaling) ----------------------
 
@@ -274,6 +512,14 @@ services:
         arguments:
             $cache: '@cache.app'
             $lockFactory: '@lock.factory'
+            $lockTtl: '%oronts_asset_pilot.idempotency.lock_ttl%'
+
+    Oronts\AssetPilotBundle\Service\AssetOrganizerInterface: '@Oronts\AssetPilotBundle\Service\AssetOrganizer'
+
+    Oronts\AssetPilotBundle\Service\AssetOrganizer:
+        arguments:
+            $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
+            $maxObjectReplays: '%oronts_asset_pilot.idempotency.max_object_replays%'
 
     # -- Event listeners --------------------------------------------------------
 
@@ -294,122 +540,56 @@ services:
             - { name: 'kernel.event_listener', event: 'pimcore.asset.postAdd', method: 'onAssetPostAdd' }
             - { name: 'kernel.event_listener', event: 'pimcore.asset.postUpdate', method: 'onAssetPostUpdate' }
 
-    # -- Console commands (autoconfigure handles #[AsCommand]) ------------------
-
-    Oronts\AssetPilotBundle\Command\OrganizeCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\DownloadZipCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\StatusCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\AuditCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\CleanupUnusedCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\ValidateConfigCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\DebugRuleCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\RulesExportCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\RulesDiffCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\HealthCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\RuleOverlapCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\ReplayFailuresCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\VerifyLocationsCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\ReorganizeAssetsCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\QuarantinePurgeCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\CheckIntegrityCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\HealAssetsCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\FindDuplicatesCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\SweepEmptyFoldersCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\MetricsCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\CaptureStorageSnapshotCommand:
-        tags:
-            - { name: 'console.command' }
-
-    Oronts\AssetPilotBundle\Command\NormalizeFilenamesCommand:
-        tags:
-            - { name: 'console.command' }
-
-    # -- Messenger handlers (autoconfigure handles #[AsMessageHandler]) ---------
-
-    Oronts\AssetPilotBundle\MessageHandler\OrganizeAssetsHandler:
-        tags:
-            - { name: 'messenger.message_handler' }
-
-    Oronts\AssetPilotBundle\MessageHandler\BulkOrganizeHandler:
-        tags:
-            - { name: 'messenger.message_handler' }
-
     # -- API controllers --------------------------------------------------------
 
     Oronts\AssetPilotBundle\Controller\Api\:
         resource: '../../Controller/Api/'
+        exclude:
+            - '../../Controller/Api/OpenApiSpecification.php'
+            - '../../Controller/Api/OpenApiPaths.php'
         tags: ['controller.service_arguments']
 
-    Oronts\AssetPilotBundle\Controller\Api\DashboardController:
-        tags: ['controller.service_arguments']
+    Oronts\AssetPilotBundle\Controller\Api\OperationsController:
+        arguments:
+            $planConfiguration: '%oronts_asset_pilot.config%'
+
+    Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelector:
+        arguments:
+            $objectScanBudget: '%oronts_asset_pilot.listing.scan_budget%'
+
+    Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelectorInterface: '@Oronts\AssetPilotBundle\Service\Query\VisibleObjectSelector'
 
     Oronts\AssetPilotBundle\Service\AssetSearchService:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
 
+    Oronts\AssetPilotBundle\Service\Query\AuthorizedAssetPage:
+        arguments:
+            $maxCandidates: '%oronts_asset_pilot.listing.scan_budget%'
+            $batchSize: '%oronts_asset_pilot.listing.batch_size%'
+            $exportMaxRows: '%oronts_asset_pilot.listing.export_max_rows%'
+
+    Oronts\AssetPilotBundle\Service\LocationDriftService:
+        arguments:
+            $maxCandidates: '%oronts_asset_pilot.listing.scan_budget%'
+
+    Oronts\AssetPilotBundle\Service\AssetReorganizer:
+        arguments:
+            $maxCandidates: '%oronts_asset_pilot.listing.scan_budget%'
+
+    Oronts\AssetPilotBundle\Service\DuplicateDetectionService:
+        arguments:
+            $groupScanBudget: '%oronts_asset_pilot.duplicates.group_scan_budget%'
+            $exportGroupScanBudget: '%oronts_asset_pilot.duplicates.export_group_scan_budget%'
+
+    Oronts\AssetPilotBundle\Service\ApplyPlanService:
+        arguments:
+            $secret: '%kernel.secret%'
+
+    Oronts\AssetPilotBundle\Service\ReviewedObjectOperationService:
+        arguments:
+            $planConfiguration: '%oronts_asset_pilot.config%'
+
     Oronts\AssetPilotBundle\Service\AssetPropertyService:
         arguments:
             $lockProperty: '%oronts_asset_pilot.protection.lock_property%'
-
-    Oronts\AssetPilotBundle\Controller\Api\AssetManagementController:
-        tags: ['controller.service_arguments']

@@ -4,41 +4,41 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
-use Oronts\AssetPilotBundle\Enum\OperationStatus;
-use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Model\MoveOperation;
+use Oronts\AssetPilotBundle\Enum\DriftEligibility;
+use Oronts\AssetPilotBundle\Model\DriftItem;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\LocationDriftService;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\DataObject\AbstractObject;
-use Psr\Log\NullLogger;
 
 #[CoversClass(LocationDriftService::class)]
 class LocationDriftServiceTest extends TestCase
 {
-    /** @param MoveOperation[] $dryRunOps */
-    private function service(array $dryRunOps): LocationDriftService
+    /** @param list<DriftItem> $items */
+    private function service(array $items): LocationDriftService
     {
         $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->method('dryRun')->willReturn($dryRunOps);
+        $organizer->method('analyzeDrift')->willReturn($items);
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(true);
 
-        return new LocationDriftService($organizer, new NullLogger());
+        return new LocationDriftService($organizer, $authorization);
     }
 
-    private function op(int $assetId, string $from, string $to, OperationStatus $status): MoveOperation
+    private function item(int $assetId, string $from, string $to, DriftEligibility $eligibility = DriftEligibility::NoKnownBlock, ?string $reason = null): DriftItem
     {
-        return new MoveOperation($assetId, $from, $to, 10, 'Product', 'product_images', $status, TriggerType::Manual);
+        return new DriftItem($assetId, $from, $to, 'product_images', $eligibility, $reason);
     }
 
     #[Test]
-    public function driftForObjectReturnsOnlyTheWouldMoveOperations(): void
+    public function driftForObjectReturnsEveryMismatchIncludingBlockedAssets(): void
     {
         $service = $this->service([
-            $this->op(1, '/old/a.jpg', '/new/a.jpg', OperationStatus::Pending),
-            $this->op(2, '/x/b.jpg', '/x/b.jpg', OperationStatus::Skipped),
-            $this->op(3, '/old/c.jpg', '/new/c.jpg', OperationStatus::Pending),
+            $this->item(1, '/old/a.jpg', '/new/a.jpg'),
+            $this->item(3, '/old/c.jpg', '/new/c.jpg', DriftEligibility::Blocked, 'Asset is locked'),
         ]);
 
         $drift = $service->driftForObject($this->createMock(AbstractObject::class));
@@ -49,14 +49,14 @@ class LocationDriftServiceTest extends TestCase
         self::assertSame('/new/a.jpg', $drift[0]->expectedPath);
         self::assertSame('product_images', $drift[0]->ruleName);
         self::assertSame(3, $drift[1]->assetId);
+        self::assertSame(DriftEligibility::Blocked, $drift[1]->eligibility);
+        self::assertSame('Asset is locked', $drift[1]->reason);
     }
 
     #[Test]
     public function noDriftWhenEverythingIsAtTarget(): void
     {
-        $service = $this->service([
-            $this->op(1, '/x/a.jpg', '/x/a.jpg', OperationStatus::Skipped),
-        ]);
+        $service = $this->service([]);
 
         self::assertSame([], $service->driftForObject($this->createMock(AbstractObject::class)));
     }
@@ -65,19 +65,24 @@ class LocationDriftServiceTest extends TestCase
     public function driftForObjectIdReturnsTheSameShapeAsAClassScan(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->method('dryRun')->willReturn([
-            $this->op(1, '/old/a.jpg', '/new/a.jpg', OperationStatus::Pending),
+        $organizer->method('analyzeDrift')->willReturn([
+            $this->item(1, '/old/a.jpg', '/new/a.jpg'),
         ]);
 
-        $service = new class ($organizer, $this->createMock(AbstractObject::class)) extends LocationDriftService {
-            public function __construct(AssetOrganizer $organizer, private readonly AbstractObject $object)
+        $service = new class ($organizer, $this->createMock(ElementAuthorization::class), $this->createMock(AbstractObject::class)) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer, ElementAuthorization $authorization, private readonly AbstractObject $object)
             {
-                parent::__construct($organizer, new NullLogger());
+                parent::__construct($organizer, $authorization);
             }
 
             protected function loadObject(int $id): ?AbstractObject
             {
                 return $this->object;
+            }
+
+            protected function isVisible(AbstractObject $object): bool
+            {
+                return true;
             }
         };
 
@@ -90,15 +95,48 @@ class LocationDriftServiceTest extends TestCase
     }
 
     #[Test]
+    public function classScanStopsAtTheCandidateBudgetAndReportsTruncated(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $service = new class ($organizer, $this->createMock(ElementAuthorization::class), $this->createMock(AbstractObject::class)) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer, ElementAuthorization $authorization, private readonly AbstractObject $object)
+            {
+                parent::__construct($organizer, $authorization, 50, 10);
+            }
+
+            protected function listObjectIds(string $className, int $offset, int $limit): array
+            {
+                return array_slice(range(1, 100), $offset, $limit);
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->object;
+            }
+
+            protected function isVisible(AbstractObject $object): bool
+            {
+                return false;
+            }
+        };
+
+        $result = $service->driftForClass('Product');
+
+        self::assertSame([], $result['items']);
+        self::assertSame(0, $result['objectsScanned']);
+        self::assertTrue($result['truncated']);
+    }
+
+    #[Test]
     public function driftForObjectIdReturnsNullWhenTheObjectIsMissing(): void
     {
         $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->expects(self::never())->method('dryRun');
+        $organizer->expects(self::never())->method('analyzeDrift');
 
-        $service = new class ($organizer) extends LocationDriftService {
-            public function __construct(AssetOrganizer $organizer)
+        $service = new class ($organizer, $this->createMock(ElementAuthorization::class)) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer, ElementAuthorization $authorization)
             {
-                parent::__construct($organizer, new NullLogger());
+                parent::__construct($organizer, $authorization);
             }
 
             protected function loadObject(int $id): ?AbstractObject
@@ -108,5 +146,29 @@ class LocationDriftServiceTest extends TestCase
         };
 
         self::assertNull($service->driftForObjectId(999));
+    }
+
+    #[Test]
+    public function driftForObjectIdHidesObjectsOutsideTheWorkspace(): void
+    {
+        $organizer = $this->createMock(AssetOrganizer::class);
+        $organizer->expects(self::never())->method('analyzeDrift');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+        $object = $this->createMock(AbstractObject::class);
+
+        $service = new class ($organizer, $authorization, $object) extends LocationDriftService {
+            public function __construct(AssetOrganizer $organizer, ElementAuthorization $authorization, private readonly AbstractObject $object)
+            {
+                parent::__construct($organizer, $authorization);
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->object;
+            }
+        };
+
+        self::assertNull($service->driftForObjectId(42));
     }
 }

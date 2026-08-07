@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Action;
 
+use Oronts\AssetPilotBundle\Action\RuleActionDeliveryContextInterface;
 use Oronts\AssetPilotBundle\Action\RuleActionInterface;
 use Oronts\AssetPilotBundle\Action\RuleActionResolver;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -25,7 +26,12 @@ class RuleActionResolverTest extends TestCase
                 return $this->type;
             }
 
-            public function apply(Asset $asset, AbstractObject $object, array $config): void {}
+            public function prepare(Asset $asset, AbstractObject $object, array $config): array
+            {
+                return $config;
+            }
+
+            public function applyPrepared(Asset $asset, array $payload, RuleActionDeliveryContextInterface $delivery): void {}
         };
     }
 
@@ -44,5 +50,14 @@ class RuleActionResolverTest extends TestCase
         $resolver = new RuleActionResolver([$this->action('set_property')]);
 
         self::assertNull($resolver->resolve('nope'));
+    }
+
+    #[Test]
+    public function rejectsDuplicateActionTypes(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Duplicate rule action alias "set_property".');
+
+        new RuleActionResolver([$this->action('set_property'), $this->action('set_property')]);
     }
 }

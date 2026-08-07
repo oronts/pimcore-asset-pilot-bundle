@@ -2,10 +2,14 @@ import { useEffect, useRef } from 'react'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export function useModalDismiss<T extends HTMLElement>(onClose: () => void): React.RefObject<T> {
+export function useModalDismiss<T extends HTMLElement>(onClose: () => void, enabled = true, active = true): React.RefObject<T> {
   const ref = useRef<T>(null)
   const onCloseRef = useRef(onClose)
+  const enabledRef = useRef(enabled)
+  const activeRef = useRef(active)
   onCloseRef.current = onClose
+  enabledRef.current = enabled
+  activeRef.current = active
 
   // Mount-only: re-running on a changed onClose identity (callers pass inline arrows) would
   // re-focus the first control on every render and steal focus from inputs inside the modal.
@@ -18,9 +22,10 @@ export function useModalDismiss<T extends HTMLElement>(onClose: () => void): Rea
     else node?.focus()
 
     const onKeyDown = (e: KeyboardEvent): void => {
+      if (!activeRef.current) return
       if (e.key === 'Escape') {
         e.stopPropagation()
-        onCloseRef.current()
+        if (enabledRef.current) onCloseRef.current()
         return
       }
       if (e.key !== 'Tab' || node == null) return

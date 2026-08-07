@@ -4,155 +4,114 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetDependencyResolver;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
 use Oronts\AssetPilotBundle\Service\AssetReorganizer;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Pimcore\Model\DataObject\AbstractObject;
-use Psr\Log\NullLogger;
 
 #[CoversClass(AssetReorganizer::class)]
-class AssetReorganizerTest extends TestCase
+final class AssetReorganizerTest extends TestCase
 {
+    #[Test]
+    public function folderSelectionReturnsEachOwnerOnceInDiscoveryOrder(): void
+    {
+        $service = $this->selector(
+            [1, 2],
+            [1 => [10], 2 => [10, 20]],
+        );
+
+        $selection = $service->selectFolder('/Staging', 50);
+
+        self::assertSame(2, $selection['assetCount']);
+        self::assertSame([10, 20], $selection['objectIds']);
+    }
+
+    #[Test]
+    public function folderSelectionUsesConfiguredDefaultLimit(): void
+    {
+        $service = $this->selector([1, 2, 3], [1 => [10], 2 => [20], 3 => [30]], defaultLimit: 2);
+
+        self::assertSame(
+            ['assetCount' => 2, 'objectIds' => [10, 20], 'truncated' => false],
+            $service->selectFolder('/Staging'),
+        );
+    }
+
+    #[Test]
+    public function folderScanStopsAtTheCandidateBudgetAndReportsTruncated(): void
+    {
+        // A workspace-restricted user sees none of a large folder; the scan stops at the budget.
+        $service = $this->selector(range(1, 100), [], visibleAssetIds: [], maxCandidates: 10);
+
+        $selection = $service->selectFolder('/Staging', 50);
+
+        self::assertSame(0, $selection['assetCount']);
+        self::assertTrue($selection['truncated']);
+    }
+
+    #[Test]
+    public function explicitSelectionDropsInvalidDuplicateAndHiddenAssets(): void
+    {
+        $service = $this->selector(
+            [],
+            [5 => [10], 6 => [20]],
+            visibleAssetIds: [5],
+        );
+
+        $selection = $service->selectAssets([5, 5, 6, 0, -3]);
+
+        self::assertSame(1, $selection['assetCount']);
+        self::assertSame([10], $selection['objectIds']);
+    }
+
     /**
-     * @param list<int>            $assetIds       returned by the folder-listing seam
-     * @param array<int, list<int>> $ownersByAsset  dependent object ids per asset id
-     * @param array<int, ?AbstractObject> $objectsById
+     * @param list<int>             $folderAssetIds
+     * @param array<int, list<int>> $ownersByAsset
+     * @param list<int>|null        $visibleAssetIds
      */
-    private function reorganizer(
-        array $assetIds,
+    private function selector(
+        array $folderAssetIds,
         array $ownersByAsset,
-        AssetOrganizer $organizer,
-        OrganizeDispatcher $bus,
-        array $objectsById = [],
+        ?array $visibleAssetIds = null,
+        int $defaultLimit = 100,
+        int $maxCandidates = 5000,
     ): AssetReorganizer {
         $resolver = $this->createMock(AssetDependencyResolver::class);
         $resolver->method('dependentObjectIds')->willReturnCallback(
             static fn (int $assetId): array => $ownersByAsset[$assetId] ?? [],
         );
 
-        return new class ($resolver, $organizer, $bus, $assetIds, $objectsById) extends AssetReorganizer {
-            /** @param list<int> $assetIds @param array<int, ?AbstractObject> $objectsById */
-            public function __construct(AssetDependencyResolver $r, AssetOrganizer $o, OrganizeDispatcher $b, private array $assetIds, private array $objectsById)
-            {
-                parent::__construct($r, $o, $b, new NullLogger());
+        return new class (
+            $resolver,
+            $this->createMock(ElementAuthorization::class),
+            $folderAssetIds,
+            $visibleAssetIds,
+            $defaultLimit,
+            $maxCandidates,
+        ) extends AssetReorganizer {
+            /** @param list<int> $folderAssetIds @param list<int>|null $visibleAssetIds */
+            public function __construct(
+                AssetDependencyResolver $resolver,
+                ElementAuthorization $authorization,
+                private readonly array $folderAssetIds,
+                private readonly ?array $visibleAssetIds,
+                int $defaultLimit,
+                int $maxCandidates,
+            ) {
+                parent::__construct($resolver, $authorization, $defaultLimit, $maxCandidates);
             }
 
-            protected function listAssetIdsInFolder(string $folderPath, int $limit): array
+            protected function rawAssetIdsInFolder(string $folderPath, int $offset, int $limit): array
             {
-                return array_slice($this->assetIds, 0, $limit);
+                return array_slice($this->folderAssetIds, $offset, $limit);
             }
 
-            protected function loadObject(int $id): ?AbstractObject
+            protected function isAssetVisible(int $assetId): bool
             {
-                return $this->objectsById[$id] ?? null;
+                return $this->visibleAssetIds === null || in_array($assetId, $this->visibleAssetIds, true);
             }
         };
-    }
-
-    #[Test]
-    public function organizesEachDistinctOwnerObjectOnce(): void
-    {
-        $organizer = $this->createMock(AssetOrganizer::class);
-        // assets 1,2 both owned by object 10; asset 2 also owned by 20 -> organize 10 and 20 once each.
-        $organizer->expects(self::exactly(2))->method('organize')->willReturn([]);
-
-        $bus = $this->createMock(OrganizeDispatcher::class);
-        $bus->expects(self::never())->method('dispatchObject');
-
-        $object = $this->createMock(AbstractObject::class);
-        $result = $this->reorganizer(
-            [1, 2],
-            [1 => [10], 2 => [10, 20]],
-            $organizer,
-            $bus,
-            [10 => $object, 20 => $object],
-        )->reorganizeFolder('/Staging');
-
-        self::assertSame(2, $result->assetsScanned);
-        self::assertSame(2, $result->ownerObjects);
-        self::assertSame(2, $result->organized);
-        self::assertSame(0, $result->dispatched);
-    }
-
-    #[Test]
-    public function asyncDispatchesEachOwnerWithoutLoading(): void
-    {
-        $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->expects(self::never())->method('organize');
-
-        $bus = $this->createMock(OrganizeDispatcher::class);
-        $bus->expects(self::exactly(2))->method('dispatchObject');
-
-        $result = $this->reorganizer([1], [1 => [10, 20]], $organizer, $bus)->reorganizeFolder('/Staging', 50, true);
-
-        self::assertSame(2, $result->dispatched);
-        self::assertSame(0, $result->organized);
-    }
-
-    #[Test]
-    public function anAsyncDispatchFailureIsCountedNotFatal(): void
-    {
-        $dispatcher = $this->createMock(OrganizeDispatcher::class);
-        $dispatcher->method('dispatchObject')->willThrowException(new \RuntimeException('bus down'));
-
-        $result = $this->reorganizer([1], [1 => [10]], $this->createMock(AssetOrganizer::class), $dispatcher)
-            ->reorganizeFolder('/Staging', 50, true);
-
-        self::assertSame(1, $result->failed);
-        self::assertSame(0, $result->dispatched);
-    }
-
-    #[Test]
-    public function skipsOwnersThatNoLongerExist(): void
-    {
-        $organizer = $this->createMock(AssetOrganizer::class);
-        $result = $this->reorganizer([1], [1 => [10]], $organizer, $this->createMock(OrganizeDispatcher::class), [])->reorganizeFolder('/Staging');
-
-        self::assertSame(1, $result->ownerObjects);
-        self::assertSame(1, $result->skipped);
-        self::assertSame(0, $result->organized);
-    }
-
-    #[Test]
-    public function reorganizeAssetsOrganizesTheOwnersOfTheGivenAssetIds(): void
-    {
-        $organizer = $this->createMock(AssetOrganizer::class);
-        // assets 1,2 owned by 10; asset 2 also owned by 20 -> organize 10 and 20 once each.
-        $organizer->expects(self::exactly(2))->method('organize')->willReturn([]);
-
-        $bus = $this->createMock(OrganizeDispatcher::class);
-        $bus->expects(self::never())->method('dispatchObject');
-
-        $object = $this->createMock(AbstractObject::class);
-        $result = $this->reorganizer(
-            [],
-            [1 => [10], 2 => [10, 20]],
-            $organizer,
-            $bus,
-            [10 => $object, 20 => $object],
-        )->reorganizeAssets([1, 2]);
-
-        self::assertSame(2, $result->assetsScanned);
-        self::assertSame(2, $result->ownerObjects);
-        self::assertSame(2, $result->organized);
-    }
-
-    #[Test]
-    public function reorganizeAssetsDedupesAndDropsNonPositiveIds(): void
-    {
-        $organizer = $this->createMock(AssetOrganizer::class);
-        $organizer->expects(self::once())->method('organize')->willReturn([]);
-
-        $object = $this->createMock(AbstractObject::class);
-        $result = $this->reorganizer([], [5 => [10]], $organizer, $this->createMock(OrganizeDispatcher::class), [10 => $object])
-            ->reorganizeAssets([5, 5, 0, -3]);
-
-        self::assertSame(1, $result->assetsScanned);
-        self::assertSame(1, $result->ownerObjects);
-        self::assertSame(1, $result->organized);
     }
 }

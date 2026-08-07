@@ -7,6 +7,7 @@ namespace Oronts\AssetPilotBundle\Tests\Unit\Engine;
 use Oronts\AssetPilotBundle\Condition\ConditionEvaluatorInterface;
 use Oronts\AssetPilotBundle\Engine\RuleEngine;
 use Oronts\AssetPilotBundle\Enum\MoveStrategy;
+use Oronts\AssetPilotBundle\Exception\PathResolutionException;
 use Oronts\AssetPilotBundle\Filter\AssetFilterInterface;
 use Oronts\AssetPilotBundle\Model\Rule;
 use Oronts\AssetPilotBundle\PathResolver\PathResolverInterface;
@@ -74,6 +75,39 @@ class RuleEngineTest extends TestCase
     }
 
     #[Test]
+    public function matchFieldFailsClosedAndSkipsTheRuleWhenPathResolutionThrows(): void
+    {
+        $this->conditionEvaluator->method('evaluate')->willReturn(true);
+        $this->filter->method('accept')->willReturn(true);
+        $this->pathResolver->method('resolve')->willThrowException(new PathResolutionException('template blew up'));
+
+        $engine = $this->createEngine([$this->createRule('r', 'Product', 10)]);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $asset = $this->createMock(Asset::class);
+
+        self::assertCount(0, $engine->matchField($object, $asset, 'image', null), 'a template render failure must skip the rule, never produce a fallback match');
+    }
+
+    #[Test]
+    public function explainReportsAPathResolutionFailureAsARejectionNotAMatch(): void
+    {
+        $this->conditionEvaluator->method('evaluate')->willReturn(true);
+        $this->filter->method('accept')->willReturn(true);
+        $this->pathResolver->method('resolve')->willThrowException(new PathResolutionException('template blew up'));
+
+        $engine = $this->createEngine([$this->createRule('r', 'Product', 10)]);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $asset = $this->createMock(Asset::class);
+
+        $result = $engine->explain($object, $asset, 'image', null);
+
+        self::assertSame([], $result['matches'], 'a path failure yields no match');
+        self::assertCount(1, $result['evaluations'], 'the failure is surfaced as an evaluation, not swallowed');
+    }
+
+    #[Test]
     public function sortedRulesByPriorityDescending(): void
     {
         $r1 = $this->createRule('low', 'Product', 1);
@@ -86,6 +120,17 @@ class RuleEngineTest extends TestCase
         self::assertSame('high', $rules[0]->name);
         self::assertSame('mid', $rules[1]->name);
         self::assertSame('low', $rules[2]->name);
+    }
+
+    #[Test]
+    public function equalPriorityRulesAreSortedByName(): void
+    {
+        $engine = $this->createEngine([
+            $this->createRule('zeta', 'Product', 10),
+            $this->createRule('alpha', 'Product', 10),
+        ]);
+
+        self::assertSame(['alpha', 'zeta'], array_map(static fn (Rule $rule): string => $rule->name, $engine->getRules()));
     }
 
     #[Test]
@@ -116,6 +161,32 @@ class RuleEngineTest extends TestCase
         self::assertCount(2, $rules);
         self::assertSame('provided', $rules[0]->name);
         self::assertSame('config', $rules[1]->name);
+    }
+
+    #[Test]
+    public function duplicateNamesAcrossConfigurationAndProvidersAreRejected(): void
+    {
+        $rule = $this->createRule('same', 'Product', 50);
+        $provider = new class ($rule) implements \Oronts\AssetPilotBundle\Engine\RuleProviderInterface {
+            public function __construct(private readonly Rule $rule) {}
+
+            public function getRules(): iterable
+            {
+                return [$this->rule];
+            }
+        };
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Duplicate rule name "same".');
+
+        new RuleEngine(
+            rules: [$rule],
+            conditionEvaluator: $this->conditionEvaluator,
+            pathResolver: $this->pathResolver,
+            filter: $this->filter,
+            logger: new NullLogger(),
+            ruleProviders: [$provider],
+        );
     }
 
     #[Test]
@@ -346,6 +417,67 @@ class RuleEngineTest extends TestCase
         $matches = $engine->matchField($object, $asset, 'images', 'de_DE');
         self::assertCount(1, $matches);
         self::assertSame('de_DE', $matches[0]->locale);
+    }
+
+    #[Test]
+    public function explainReportsEveryGateAndTheResolvedMatch(): void
+    {
+        $rules = [
+            Rule::fromConfig('disabled', ['class' => 'Product', 'target_path' => '/disabled', 'enabled' => false, 'priority' => 70]),
+            Rule::fromConfig('class', ['class' => 'Category', 'target_path' => '/class', 'priority' => 60]),
+            Rule::fromConfig('field', ['class' => 'Product', 'fields' => ['gallery'], 'target_path' => '/field', 'priority' => 50]),
+            Rule::fromConfig('locale', ['class' => 'Product', 'fields' => ['image'], 'locales' => ['en'], 'target_path' => '/locale', 'priority' => 40]),
+            Rule::fromConfig('condition', ['class' => 'Product', 'fields' => ['image'], 'condition' => 'false', 'target_path' => '/condition', 'priority' => 30]),
+            Rule::fromConfig('filter', ['class' => 'Product', 'fields' => ['image'], 'condition' => 'true', 'target_path' => '/filter', 'priority' => 20]),
+            Rule::fromConfig('matched', ['class' => 'Product', 'fields' => ['image'], 'condition' => 'true', 'target_path' => '/matched', 'priority' => 10]),
+        ];
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $asset = $this->createMock(Asset::class);
+        $this->conditionEvaluator->method('evaluateStrict')->willReturnCallback(
+            static fn (Concrete $object, Asset $asset, Rule $rule): bool => $rule->name !== 'condition',
+        );
+        $this->filter->method('accept')->willReturnCallback(
+            static fn (Asset $asset, Concrete $object, Rule $rule): bool => $rule->name !== 'filter',
+        );
+        $this->pathResolver->expects(self::once())->method('resolve')->with($object, $asset, $rules[6], 'de')->willReturn('/resolved');
+
+        $result = $this->createEngine($rules)->explain($object, $asset, 'image', 'de');
+        $reasons = [];
+        foreach ($result['evaluations'] as $evaluation) {
+            $reasons[$evaluation->ruleName] = $evaluation->rejectionReason;
+        }
+
+        self::assertSame([
+            'disabled' => 'disabled',
+            'class' => 'class_mismatch',
+            'field' => 'field_mismatch',
+            'locale' => 'locale_mismatch',
+            'condition' => 'condition_failed',
+            'filter' => 'filter_rejected',
+            'matched' => null,
+        ], $reasons);
+        self::assertCount(1, $result['matches']);
+        self::assertSame('/resolved', $result['matches'][0]->resolvedPath);
+    }
+
+    #[Test]
+    public function explainCapturesStrictConditionErrors(): void
+    {
+        $rule = Rule::fromConfig('broken', [
+            'class' => 'Product',
+            'condition' => 'broken()',
+            'target_path' => '/broken',
+        ]);
+        $object = $this->createMock(Concrete::class);
+        $object->method('getClassName')->willReturn('Product');
+        $asset = $this->createMock(Asset::class);
+        $this->conditionEvaluator->method('evaluateStrict')->willThrowException(new \RuntimeException('unknown function'));
+
+        $evaluation = $this->createEngine([$rule])->explain($object, $asset)['evaluations'][0];
+
+        self::assertSame('condition_failed', $evaluation->rejectionReason);
+        self::assertSame('unknown function', $evaluation->conditionError);
     }
 
 

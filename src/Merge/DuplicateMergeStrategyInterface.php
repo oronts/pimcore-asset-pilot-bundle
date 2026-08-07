@@ -25,10 +25,16 @@ interface DuplicateMergeStrategyInterface
     public function repointsReferences(): bool;
 
     /**
-     * Dispose of one duplicate copy. For a repointing strategy the repointer has already run (and a
-     * strategy MUST NOT destroy a copy whose references were not fully repointed, i.e.
-     * {@see RepointReport::$fullyRepointed} is false); for a non-repointing strategy the report is
-     * neutral and the copy may still be referenced.
+     * Dispose of one duplicate copy under the fenced merge context. For a repointing strategy the
+     * repointer has already run (and a strategy MUST NOT destroy a copy whose references were not fully
+     * repointed, i.e. {@see RepointReport::$fullyRepointed} is false); for a non-repointing strategy the
+     * report is neutral and the copy may still be referenced.
+     *
+     * The copy id is {@see DuplicateMergeContextInterface::copyId()}. The context is mandatory (there is no
+     * context-free path in 2.0): any strategy that does long or external work MUST call
+     * {@see DuplicateMergeContextInterface::heartbeat()} to keep the run-item lease and every held asset
+     * lock alive, and MUST persist asset changes through {@see DuplicateMergeContextInterface::save()} so a
+     * lost fence fails closed instead of mutating under an expired lock.
      */
-    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition;
+    public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition;
 }

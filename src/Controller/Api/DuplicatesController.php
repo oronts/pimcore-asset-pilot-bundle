@@ -4,31 +4,49 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Controller\Api\Support\StreamsCsv;
+use Oronts\AssetPilotBundle\Enum\ActorType;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
+use Oronts\AssetPilotBundle\Enum\OperationRunKind;
+use Oronts\AssetPilotBundle\Exception\MergeLeaseLostException;
+use Oronts\AssetPilotBundle\Exception\NotPermittedException;
+use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
+use Oronts\AssetPilotBundle\Merge\MergeOutcome;
+use Oronts\AssetPilotBundle\Model\ApplyPlan;
+use Oronts\AssetPilotBundle\Model\DuplicateGroup;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
 use Oronts\AssetPilotBundle\Service\AssetSearchServiceInterface;
-use Oronts\AssetPilotBundle\Service\DuplicateDetectionService;
-use Oronts\AssetPilotBundle\Service\DuplicateMergeService;
+use Oronts\AssetPilotBundle\Service\DuplicateDetectionServiceInterface;
+use Oronts\AssetPilotBundle\Service\DuplicateMergeServiceInterface;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class DuplicatesController
 {
+    use DecodesJsonObject;
+    use ReadsRequestScalars;
+    use RejectsClaimedPlan;
     use StreamsCsv;
 
     private const int MAX_LIMIT = 100;
-    private const int EXPORT_PAGE = 200;
-    private const int MAX_EXPORT_PAGES = 10000;
 
     public function __construct(
-        protected readonly DuplicateDetectionService $duplicates,
-        protected readonly DuplicateMergeService $merge,
+        protected readonly DuplicateDetectionServiceInterface $duplicates,
+        protected readonly DuplicateMergeServiceInterface $merge,
         protected readonly AssetSearchServiceInterface $assets,
+        protected readonly ApplyPlanServiceInterface $applyPlans,
+        protected readonly ElementAuthorizationInterface $authorization,
+        protected readonly UrlGeneratorInterface $urlGenerator,
         protected readonly LoggerInterface $logger,
     ) {}
 
@@ -46,10 +64,13 @@ class DuplicatesController
         $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;
 
         try {
-            $groups = $this->duplicates->findDuplicates($page, $limit, $minCopies, $type);
+            $result = $this->duplicates->findDuplicatePage($page, $limit, $minCopies, $type);
+            $groups = $result['groups'];
             $reps = $this->assets->summarize(array_values(array_filter(
                 array_map(static fn ($group): ?int => $group->assetIds[0] ?? null, $groups),
             )));
+
+            $isSystem = $this->authorization->currentActor()->type === ActorType::System;
 
             return new JsonResponse([
                 'items' => array_map(static function ($group) use ($reps): array {
@@ -70,9 +91,11 @@ class DuplicatesController
                         ],
                     ];
                 }, $groups),
-                'total' => $this->duplicates->countDuplicateGroups($minCopies, $type),
+                'total' => $isSystem ? $this->duplicates->countDuplicateGroups($minCopies, $type) : null,
                 'page' => $page,
                 'limit' => $limit,
+                'hasMore' => $result['hasMore'],
+                'truncated' => $result['truncated'],
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to list duplicate assets.', ['exception' => $e]);
@@ -94,19 +117,18 @@ class DuplicatesController
         $type = is_string($typeParam) && $typeParam !== '' ? $typeParam : null;
 
         $rows = (function () use ($minCopies, $type): \Generator {
-            $page = 1;
-            do {
-                $groups = $this->duplicates->findDuplicates($page, self::EXPORT_PAGE, $minCopies, $type);
-                foreach ($groups as $group) {
-                    yield [
-                        $group->checksum,
-                        $group->count,
-                        $group->fileSize,
-                        $group->fileSize * max(0, $group->count - 1),
-                        implode(';', $group->assetIds),
-                    ];
-                }
-            } while (count($groups) === self::EXPORT_PAGE && ++$page <= self::MAX_EXPORT_PAGES);
+            $source = $this->duplicates->iterateForExport($minCopies, $type);
+            foreach ($source as $group) {
+                yield [
+                    $group->checksum,
+                    $group->count,
+                    $group->fileSize,
+                    $group->fileSize * max(0, $group->count - 1),
+                    implode(';', $group->assetIds),
+                ];
+            }
+
+            return $source->getReturn();
         })();
 
         return $this->streamCsv(
@@ -139,18 +161,35 @@ class DuplicatesController
     #[IsGranted(AssetPilotPermission::Admin->value)]
     public function merge(Request $request): JsonResponse
     {
-        $data = json_decode((string) ($request->getContent() ?: '{}'), true);
-        if (!is_array($data)) {
-            return new JsonResponse(['error' => 'A JSON body is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        $data = $this->decodeJsonObject($request, true);
+        if ($data instanceof JsonResponse) {
+            return $data;
+        }
+
+        $runId = $this->requestOptionalString($data, 'runId');
+        if ($runId instanceof JsonResponse) {
+            return $runId;
+        }
+        if ($runId !== null && $runId !== '') {
+            return $this->resumeMerge($runId);
         }
 
         $checksum = is_string($data['checksum'] ?? null) ? $data['checksum'] : '';
         if ($checksum === '') {
             return new JsonResponse(['error' => 'A checksum is required.'], JsonResponse::HTTP_BAD_REQUEST);
         }
-        $canonicalId = isset($data['canonicalId']) ? (int) $data['canonicalId'] : null;
-        $strategy = is_string($data['strategy'] ?? null) ? $data['strategy'] : null;
-        $dryRun = ($data['dryRun'] ?? false) === true;
+        $canonicalId = $this->requestOptionalPositiveInt($data, 'canonicalId', null, null);
+        if ($canonicalId instanceof JsonResponse) {
+            return $canonicalId;
+        }
+        $strategy = $this->requestOptionalString($data, 'strategy');
+        if ($strategy instanceof JsonResponse) {
+            return $strategy;
+        }
+        $dryRun = $this->requestBool($data, 'dryRun', false);
+        if ($dryRun instanceof JsonResponse) {
+            return $dryRun;
+        }
 
         $group = $this->duplicates->groupForChecksum($checksum);
         if ($group === null) {
@@ -158,18 +197,13 @@ class DuplicatesController
         }
 
         try {
-            $outcome = $this->merge->merge($group, $canonicalId, $strategy, $dryRun);
-
-            return new JsonResponse([
-                'checksum' => $outcome->checksum,
-                'canonicalId' => $outcome->canonicalId,
-                'dryRun' => $dryRun,
-                'dispositions' => array_map(static fn ($disposition): array => [
-                    'copyId' => $disposition->copyId,
-                    'outcome' => $disposition->outcome->value,
-                    'reason' => $disposition->reason,
-                ], $outcome->dispositions),
-            ]);
+            return $this->mergeGroup($data, $group, $checksum, $canonicalId, $strategy, $dryRun);
+        } catch (MergeLeaseLostException $e) {
+            return $this->mergeLeaseConflict($e);
+        } catch (StaleApplyPlanException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_CONFLICT);
+        } catch (NotPermittedException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
         } catch (\InvalidArgumentException $e) {
             return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_BAD_REQUEST);
         } catch (\Throwable $e) {
@@ -177,5 +211,123 @@ class DuplicatesController
 
             return new JsonResponse(['error' => 'Failed to merge duplicates.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /** @param array<string, mixed> $data */
+    private function mergeGroup(
+        array $data,
+        DuplicateGroup $group,
+        string $checksum,
+        ?int $canonicalId,
+        ?string $strategy,
+        bool $dryRun,
+    ): JsonResponse {
+        $canonicalId ??= min($group->assetIds);
+        $resolvedStrategy = $strategy ?? $this->merge->defaultStrategyName();
+        $targets = $this->merge->planTargets($group, $canonicalId);
+        $plan = $this->duplicateMergePlan($checksum, $canonicalId, $resolvedStrategy, $targets);
+        $execution = $this->mergeExecution($data, $plan, $dryRun);
+        if ($execution instanceof JsonResponse) {
+            return $execution;
+        }
+
+        $outcome = $dryRun
+            ? $this->merge->preview($group, $canonicalId, $resolvedStrategy)
+            : $this->merge->merge($group, $execution['fingerprints'], $canonicalId, $resolvedStrategy);
+
+        return $this->mergeResponse($outcome, $dryRun, $execution['planToken'], $outcome->runId);
+    }
+
+    /** @param list<\Oronts\AssetPilotBundle\Model\ApplyPlanTarget> $targets */
+    private function duplicateMergePlan(string $checksum, int $canonicalId, string $strategy, array $targets): ApplyPlan
+    {
+        return new ApplyPlan(
+            kind: OperationRunKind::DuplicateMerge->value,
+            actor: $this->authorization->currentActor(),
+            request: ['checksum' => $checksum, 'canonicalId' => $canonicalId, 'strategy' => $strategy],
+            config: ['defaultStrategy' => $this->merge->defaultStrategyName()],
+            targets: $targets,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{planToken: ?string, fingerprints: array<string, string>|null}|JsonResponse
+     */
+    private function mergeExecution(array $data, ApplyPlan $plan, bool $dryRun): array|JsonResponse
+    {
+        if ($dryRun) {
+            return ['planToken' => $this->applyPlans->issue($plan), 'fingerprints' => null];
+        }
+
+        $token = is_string($data['planToken'] ?? null) ? $data['planToken'] : '';
+        if ($token === '') {
+            return new JsonResponse(['error' => 'A planToken from a fresh preview is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($token, $plan));
+        if ($rejection !== null) {
+            return $rejection;
+        }
+
+        return ['planToken' => null, 'fingerprints' => $plan->fingerprintMap()];
+    }
+
+    private function mergeResponse(MergeOutcome $outcome, bool $dryRun, ?string $planToken, ?string $statusRunId): JsonResponse
+    {
+        return new JsonResponse([
+            'checksum' => $outcome->checksum,
+            'canonicalId' => $outcome->canonicalId,
+            'dryRun' => $dryRun,
+            'planToken' => $planToken,
+            'runId' => $outcome->runId,
+            'status' => $outcome->status?->value,
+            'statusUrl' => $statusRunId === null ? null : $this->urlGenerator->generate(
+                'oronts_asset_pilot_operation_run_get',
+                ['id' => $statusRunId],
+            ),
+            'dispositions' => array_map(static fn ($disposition): array => [
+                'copyId' => $disposition->copyId,
+                'outcome' => $disposition->outcome->value,
+                'reason' => $disposition->reason,
+            ], $outcome->dispositions),
+        ]);
+    }
+
+    private function resumeMerge(string $runId): JsonResponse
+    {
+        try {
+            $outcome = $this->merge->resume($runId);
+
+            return $this->mergeResponse($outcome, false, null, $runId);
+        } catch (MergeLeaseLostException $e) {
+            return $this->mergeLeaseConflict($e);
+        } catch (NotPermittedException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_FORBIDDEN);
+        } catch (\InvalidArgumentException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_NOT_FOUND);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to resume duplicate merge.', ['runId' => $runId, 'exception' => $e]);
+
+            return new JsonResponse(['error' => 'Failed to resume duplicate merge.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * A duplicate-merge finalization conflict is recoverable: return the run's id and status URL so the
+     * caller can resume it directly, instead of replaying a consumed plan token or searching the run list.
+     */
+    private function mergeLeaseConflict(MergeLeaseLostException $e): JsonResponse
+    {
+        $body = ['error' => $e->getMessage()];
+        if ($e->runId !== null) {
+            $body['runId'] = $e->runId;
+            $body['statusUrl'] = $this->urlGenerator->generate('oronts_asset_pilot_operation_run_get', ['id' => $e->runId]);
+            if ($e->rootRunId !== null && $e->rootRunId !== $e->runId) {
+                $body['rootRunId'] = $e->rootRunId;
+            }
+        }
+
+        return new JsonResponse($body, JsonResponse::HTTP_CONFLICT);
     }
 }

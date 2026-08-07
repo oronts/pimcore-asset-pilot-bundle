@@ -10,7 +10,7 @@ namespace Oronts\AssetPilotBundle\Service;
  * Studio session); the idiomatic path is `asset-pilot:metrics --format=prometheus` written to a
  * node_exporter textfile collector or pushed to a pushgateway.
  */
-class PrometheusFormatter
+class PrometheusFormatter implements PrometheusFormatterInterface
 {
     private const string PREFIX = 'asset_pilot';
 
@@ -37,7 +37,7 @@ class PrometheusFormatter
         }
 
         $this->gauge($lines, '_operations_count', 'Total Asset Pilot operations.', $metrics['total']);
-        $this->gauge($lines, '_move_operations_count', 'Move attempts (operations excluding action_failed); the failure-rate denominator.', $metrics['moveTotal']);
+        $this->gauge($lines, '_move_operations_count', 'Terminal move attempts; the failure-rate denominator.', $metrics['moveTotal']);
         $this->gauge($lines, '_failure_rate', 'Failed-move ratio over move attempts (0..1).', $metrics['failureRate']);
 
         $duration = $metrics['durationMs'];

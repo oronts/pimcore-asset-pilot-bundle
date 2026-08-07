@@ -16,4 +16,6 @@ interface PathResolverInterface
         Rule $rule,
         ?string $locale = null,
     ): string;
+
+    public function validateTemplate(string $template): void;
 }

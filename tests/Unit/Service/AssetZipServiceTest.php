@@ -4,37 +4,47 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Service;
 
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Security\ElementAuthorization;
 use Oronts\AssetPilotBundle\Service\AssetFieldExtractorInterface;
 use Oronts\AssetPilotBundle\Service\AssetZipService;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
+use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
+use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\DataObject\Concrete;
 use Psr\Log\NullLogger;
 
 #[CoversClass(AssetZipService::class)]
 class AssetZipServiceTest extends TestCase
 {
     #[Test]
-    public function onlyIncludesReadableNonFolderAssets(): void
+    public function usesTheExplicitActorForPerAssetAuthorization(): void
     {
+        $actor = ActorContext::user(7);
         $allowed = $this->createMock(Asset::class);
-        $allowed->method('isAllowed')->with('view')->willReturn(true);
-
+        $allowed->expects(self::never())->method('isAllowed');
         $denied = $this->createMock(Asset::class);
-        $denied->method('isAllowed')->with('view')->willReturn(false);
-
+        $denied->expects(self::never())->method('isAllowed');
         $folder = $this->createMock(Asset\Folder::class);
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->expects(self::exactly(2))
+            ->method('isAllowed')
+            ->with(self::isInstanceOf(Asset::class), 'view', $actor)
+            ->willReturnOnConsecutiveCalls(true, false);
 
-        $service = $this->serviceWith([1 => $allowed, 2 => $denied, 3 => $folder, 4 => null]);
+        $service = $this->serviceWith([1 => $allowed, 2 => $denied, 3 => $folder, 4 => null], authorization: $authorization);
 
-        self::assertSame([$allowed], $service->downloadable([1, 2, 3, 4]));
+        self::assertSame([$allowed], $service->downloadable([1, 2, 3, 4], $actor));
     }
 
     #[Test]
-    public function capsLoadedAssetsAtMaxAssets(): void
+    public function rejectsRequestsAboveMaxAssets(): void
     {
         $assets = [];
         for ($id = 1; $id <= 5; $id++) {
@@ -43,7 +53,49 @@ class AssetZipServiceTest extends TestCase
             $assets[$id] = $a;
         }
 
-        self::assertCount(2, $this->serviceWith($assets, 2)->downloadable([1, 2, 3, 4, 5]));
+        $this->expectException(\LengthException::class);
+        $this->expectExceptionMessage('configured limit is 2');
+
+        $this->serviceWith($assets, 2)->downloadable([1, 2, 3, 4, 5]);
+    }
+
+    #[Test]
+    public function uniqueNameNeverEmitsADuplicateWhenAGeneratedNameLaterCollides(): void
+    {
+        $service = $this->serviceWith([]);
+        $used = [];
+        $a = $service->unique('a.jpg', $used);
+        $b = $service->unique('a.jpg', $used);
+        $c = $service->unique('a-2.jpg', $used);
+        $d = $service->unique('a.jpg', $used);
+
+        self::assertSame('a.jpg', $a);
+        self::assertSame('a-2.jpg', $b);
+        self::assertNotSame($b, $c);
+        self::assertCount(4, array_unique([$a, $b, $c, $d]), 'Every emitted archive entry name must be unique.');
+    }
+
+    #[Test]
+    public function rejectsDuplicateStrategyNames(): void
+    {
+        $strategy = static function (): ZipEntryStrategyInterface {
+            return new class () implements ZipEntryStrategyInterface {
+                public function getName(): string
+                {
+                    return 'folder';
+                }
+
+                public function entryPath(Asset $asset): string
+                {
+                    return $asset->getFilename();
+                }
+            };
+        };
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Duplicate ZIP strategy alias "folder".');
+
+        new AssetZipService(new NullLogger(), $this->createMock(AssetFieldExtractorInterface::class), $this->createMock(ElementAuthorization::class), [$strategy(), $strategy()]);
     }
 
     #[Test]
@@ -79,16 +131,45 @@ class AssetZipServiceTest extends TestCase
         self::assertSame('dir/b-2', $service->unique('dir/b', $used));
     }
 
+    #[Test]
+    public function buildFromObjectsSkipsAnObjectTheActorCannotView(): void
+    {
+        $object = $this->createMock(Concrete::class);
+        $object->method('getId')->willReturn(9);
+        $extractor = $this->createMock(AssetFieldExtractorInterface::class);
+        $extractor->expects(self::never())->method('extract');
+        $authorization = $this->createMock(ElementAuthorization::class);
+        $authorization->method('isAllowed')->willReturn(false);
+
+        $service = new class (new NullLogger(), $extractor, $authorization, $object) extends AssetZipService {
+            public function __construct(NullLogger $logger, AssetFieldExtractorInterface $extractor, ElementAuthorization $authorization, private readonly ?Concrete $object)
+            {
+                parent::__construct($logger, $extractor, $authorization, [], 'flat', 1000, 536870912);
+            }
+
+            protected function loadObject(int $id): ?AbstractObject
+            {
+                return $this->object;
+            }
+        };
+
+        self::assertInstanceOf(ZipBuildResult::class, $service->buildFromObjects([9]));
+    }
+
     /** @param array<int, ?Asset> $map */
-    private function serviceWith(array $map, int $maxAssets = 1000): object
+    private function serviceWith(array $map, int $maxAssets = 1000, int $maxBytes = 536870912, ?ElementAuthorization $authorization = null): object
     {
         $extractor = $this->createMock(AssetFieldExtractorInterface::class);
+        if ($authorization === null) {
+            $authorization = $this->createMock(ElementAuthorization::class);
+            $authorization->method('isAllowed')->willReturn(true);
+        }
 
-        return new class (new NullLogger(), $extractor, $map, $maxAssets) extends AssetZipService {
+        return new class (new NullLogger(), $extractor, $authorization, $map, $maxAssets, $maxBytes) extends AssetZipService {
             /** @param array<int, ?Asset> $map */
-            public function __construct(NullLogger $logger, AssetFieldExtractorInterface $extractor, private readonly array $map, int $maxAssets)
+            public function __construct(NullLogger $logger, AssetFieldExtractorInterface $extractor, ElementAuthorization $authorization, private readonly array $map, int $maxAssets, int $maxBytes)
             {
-                parent::__construct($logger, $extractor, [], 'flat', $maxAssets);
+                parent::__construct($logger, $extractor, $authorization, [], 'flat', $maxAssets, $maxBytes);
             }
 
             protected function loadAsset(int $id): ?Asset
@@ -100,9 +181,9 @@ class AssetZipServiceTest extends TestCase
              * @param int[] $ids
              * @return Asset[]
              */
-            public function downloadable(array $ids): array
+            public function downloadable(array $ids, ?ActorContext $actor = null): array
             {
-                return $this->downloadableAssets($ids);
+                return $this->downloadableAssets($ids, $actor);
             }
 
             public function safe(string $entry): ?string
@@ -116,11 +197,8 @@ class AssetZipServiceTest extends TestCase
                 return $this->uniqueName($entry, $used);
             }
 
-            /**
-             * @param Asset[] $assets
-             * @return array{path: ?string, added: int, skipped: int}
-             */
-            public function callBuild(array $assets, ?ZipBuildOptions $options = null): array
+            /** @param list<Asset> $assets */
+            public function callBuild(array $assets, ?ZipBuildOptions $options = null): ZipBuildResult
             {
                 return $this->build($assets, $options);
             }
@@ -161,15 +239,53 @@ class AssetZipServiceTest extends TestCase
         $result = $this->serviceWith([])->callBuild([$goodAsset, $emptyAsset]);
 
         try {
-            self::assertSame(1, $result['added'], 'only the non-empty asset is packed');
-            self::assertSame(1, $result['skipped'], 'the 0-byte asset is skipped, not packed empty');
-            self::assertNotNull($result['path']);
+            self::assertSame(1, $result->added, 'only the non-empty asset is packed');
+            self::assertSame(1, $result->skipped, 'the 0-byte asset is skipped, not packed empty');
+            self::assertSame(2, $result->requested);
+            self::assertFalse($result->truncated);
+            self::assertNotNull($result->path);
         } finally {
-            if ($result['path'] !== null) {
-                @unlink($result['path']);
+            if ($result->path !== null) {
+                @unlink($result->path);
             }
             @unlink($good);
             @unlink($empty);
         }
     }
+
+    #[Test]
+    public function buildRejectsAssetsAboveTheUncompressedByteBudget(): void
+    {
+        $file = (string) tempnam(sys_get_temp_dir(), 'apz_limit_');
+        file_put_contents($file, '123456');
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getFilename')->willReturn('large.bin');
+        $asset->method('getLocalFile')->willReturn($file);
+
+        try {
+            $this->expectException(\LengthException::class);
+            $this->expectExceptionMessage('5-byte uncompressed limit');
+            $this->serviceWith([], maxBytes: 5)->callBuild([$asset]);
+        } finally {
+            @unlink($file);
+        }
+    }
+    #[Test]
+    public function buildRemovesTheArchiveWhenEveryAssetIsSkipped(): void
+    {
+        $empty = (string) tempnam(sys_get_temp_dir(), 'apz_empty_');
+        $asset = $this->createMock(Asset::class);
+        $asset->method('getFilename')->willReturn('empty.png');
+        $asset->method('getLocalFile')->willReturn($empty);
+
+        try {
+            self::assertEquals(
+                new ZipBuildResult(null, 1, 0, 1),
+                $this->serviceWith([])->callBuild([$asset]),
+            );
+        } finally {
+            @unlink($empty);
+        }
+    }
+
 }

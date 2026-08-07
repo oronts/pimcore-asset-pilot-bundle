@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Tests\Unit\Action;
 
+use Oronts\AssetPilotBundle\Action\RuleActionDeliveryContextInterface;
 use Oronts\AssetPilotBundle\Action\SetPropertyAction;
 use Oronts\AssetPilotBundle\Service\AssetPropertyService;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -11,6 +12,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\AbstractObject;
+use Pimcore\Model\Property;
 
 #[CoversClass(SetPropertyAction::class)]
 class SetPropertyActionTest extends TestCase
@@ -33,30 +35,51 @@ class SetPropertyActionTest extends TestCase
     }
 
     #[Test]
-    public function writesAStaticValueThroughThePropertyService(): void
+    public function preparesAStaticValueBeforeTheMove(): void
     {
-        $service = $this->createMock(AssetPropertyService::class);
-        $service->expects(self::once())->method('setProperty')->with(42, '/Products/a.jpg', 'cdn_ready', 'text', 'yes');
-
-        (new SetPropertyAction($service))->apply($this->asset(), $this->createMock(AbstractObject::class), [
+        $payload = (new SetPropertyAction($this->createMock(AssetPropertyService::class)))->prepare($this->asset(), $this->createMock(AbstractObject::class), [
             'type' => 'set_property',
             'name' => 'cdn_ready',
             'value' => 'yes',
         ]);
+
+        self::assertSame(['name' => 'cdn_ready', 'type' => 'text', 'value' => 'yes'], $payload);
     }
 
     #[Test]
     public function castsABooleanValueToDbBool(): void
     {
-        $service = $this->createMock(AssetPropertyService::class);
-        $service->expects(self::once())->method('setProperty')->with(42, '/Products/a.jpg', 'featured', 'bool', '1');
-
-        (new SetPropertyAction($service))->apply($this->asset(), $this->createMock(AbstractObject::class), [
+        $payload = (new SetPropertyAction($this->createMock(AssetPropertyService::class)))->prepare($this->asset(), $this->createMock(AbstractObject::class), [
             'type' => 'set_property',
             'name' => 'featured',
             'property_type' => 'bool',
             'value' => true,
         ]);
+
+        self::assertSame(['name' => 'featured', 'type' => 'bool', 'value' => '1'], $payload);
+    }
+
+    #[Test]
+    public function appliesPreparedDataThroughTheLockedPropertyService(): void
+    {
+        $service = $this->createMock(AssetPropertyService::class);
+        $asset = $this->asset();
+        $asset->method('getProperty')->with('cdn_ready', true)->willReturn(null);
+        $service->expects(self::once())->method('setPropertyOnLockedAsset')->with($asset, 'cdn_ready', 'text', 'yes');
+
+        (new SetPropertyAction($service))->applyPrepared($asset, ['name' => 'cdn_ready', 'type' => 'text', 'value' => 'yes'], $this->createMock(RuleActionDeliveryContextInterface::class));
+    }
+
+    #[Test]
+    public function repeatedPreparedDeliveryDoesNotCreateAnotherAssetVersion(): void
+    {
+        $property = (new Property())->setName('cdn_ready')->setType('text')->setData('yes');
+        $asset = $this->asset();
+        $asset->method('getProperty')->with('cdn_ready', true)->willReturn($property);
+        $service = $this->createMock(AssetPropertyService::class);
+        $service->expects(self::never())->method('setPropertyOnLockedAsset');
+
+        (new SetPropertyAction($service))->applyPrepared($asset, ['name' => 'cdn_ready', 'type' => 'text', 'value' => 'yes'], $this->createMock(RuleActionDeliveryContextInterface::class));
     }
 
     #[Test]
@@ -65,7 +88,17 @@ class SetPropertyActionTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         (new SetPropertyAction($this->createMock(AssetPropertyService::class)))
-            ->apply($this->asset(), $this->createMock(AbstractObject::class), ['type' => 'set_property', 'value' => 'x']);
+            ->prepare($this->asset(), $this->createMock(AbstractObject::class), ['type' => 'set_property', 'value' => 'x']);
+    }
+
+    #[Test]
+    public function validateConfigRejectsAnUnknownBooleanValue(): void
+    {
+        $errors = (new SetPropertyAction($this->createMock(AssetPropertyService::class)))
+            ->validateConfig(['name' => 'flag', 'property_type' => 'bool', 'value' => 'definitely']);
+
+        self::assertNotEmpty($errors);
+        self::assertStringContainsString('boolean', implode(' ', $errors));
     }
 
     #[Test]

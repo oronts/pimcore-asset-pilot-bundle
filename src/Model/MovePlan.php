@@ -9,7 +9,7 @@ namespace Oronts\AssetPilotBundle\Model;
  * (folderPath + targetFilename) or skip with a reason. Produced once by MovePlanner so the
  * dry-run preview and the live move can never drift on which gates apply or in what order.
  */
-final class MovePlan
+class MovePlan
 {
     private function __construct(
         public readonly string $targetPath,

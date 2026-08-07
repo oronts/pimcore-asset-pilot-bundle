@@ -6,7 +6,7 @@ namespace Oronts\AssetPilotBundle\Service;
 
 use Pimcore\Model\Asset;
 
-final class AssetProtection
+class AssetProtection
 {
     /**
      * Default name of the Pimcore property that, when truthy on an asset, excludes it from

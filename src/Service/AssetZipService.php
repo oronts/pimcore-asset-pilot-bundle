@@ -4,8 +4,13 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Service;
 
+use Oronts\AssetPilotBundle\Model\ActorContext;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\Query\Like;
+use Oronts\AssetPilotBundle\Support\UniqueServiceMap;
 use Oronts\AssetPilotBundle\Zip\FlatZipStrategy;
 use Oronts\AssetPilotBundle\Zip\ZipBuildOptions;
+use Oronts\AssetPilotBundle\Zip\ZipBuildResult;
 use Oronts\AssetPilotBundle\Zip\ZipEntryStrategyInterface;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject;
@@ -29,7 +34,7 @@ use Psr\Log\LoggerInterface;
  * Reusable standalone: call buildFromAssetIds()/buildFromFolder()/buildFromObjects() and stream the
  * returned path; register a ZipEntryStrategyInterface to add an archive layout.
  */
-class AssetZipService
+class AssetZipService implements AssetZipServiceInterface
 {
     /** @var array<string, ZipEntryStrategyInterface> */
     private array $strategies = [];
@@ -40,81 +45,89 @@ class AssetZipService
     public function __construct(
         protected readonly LoggerInterface $logger,
         protected readonly AssetFieldExtractorInterface $fieldExtractor,
+        protected readonly ElementAuthorizationInterface $authorization,
         iterable $strategies = [],
         protected readonly string $defaultStrategy = 'flat',
         protected readonly int $maxAssets = 1000,
+        protected readonly int $maxUncompressedBytes = 536870912,
     ) {
-        foreach ($strategies as $strategy) {
-            $this->strategies[$strategy->getName()] = $strategy;
-        }
+        $this->strategies = UniqueServiceMap::from($strategies, static fn (ZipEntryStrategyInterface $strategy): string => $strategy->getName(), 'ZIP strategy');
     }
 
-    /**
-     * @param int[] $assetIds
-     *
-     * @return array{path: ?string, added: int, skipped: int}
-     */
-    public function buildFromAssetIds(array $assetIds, ?ZipBuildOptions $options = null): array
+    /** @param list<int> $assetIds */
+    public function buildFromAssetIds(array $assetIds, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): ZipBuildResult
     {
-        return $this->build($this->downloadableAssets($assetIds), $options);
+        $assetIds = array_values(array_unique(array_map('intval', $assetIds)));
+
+        return $this->build($this->downloadableAssets($assetIds, $actor), $options, count($assetIds));
     }
 
-    /**
-     * @return array{path: ?string, added: int, skipped: int}
-     */
-    public function buildFromFolder(int $folderId, bool $recursive = true, ?ZipBuildOptions $options = null): array
+    public function buildFromFolder(int $folderId, bool $recursive = true, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): ZipBuildResult
     {
-        return $this->build($this->assetsInFolder($folderId, $recursive), $options);
+        $assets = $this->assetsInFolder($folderId, $recursive, $actor);
+
+        return $this->build($assets, $options, count($assets));
     }
 
     /**
      * Zip every asset referenced by the given data objects (across all field types the extractor
      * supports: relations, bricks, field collections, localized and block fields).
      *
-     * @param int[] $objectIds
-     *
-     * @return array{path: ?string, added: int, skipped: int}
+     * @param list<int> $objectIds
      */
-    public function buildFromObjects(array $objectIds, ?ZipBuildOptions $options = null): array
+    public function buildFromObjects(array $objectIds, ?ZipBuildOptions $options = null, ?ActorContext $actor = null): ZipBuildResult
     {
         $assets = [];
         foreach ($objectIds as $objectId) {
-            if (count($assets) >= $this->maxAssets) {
-                break;
-            }
             $object = $this->loadObject((int) $objectId);
-            if ($object === null) {
+            // Authorize the source object, not just its assets: its asset associations disclose the object.
+            if ($object === null || !$this->authorization->isAllowed($object, 'view', $actor)) {
                 continue;
             }
             foreach ($this->fieldExtractor->extract($object) as $info) {
                 foreach ($info->assets as $asset) {
-                    if ($asset->isAllowed('view')) {
+                    if ($this->authorization->isAllowed($asset, 'view', $actor)) {
                         $assets[(int) $asset->getId()] = $asset;
+                        $this->assertWithinLimit(count($assets));
                     }
                 }
             }
         }
 
-        return $this->build(array_values($assets), $options);
+        return $this->build(array_values($assets), $options, count($assets));
     }
 
-    /**
-     * @param Asset[] $assets
-     *
-     * @return array{path: ?string, added: int, skipped: int}
-     */
-    protected function build(array $assets, ?ZipBuildOptions $options): array
+    /** @param list<Asset> $assets */
+    protected function build(array $assets, ?ZipBuildOptions $options, ?int $requested = null): ZipBuildResult
     {
         $options ??= new ZipBuildOptions();
         $strategy = $this->resolveStrategy($options->strategy);
 
-        $capped = array_slice($assets, 0, $this->maxAssets);
-        $skipped = count($assets) - count($capped);
-
-        if ($capped === []) {
-            return ['path' => null, 'added' => 0, 'skipped' => $skipped];
+        $this->assertWithinLimit(count($assets));
+        $requested ??= count($assets);
+        $skipped = max(0, $requested - count($assets));
+        if ($assets === []) {
+            return $this->emptyBuildResult($requested, $skipped);
         }
 
+        [$path, $zip] = $this->openArchive();
+        try {
+            [$added, $skipped] = $this->addAssetsToArchive($zip, $assets, $options, $strategy, $skipped);
+            if (!$zip->close()) {
+                throw new \RuntimeException('Could not finalize the zip archive.');
+            }
+        } catch (\Throwable $e) {
+            $this->discardArchive($zip, $path);
+
+            throw $e;
+        }
+
+        return $this->buildResult($path, $requested, $added, $skipped, $strategy);
+    }
+
+    /** @return array{string, \ZipArchive} */
+    private function openArchive(): array
+    {
         $path = $this->createScratchPath();
         $zip = new \ZipArchive();
         if ($zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
@@ -123,41 +136,91 @@ class AssetZipService
             throw new \RuntimeException('Could not create the zip archive.');
         }
 
-        $added = 0;
-        $used = [];
-        try {
-            foreach ($capped as $asset) {
-                $file = $this->localFileFor($asset, $options->thumbnail, $entryExtension);
-                // safeEntryName rejects zip-slip paths (absolute, .., backslash, control chars) that a
-                // custom strategy could emit; a missing, empty, or unreadable asset is skipped, not
-                // packed (a failed storage read surfaces in Pimcore as a 0-byte temp file).
-                $entry = $file !== null && $this->isPackable($file)
-                    ? $this->safeEntryName($this->retargetExtension($strategy->entryPath($asset), $entryExtension))
-                    : null;
-                if ($file === null || $entry === null) {
-                    $skipped++;
-                    continue;
-                }
-                // Count what actually landed in the archive: if libzip refuses the entry (e.g. the
-                // file vanished between the check and the add), report it skipped, not added.
-                if ($zip->addFile($file, $this->uniqueName($entry, $used))) {
-                    $added++;
-                } else {
-                    $skipped++;
-                }
-            }
-            $zip->close();
-        } catch (\Throwable $e) {
-            @$zip->close();
-            @unlink($path);
+        return [$path, $zip];
+    }
 
-            throw $e;
+    /**
+     * @param list<Asset> $assets
+     * @return array{int, int}
+     */
+    private function addAssetsToArchive(
+        \ZipArchive $zip,
+        array $assets,
+        ZipBuildOptions $options,
+        ZipEntryStrategyInterface $strategy,
+        int $skipped,
+    ): array {
+        $added = 0;
+        $uncompressedBytes = 0;
+        $used = [];
+        foreach ($assets as $asset) {
+            if ($this->addAssetToArchive($zip, $asset, $options, $strategy, $uncompressedBytes, $used)) {
+                ++$added;
+            } else {
+                ++$skipped;
+            }
         }
 
+        return [$added, $skipped];
+    }
+
+    /** @param array<string, int> $used */
+    private function addAssetToArchive(
+        \ZipArchive $zip,
+        Asset $asset,
+        ZipBuildOptions $options,
+        ZipEntryStrategyInterface $strategy,
+        int &$uncompressedBytes,
+        array &$used,
+    ): bool {
+        $file = $this->localFileFor($asset, $options->thumbnail, $entryExtension);
+        $entry = $file !== null && $this->isPackable($file)
+            ? $this->safeEntryName($this->retargetExtension($strategy->entryPath($asset), $entryExtension))
+            : null;
+        if ($file === null || $entry === null) {
+            return false;
+        }
+
+        $fileSize = filesize($file);
+        if ($fileSize === false) {
+            return false;
+        }
+        $uncompressedBytes += $fileSize;
+        if ($uncompressedBytes > $this->maxUncompressedBytes) {
+            throw new \LengthException(sprintf(
+                'ZIP source data exceeds the configured %d-byte uncompressed limit.',
+                $this->maxUncompressedBytes,
+            ));
+        }
+
+        return $zip->addFile($file, $this->uniqueName($entry, $used));
+    }
+
+    private function discardArchive(\ZipArchive $zip, string $path): void
+    {
+        try {
+            $zip->close();
+        } catch (\Throwable) {
+        }
+        @unlink($path);
+    }
+
+    private function emptyBuildResult(int $requested, int $skipped): ZipBuildResult
+    {
+        return new ZipBuildResult(null, $requested, 0, $skipped);
+    }
+
+    private function buildResult(
+        string $path,
+        int $requested,
+        int $added,
+        int $skipped,
+        ZipEntryStrategyInterface $strategy,
+    ): ZipBuildResult {
         if ($added === 0) {
             @unlink($path);
 
-            return ['path' => null, 'added' => 0, 'skipped' => $skipped];
+            return $this->emptyBuildResult($requested, $skipped);
         }
 
         $this->logger->info('Asset Pilot: built archive ({added} assets, {skipped} skipped, strategy {strategy})', [
@@ -166,7 +229,7 @@ class AssetZipService
             'strategy' => $strategy->getName(),
         ]);
 
-        return ['path' => $path, 'added' => $added, 'skipped' => $skipped];
+        return new ZipBuildResult($path, $requested, $added, $skipped);
     }
 
     /**
@@ -174,17 +237,13 @@ class AssetZipService
      *
      * @return Asset[]
      */
-    protected function downloadableAssets(array $assetIds): array
+    protected function downloadableAssets(array $assetIds, ?ActorContext $actor = null): array
     {
+        $this->assertWithinLimit(count($assetIds));
         $assets = [];
         foreach ($assetIds as $id) {
-            // Stop loading once the cap is reached so a huge id list cannot exhaust memory before build().
-            if (count($assets) >= $this->maxAssets) {
-                break;
-            }
             $asset = $this->loadAsset((int) $id);
-            // Per-asset Pimcore workspace ACL on top of the View permission; isAllowed() returns true on CLI.
-            if ($asset === null || $asset instanceof Asset\Folder || !$asset->isAllowed('view')) {
+            if ($asset === null || $asset instanceof Asset\Folder || !$this->authorization->isAllowed($asset, 'view', $actor)) {
                 continue;
             }
             $assets[] = $asset;
@@ -196,28 +255,39 @@ class AssetZipService
     /**
      * @return Asset[]
      */
-    protected function assetsInFolder(int $folderId, bool $recursive): array
+    protected function assetsInFolder(int $folderId, bool $recursive, ?ActorContext $actor = null): array
     {
         $folder = $this->loadAsset($folderId);
-        if (!$folder instanceof Asset\Folder || !$folder->isAllowed('view')) {
+        if (!$folder instanceof Asset\Folder || !$this->authorization->isAllowed($folder, 'view', $actor)) {
             return [];
         }
 
         $base = rtrim((string) $folder->getRealFullPath(), '/') . '/';
         $listing = $this->folderListing();
         $listing->setCondition(
-            'type != :folder AND path ' . ($recursive ? 'LIKE :path' : '= :exact'),
+            'type != :folder AND path ' . ($recursive ? 'LIKE :path' . Like::CLAUSE : '= :exact'),
             $recursive
-                ? ['folder' => 'folder', 'path' => str_replace(['%', '_'], ['\\%', '\\_'], $base) . '%']
+                ? ['folder' => 'folder', 'path' => Like::escape($base) . '%']
                 : ['folder' => 'folder', 'exact' => $base],
         );
-        $listing->setLimit($this->maxAssets + 1);
-
         $assets = [];
-        foreach ($listing->load() as $asset) {
-            if ($asset->isAllowed('view')) {
-                $assets[] = $asset;
+        $offset = 0;
+        $pageSize = $this->maxAssets + 1;
+        while (true) {
+            $listing->setOffset($offset);
+            $listing->setLimit($pageSize);
+            $page = $listing->load();
+            foreach ($page as $asset) {
+                // Page then authorize, so unauthorized rows do not drop authorized assets later in a folder.
+                if ($this->authorization->isAllowed($asset, 'view', $actor)) {
+                    $assets[] = $asset;
+                    $this->assertWithinLimit(count($assets));
+                }
             }
+            if (count($page) < $pageSize) {
+                break;
+            }
+            $offset += $pageSize;
         }
 
         return $assets;
@@ -225,9 +295,26 @@ class AssetZipService
 
     private function resolveStrategy(?string $name): ZipEntryStrategyInterface
     {
-        return $this->strategies[$name ?? $this->defaultStrategy]
-            ?? $this->strategies[$this->defaultStrategy]
-            ?? new FlatZipStrategy();
+        $name ??= $this->defaultStrategy;
+        if (isset($this->strategies[$name])) {
+            return $this->strategies[$name];
+        }
+        if ($name === 'flat') {
+            return new FlatZipStrategy();
+        }
+
+        throw new \InvalidArgumentException(sprintf('Unknown ZIP strategy "%s".', $name));
+    }
+
+    private function assertWithinLimit(int $count): void
+    {
+        if ($count > $this->maxAssets) {
+            throw new \LengthException(sprintf(
+                'ZIP request contains %d assets; the configured limit is %d. Narrow the selection and retry.',
+                $count,
+                $this->maxAssets,
+            ));
+        }
     }
 
     /**
@@ -324,16 +411,21 @@ class AssetZipService
             return $entry;
         }
 
-        $n = ++$used[$entry];
         $dir = \dirname($entry);
         $dir = $dir === '.' ? '' : $dir . '/';
         $base = basename($entry);
         $ext = pathinfo($base, PATHINFO_EXTENSION);
-        if ($ext === '') {
-            return $dir . $base . '-' . $n;
-        }
+        $stem = $ext === '' ? $base : substr($base, 0, -(strlen($ext) + 1));
+        $suffix = $ext === '' ? '' : '.' . $ext;
 
-        return $dir . substr($base, 0, -(strlen($ext) + 1)) . '-' . $n . '.' . $ext;
+        // Register the generated name too, and skip a suffix that some other asset already owns, so two entries
+        // can never resolve to the same archive path (ZipArchive::addFile would otherwise overwrite one).
+        do {
+            $candidate = $dir . $stem . '-' . (++$used[$entry]) . $suffix;
+        } while (isset($used[$candidate]));
+        $used[$candidate] = 1;
+
+        return $candidate;
     }
 
     protected function loadAsset(int $id): ?Asset

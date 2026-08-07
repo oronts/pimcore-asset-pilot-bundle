@@ -16,12 +16,13 @@ class OperationStatusTest extends TestCase
     public function hasExpectedCases(): void
     {
         $cases = OperationStatus::cases();
-        self::assertCount(6, $cases);
+        self::assertCount(7, $cases);
         self::assertSame('pending', OperationStatus::Pending->value);
         self::assertSame('in_progress', OperationStatus::InProgress->value);
+        self::assertSame('recovery_required', OperationStatus::RecoveryRequired->value);
         self::assertSame('completed', OperationStatus::Completed->value);
+        self::assertSame('completed_with_observer_error', OperationStatus::CompletedWithObserverError->value);
         self::assertSame('failed', OperationStatus::Failed->value);
         self::assertSame('skipped', OperationStatus::Skipped->value);
-        self::assertSame('action_failed', OperationStatus::ActionFailed->value);
     }
 }

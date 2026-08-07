@@ -4,10 +4,21 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
+use Oronts\AssetPilotBundle\Controller\Api\Support\DecodesJsonObject;
+use Oronts\AssetPilotBundle\Controller\Api\Support\ReadsRequestScalars;
+use Oronts\AssetPilotBundle\Controller\Api\Support\RejectsClaimedPlan;
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
-use Oronts\AssetPilotBundle\Service\AssetIntegrityService;
+use Oronts\AssetPilotBundle\Exception\StaleApplyPlanException;
+use Oronts\AssetPilotBundle\Model\ApplyPlan;
+use Oronts\AssetPilotBundle\Model\HealResult;
+use Oronts\AssetPilotBundle\Security\ElementAuthorizationInterface;
+use Oronts\AssetPilotBundle\Service\ApplyPlanServiceInterface;
+use Oronts\AssetPilotBundle\Service\AssetIntegrityServiceInterface;
+use Oronts\AssetPilotBundle\Service\IntegrityHealFingerprintService;
+use Oronts\AssetPilotBundle\Service\IntegrityHealHistoryServiceInterface;
+use Oronts\AssetPilotBundle\Service\PreviewsHealPlan;
 use Oronts\AssetPilotBundle\Service\Query\Pagination;
-use Oronts\AssetPilotBundle\Service\VersionRollbackHealer;
+use Oronts\AssetPilotBundle\Service\VersionRollbackHealerInterface;
 use Oronts\AssetPilotBundle\Support\BulkIds;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -17,6 +28,11 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 class IntegrityController
 {
+    use DecodesJsonObject;
+    use PreviewsHealPlan;
+    use ReadsRequestScalars;
+    use RejectsClaimedPlan;
+
     /**
      * Each checked/healed asset is loaded and render-tested (and a heal probes its versions), so the
      * per-request work is hard-capped: both the scan page and an explicit id list are bounded to
@@ -25,9 +41,13 @@ class IntegrityController
     private const int MAX_ITEMS = 50;
 
     public function __construct(
-        protected readonly AssetIntegrityService $integrity,
-        protected readonly VersionRollbackHealer $healer,
+        protected readonly AssetIntegrityServiceInterface $integrity,
+        protected readonly VersionRollbackHealerInterface $healer,
+        protected readonly IntegrityHealHistoryServiceInterface $history,
         protected readonly LoggerInterface $logger,
+        protected readonly ApplyPlanServiceInterface $applyPlans,
+        protected readonly IntegrityHealFingerprintService $healFingerprints,
+        protected readonly ElementAuthorizationInterface $authorization,
     ) {}
 
     #[Route('/integrity', name: 'oronts_asset_pilot_integrity', methods: ['GET'])]
@@ -73,9 +93,28 @@ class IntegrityController
     #[IsGranted(AssetPilotPermission::Operate->value)]
     public function heal(Request $request): JsonResponse
     {
-        $body = json_decode($request->getContent(), true);
-        if (!is_array($body)) {
-            return new JsonResponse(['error' => 'Request body must be a JSON object.'], JsonResponse::HTTP_BAD_REQUEST);
+        $input = $this->healInput($request);
+        if ($input instanceof JsonResponse) {
+            return $input;
+        }
+
+        try {
+            return $this->executeHeal($input['ids'], $input['dryRun'], $input['planToken']);
+        } catch (StaleApplyPlanException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], JsonResponse::HTTP_CONFLICT);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to heal assets.', ['exception' => $e]);
+
+            return new JsonResponse(['error' => 'Failed to heal assets.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /** @return array{ids: list<int>, dryRun: bool, planToken: string}|JsonResponse */
+    private function healInput(Request $request): array|JsonResponse
+    {
+        $body = $this->decodeJsonObject($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
         $ids = BulkIds::clean($body['ids'] ?? null);
@@ -86,26 +125,105 @@ class IntegrityController
             return new JsonResponse(['error' => sprintf('Too many ids; heal at most %d at once.', self::MAX_ITEMS)], JsonResponse::HTTP_BAD_REQUEST);
         }
 
-        $dryRun = (bool) ($body['dryRun'] ?? false);
+        $dryRun = $body['dryRun'] ?? false;
+        if (!is_bool($dryRun)) {
+            return new JsonResponse(['error' => 'dryRun must be a boolean.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+        sort($ids, SORT_NUMERIC);
+
+        $planToken = is_string($body['planToken'] ?? null) ? $body['planToken'] : '';
+        if (!$dryRun && $planToken === '') {
+            return new JsonResponse(['error' => 'A planToken from a fresh dry-run preview is required.'], JsonResponse::HTTP_BAD_REQUEST);
+        }
+
+        return ['ids' => $ids, 'dryRun' => $dryRun, 'planToken' => $planToken];
+    }
+
+    /** @param list<int> $assetIds */
+    private function executeHeal(array $assetIds, bool $dryRun, string $planToken): JsonResponse
+    {
+        [$plan, $previewResults] = $this->previewPlan($assetIds);
+        if ($plan === null) {
+            return new JsonResponse([
+                'error' => 'An asset changed while the integrity preview was being built. Preview again.',
+            ], JsonResponse::HTTP_CONFLICT);
+        }
+
+        if ($dryRun) {
+            return new JsonResponse([
+                'dryRun' => true,
+                'planToken' => $this->applyPlans->issue($plan),
+                'results' => $this->serializeResults($assetIds, $previewResults),
+            ]);
+        }
+
+        $rejection = $this->rejectClaimedPlan($this->applyPlans->claim($planToken, $plan));
+        if ($rejection !== null) {
+            return $rejection;
+        }
+
+        $results = $this->healer->healPlannedBatch($assetIds, $plan->fingerprintMap());
+
+        return new JsonResponse([
+            'dryRun' => false,
+            'planToken' => null,
+            'results' => $this->serializeResults($assetIds, $results),
+        ]);
+    }
+
+    /**
+     * @param list<int> $assetIds
+     * @return array{ApplyPlan|null, array<int, HealResult>}
+     */
+    private function previewPlan(array $assetIds): array
+    {
+        [$results, $after] = $this->previewHealPlan($assetIds);
+        if ($after === null) {
+            return [null, $results];
+        }
+
+        return [new ApplyPlan(
+            kind: 'integrity-heal',
+            actor: $this->authorization->currentActor(),
+            request: ['assetIds' => $assetIds],
+            config: $this->healFingerprints->planConfig(),
+            targets: $this->healFingerprints->targets($assetIds, $after, $results),
+        ), $results];
+    }
+
+    /**
+     * @param list<int> $assetIds
+     * @param array<int, HealResult> $results
+     * @return list<array<string, mixed>>
+     */
+    private function serializeResults(array $assetIds, array $results): array
+    {
+        return array_map(static function (int $assetId) use ($results): array {
+            $result = $results[$assetId];
+
+            return [
+                'assetId' => $assetId,
+                'outcome' => $result->outcome->value,
+                'toVersion' => $result->toVersion,
+                'checker' => $result->checker,
+                'reason' => $result->reason,
+                'observerWarnings' => $result->observerWarnings,
+            ];
+        }, $assetIds);
+    }
+
+    #[Route('/integrity/history', name: 'oronts_asset_pilot_integrity_history', methods: ['GET'])]
+    #[IsGranted(AssetPilotPermission::Admin->value)]
+    public function history(Request $request): JsonResponse
+    {
+        [$page, $limit] = Pagination::fromRequest($request, self::MAX_ITEMS, 25);
 
         try {
-            $results = [];
-            foreach ($ids as $id) {
-                $result = $this->healer->healById($id, $dryRun);
-                $results[] = [
-                    'assetId' => $id,
-                    'outcome' => $result->outcome->value,
-                    'toVersion' => $result->toVersion,
-                    'checker' => $result->checker,
-                    'reason' => $result->reason,
-                ];
-            }
-
-            return new JsonResponse(['dryRun' => $dryRun, 'results' => $results]);
+            return new JsonResponse($this->history->getPaginated($page, $limit));
         } catch (\Throwable $e) {
-            $this->logger->error('Failed to heal assets.', ['exception' => $e]);
+            $this->logger->error('Failed to read integrity heal history.', ['exception' => $e]);
 
-            return new JsonResponse(['error' => 'Failed to heal assets.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
+            return new JsonResponse(['error' => 'Failed to read integrity heal history.'], JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -113,11 +231,13 @@ class IntegrityController
     #[IsGranted(AssetPilotPermission::Admin->value)]
     public function undo(Request $request): JsonResponse
     {
-        $body = json_decode($request->getContent(), true);
-        $rawId = is_array($body) ? ($body['assetId'] ?? null) : null;
-        $assetId = (is_int($rawId) || (is_string($rawId) && ctype_digit($rawId))) ? (int) $rawId : 0;
-        if ($assetId <= 0) {
-            return new JsonResponse(['error' => 'assetId must be a positive integer.'], JsonResponse::HTTP_BAD_REQUEST);
+        $body = $this->decodeJsonObject($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+        $assetId = $this->requestPositiveInt($body, 'assetId', null);
+        if ($assetId instanceof JsonResponse) {
+            return $assetId;
         }
 
         try {

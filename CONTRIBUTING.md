@@ -21,11 +21,13 @@ audit-log rows or the `asset-pilot:audit` output for the affected asset.
 composer install
 ```
 
-The Studio UI ships as source (a Module Federation remote), not prebuilt. To work on it:
+Releases ship a prebuilt Module Federation remote. To change it, install the pinned toolchain and
+publish a new active generation:
 
 ```bash
 npm --prefix assets/studio ci
 npm --prefix assets/studio run build      # emits the remote into public/studio/build
+npm --prefix assets/studio run verify-build
 ```
 
 ## Quality gates
@@ -33,15 +35,23 @@ npm --prefix assets/studio run build      # emits the remote into public/studio/
 Every change must pass all of these before it is reviewed. They are wired as composer scripts:
 
 ```bash
-composer test     # PHPUnit, kernel-free unit suite
-composer stan     # PHPStan (level 5)
-composer cs       # php-cs-fixer (dry-run); composer cs-fix to apply
+composer test              # PHPUnit, kernel-free unit suite
+composer stan              # PHPStan (level 5)
+composer cs                # php-cs-fixer (dry-run); composer cs-fix to apply
+composer audit-production  # locked production dependencies (composer audit --locked --no-dev)
+composer validate-project  # package metadata and lock validation (composer validate --no-check-publish)
 ```
 
-For the Studio UI, also run the type check:
+For the Studio UI, run its static, unit, accessibility, dependency, and publication gates:
 
 ```bash
 npm --prefix assets/studio run check-types
+npm --prefix assets/studio run lint
+npm --prefix assets/studio test
+npm --prefix assets/studio run test:a11y
+npm audit --prefix assets/studio --audit-level=low
+npm --prefix assets/studio run build
+npm --prefix assets/studio run verify-build
 ```
 
 The `en` and `de` translation catalogs (`assets/studio/js/src/i18n/`) must stay in parity: every key
@@ -64,6 +74,9 @@ present in one exists in the other.
 - Every REST endpoint carries `#[IsGranted(AssetPilotPermission::*)]`: read = View, mutating =
   Operate, revert and merge = Admin.
 - Never interpolate untrusted input into SQL identifiers. Bind values and whitelist columns.
+- Preserve actor/workspace context across queued mutations and reauthorize after dequeue.
+- Add chronological idempotent migrations for every released schema change and test upgrades from
+  each tagged schema.
 
 ## Tests
 

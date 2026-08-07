@@ -36,7 +36,7 @@ class AlwaysMoveStrategyTest extends TestCase
             priority: 10, enabled: true, filters: [],
         );
 
-        self::assertTrue($this->strategy->resolve($asset, $object, $rule));
+        self::assertTrue($this->strategy->resolve($asset, $object, $rule, false));
     }
 
     #[Test]

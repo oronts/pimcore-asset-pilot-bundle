@@ -16,6 +16,5 @@ export const AssetPilotPlugin: IAbstractPlugin = {
 
   onStartup: ({ moduleSystem }): void => {
     moduleSystem.registerModule(AssetPilotModule)
-    console.log('Hello from Asset Pilot.')
   }
 }

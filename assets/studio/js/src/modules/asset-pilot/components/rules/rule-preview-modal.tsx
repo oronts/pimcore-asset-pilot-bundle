@@ -1,10 +1,12 @@
-import React, { useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { assetPilotApi } from '../../services/api'
+import { ApiError, assetPilotApi } from '../../services/api'
 import type { MoveOperation } from '../../types'
 import { useToast } from '../../hooks/use-toast'
 import { useModalDismiss } from '../../hooks/use-modal-dismiss'
 import { usePermissions } from '../../hooks/use-permissions'
+import { ConfirmDialog } from '../shared/confirm-dialog'
+import { modalOverlayStyle, modalSurfaceStyle } from '../shared/modal-styles'
 
 interface RulePreviewModalProps {
   ruleName: string
@@ -16,11 +18,16 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
   const toast = useToast()
   const { operate } = usePermissions()
   const [objectId, setObjectId] = useState('')
-  const [results, setResults] = useState<MoveOperation[] | null>(null)
+  const [preview, setPreview] = useState<{ objectId: number; operations: MoveOperation[]; planToken: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
-  const modalRef = useModalDismiss<HTMLDivElement>(onClose)
+  const [confirming, setConfirming] = useState(false)
+  const request = useRef<AbortController | null>(null)
+  const modalRef = useModalDismiss<HTMLDivElement>(onClose, !loading && !applying, !confirming)
+  const titleId = useId()
+
+  useEffect(() => () => request.current?.abort(), [])
 
   const runPreview = async (): Promise<void> => {
     const id = parseInt(objectId, 10)
@@ -28,109 +35,142 @@ export const RulePreviewModal: React.FC<RulePreviewModalProps> = ({ ruleName, on
       setError(t('asset-pilot.rule-preview.invalid-id'))
       return
     }
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
     setLoading(true)
     setError(null)
+    setPreview(null)
     try {
-      const data = await assetPilotApi.previewRule(ruleName, id) as MoveOperation[]
-      setResults(data)
+      const result = await assetPilotApi.previewRule(ruleName, id, controller.signal)
+      if (!controller.signal.aborted) {
+        if (!Array.isArray(result.operations) || result.planToken == null || result.planToken === '') {
+          throw new Error(t('asset-pilot.operations.preview-invalid'))
+        }
+        setPreview({ objectId: id, ...result })
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Preview failed')
+      if (!(e instanceof Error && e.name === 'AbortError')) {
+        setError(e instanceof Error ? e.message : t('asset-pilot.rule-preview.preview-failed'))
+      }
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
   const applyNow = async (): Promise<void> => {
-    const id = parseInt(objectId, 10)
-    if (isNaN(id)) return
+    if (preview == null) return
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
     setApplying(true)
     try {
-      await assetPilotApi.applyRule(ruleName, id)
+      await assetPilotApi.applyRule(ruleName, preview.objectId, preview.planToken, controller.signal)
+      if (controller.signal.aborted) return
       toast.success(t('asset-pilot.rule-preview.apply-success'))
       onClose()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed')
+      if (controller.signal.aborted || (e instanceof Error && e.name === 'AbortError')) return
+      if (e instanceof ApiError && e.status === 409) setPreview(null)
+      toast.error(e instanceof Error ? e.message : t('asset-pilot.common.unknown-error'))
     } finally {
-      setApplying(false)
+      if (!controller.signal.aborted) {
+        setApplying(false)
+        setConfirming(false)
+      }
     }
   }
 
+  const dismiss = (): void => {
+    request.current?.abort()
+    onClose()
+  }
+
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1} style={modalStyle} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.rule-preview.title', { name: ruleName })}</h3>
-          <button onClick={onClose} style={closeBtnStyle}>&times;</button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-          <input type="number" placeholder={t('asset-pilot.rule-preview.object-id')} value={objectId} onChange={e => setObjectId(e.target.value)} style={inputStyle} />
-          <button onClick={() => { void runPreview() }} disabled={loading} style={primaryBtnStyle}>
-            {loading ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.run')}
-          </button>
-        </div>
-
-        {error != null && <p style={{ color: '#ff4d4f', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
-
-        {results != null && (
-          <div>
-            {results.length === 0 ? (
-              <p style={{ color: '#8c8c8c', fontSize: 13 }}>{t('asset-pilot.rule-preview.no-operations')}</p>
-            ) : (
-              <>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
-                      <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
-                      <th style={thStyle}>{t('asset-pilot.columns.current-path')}</th>
-                      <th style={thStyle}>{t('asset-pilot.columns.would-move-to')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((op, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                        <td style={tdStyle}>{op.assetId}</td>
-                        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{op.sourcePath}</td>
-                        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{op.targetPath}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {operate && (
-                  <button onClick={() => { void applyNow() }} disabled={applying} style={applyBtnStyle}>
-                    {applying ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.apply-now')}
-                  </button>
-                )}
-              </>
-            )}
+    <>
+      <div role="presentation" aria-hidden={confirming || undefined} style={modalOverlayStyle} onClick={event => { if (event.target === event.currentTarget && !loading && !applying && !confirming) dismiss() }}>
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} style={modalStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 id={titleId} style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t('asset-pilot.rule-preview.title', { name: ruleName })}</h3>
+            <button onClick={dismiss} disabled={loading || applying} aria-label={t('asset-pilot.common.close')} style={closeBtnStyle}>&times;</button>
           </div>
-        )}
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <input type="number" aria-label={t('asset-pilot.rule-preview.object-id')} placeholder={t('asset-pilot.rule-preview.object-id')} value={objectId} onChange={e => { request.current?.abort(); setObjectId(e.target.value); setPreview(null); setError(null); setLoading(false) }} style={inputStyle} />
+            <button onClick={() => { void runPreview() }} disabled={loading} style={primaryBtnStyle}>
+              {loading ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.run')}
+            </button>
+          </div>
+
+          {error != null && <p role="alert" style={{ color: 'var(--ap-color-error-text-active)', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
+
+          {preview != null && (
+            <div>
+              {preview.operations.length === 0 ? (
+                <p style={{ color: 'var(--ap-color-text-secondary)', fontSize: 13 }}>{t('asset-pilot.rule-preview.no-operations')}</p>
+              ) : (
+                <>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--ap-font-size)', marginBottom: 16 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
+                        <th style={thStyle}>{t('asset-pilot.columns.asset-id')}</th>
+                        <th style={thStyle}>{t('asset-pilot.columns.current-path')}</th>
+                        <th style={thStyle}>{t('asset-pilot.columns.would-move-to')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.operations.map((op, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
+                          <td style={tdStyle}>{op.assetId}</td>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{op.sourcePath}</td>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }}>{op.targetPath}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {operate && (
+                    <button onClick={() => setConfirming(true)} disabled={applying || loading} style={applyBtnStyle}>
+                      {applying ? t('asset-pilot.common.loading') : t('asset-pilot.rule-preview.apply-now')}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+        </div>
       </div>
-    </div>
+      {confirming && preview != null && (
+        <ConfirmDialog
+          title={t('asset-pilot.rule-preview.confirm-title')}
+          description={t('asset-pilot.rule-preview.confirm-description', { id: preview.objectId, count: preview.operations.length })}
+          confirmLabel={t('asset-pilot.rule-preview.apply-now')}
+          variant="warning"
+          loading={applying}
+          onConfirm={() => { void applyNow() }}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </>
   )
 }
 
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex',
-  alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-}
 const modalStyle: React.CSSProperties = {
-  background: '#fff', borderRadius: 12, padding: 24, width: 640, maxHeight: '80vh',
-  overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+  ...modalSurfaceStyle, width: 640, maxWidth: 'calc(100vw - 32px)', maxHeight: '80vh', overflow: 'auto',
 }
 const closeBtnStyle: React.CSSProperties = {
-  border: 'none', background: 'none', fontSize: 22, cursor: 'pointer', color: '#8c8c8c',
+  border: 'none', background: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--ap-color-text-secondary)',
 }
 const inputStyle: React.CSSProperties = {
-  flex: 1, padding: '6px 12px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, outline: 'none',
+  flex: 1, padding: '6px 12px', border: '1px solid var(--ap-color-border)', borderRadius: 6, fontSize: 13, outline: 'none',
 }
 const primaryBtnStyle: React.CSSProperties = {
-  padding: '6px 16px', border: 'none', borderRadius: 6, background: '#1677ff', color: '#fff',
+  padding: '6px 16px', border: 'none', borderRadius: 6, background: 'var(--ap-color-primary)', color: 'var(--ap-color-text-light-solid)',
   cursor: 'pointer', fontSize: 13, fontWeight: 500,
 }
 const applyBtnStyle: React.CSSProperties = {
-  padding: '6px 16px', border: '1px solid #fa8c16', borderRadius: 6, background: '#fff7e6', color: '#fa8c16',
+  padding: '6px 16px', border: '1px solid var(--ap-color-warning-border)', borderRadius: 6, background: 'var(--ap-color-warning-bg)', color: 'var(--ap-color-warning-text)',
   cursor: 'pointer', fontSize: 13, fontWeight: 500,
 }
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '6px', fontSize: 11, color: '#8c8c8c', fontWeight: 500 }
+const thStyle: React.CSSProperties = { textAlign: 'left', padding: '6px', fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)', fontWeight: 500 }
 const tdStyle: React.CSSProperties = { padding: '6px' }

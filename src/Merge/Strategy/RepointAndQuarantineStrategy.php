@@ -6,19 +6,22 @@ namespace Oronts\AssetPilotBundle\Merge\Strategy;
 
 use Oronts\AssetPilotBundle\Enum\DispositionOutcome;
 use Oronts\AssetPilotBundle\Merge\CopyDisposition;
-use Oronts\AssetPilotBundle\Merge\DuplicateMergeStrategyInterface;
+use Oronts\AssetPilotBundle\Merge\DuplicateMergeContextInterface;
 use Oronts\AssetPilotBundle\Merge\RepointReport;
-use Oronts\AssetPilotBundle\Service\QuarantineService;
+use Oronts\AssetPilotBundle\Merge\ResumableDuplicateMergeStrategyInterface;
+use Oronts\AssetPilotBundle\Service\QuarantineServiceInterface;
 
 /**
  * The default, reversible policy: once a copy's references are fully repointed onto the canonical
  * asset, move the copy to quarantine (restorable) rather than deleting it. A copy whose references
  * could not all be repointed is left in place and reported, never quarantined.
  */
-class RepointAndQuarantineStrategy implements DuplicateMergeStrategyInterface
+class RepointAndQuarantineStrategy implements ResumableDuplicateMergeStrategyInterface
 {
+    use QuarantinesCopy;
+
     public function __construct(
-        protected readonly QuarantineService $quarantine,
+        protected readonly QuarantineServiceInterface $quarantine,
     ) {}
 
     public function name(): string
@@ -31,18 +34,14 @@ class RepointAndQuarantineStrategy implements DuplicateMergeStrategyInterface
         return true;
     }
 
-    public function disposeCopy(int $copyId, RepointReport $report): CopyDisposition
+    public function disposeCopy(RepointReport $report, DuplicateMergeContextInterface $context): CopyDisposition
     {
+        $copyId = $context->copyId();
         if (!$report->fullyRepointed) {
             return new CopyDisposition($copyId, DispositionOutcome::LeftReferenced, $this->blockedReason($report));
         }
 
-        $result = $this->quarantine->quarantine([$copyId]);
-        if (($result['quarantined'] ?? 0) > 0) {
-            return new CopyDisposition($copyId, DispositionOutcome::Quarantined);
-        }
-
-        return new CopyDisposition($copyId, DispositionOutcome::LeftError, 'quarantine did not move the copy');
+        return $this->quarantineCopy($copyId);
     }
 
     private function blockedReason(RepointReport $report): string

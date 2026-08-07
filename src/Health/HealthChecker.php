@@ -11,7 +11,7 @@ use Psr\Log\LoggerInterface;
 /**
  * Runs every tagged health check and rolls the results up into one overall status (the worst).
  */
-class HealthChecker
+class HealthChecker implements HealthCheckerInterface
 {
     /** @var list<HealthCheckInterface> */
     private array $checks;

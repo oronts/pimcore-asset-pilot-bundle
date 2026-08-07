@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Oronts\AssetPilotBundle\Controller\Api;
 
 use Oronts\AssetPilotBundle\Enum\AssetPilotPermission;
-use Oronts\AssetPilotBundle\Service\MetricsService;
+use Oronts\AssetPilotBundle\Service\MetricsServiceInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -14,7 +14,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class MetricsController
 {
     public function __construct(
-        protected readonly MetricsService $metrics,
+        protected readonly MetricsServiceInterface $metrics,
         protected readonly LoggerInterface $logger,
     ) {}
 

@@ -26,13 +26,13 @@ export const RecentOperationsTable: React.FC<RecentOperationsTableProps> = ({ op
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>{t('asset-pilot.dashboard.recent-operations')}</h4>
+        <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--ap-color-text)' }}>{t('asset-pilot.dashboard.recent-operations')}</h4>
         <button onClick={onViewAll} style={viewAllStyle}>{t('asset-pilot.dashboard.view-all')}</button>
       </div>
-      <ResponsiveTableWrapper>
+      <ResponsiveTableWrapper label={t('asset-pilot.common.table-scroll-region')}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
+            <tr style={{ borderBottom: '2px solid var(--ap-color-border-secondary)' }}>
               <SortableHeader label={t('asset-pilot.columns.asset')} field="asset_id" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />
               <SortableHeader label={t('asset-pilot.columns.from')} field="asset_path_from" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />
               <SortableHeader label={t('asset-pilot.columns.to')} field="asset_path_to" currentField={sortField} direction={sortDirection} onToggle={toggleSort} />
@@ -43,13 +43,13 @@ export const RecentOperationsTable: React.FC<RecentOperationsTableProps> = ({ op
           </thead>
           <tbody>
             {sorted.map((op, i) => (
-              <tr key={op.id ?? i} style={{ borderBottom: '1px solid #f5f5f5' }}>
+              <tr key={op.id ?? i} style={{ borderBottom: '1px solid var(--ap-color-fill-secondary)' }}>
                 <td style={tdStyle}>{op.asset_id}</td>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }} title={op.asset_path_from}>{truncate(op.asset_path_from, 30)}</td>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }} title={op.asset_path_to}>{truncate(op.asset_path_to, 30)}</td>
+                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }} title={op.asset_path_from}>{truncate(op.asset_path_from, 30)}</td>
+                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 'var(--ap-font-size)' }} title={op.asset_path_to}>{truncate(op.asset_path_to, 30)}</td>
                 <td style={tdStyle}>{op.rule_name}</td>
                 <td style={tdStyle}><StatusTag status={op.status} /></td>
-                <td style={{ ...tdStyle, fontSize: 11, color: '#8c8c8c' }}>{formatDate(op.created_at)}</td>
+                <td style={{ ...tdStyle, fontSize: 'var(--ap-font-size)', color: 'var(--ap-color-text-secondary)' }}>{formatDate(op.created_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -60,6 +60,6 @@ export const RecentOperationsTable: React.FC<RecentOperationsTableProps> = ({ op
 }
 
 const viewAllStyle: React.CSSProperties = {
-  border: 'none', background: 'none', color: '#1677ff', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+  border: 'none', background: 'none', color: 'var(--ap-color-primary)', cursor: 'pointer', fontSize: 'var(--ap-font-size)', fontWeight: 500,
 }
 const tdStyle: React.CSSProperties = { padding: '6px' }

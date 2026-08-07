@@ -35,10 +35,30 @@ readonly class OperationResult
         );
     }
 
+    public static function completedWithObserverError(string $reason, MoveOperation $operation): self
+    {
+        return new self(
+            status: OperationStatus::CompletedWithObserverError,
+            message: $reason,
+            operation: $operation,
+            durationMs: $operation->durationMs,
+        );
+    }
+
     public static function failed(string $reason, MoveOperation $operation): self
     {
         return new self(
             status: OperationStatus::Failed,
+            message: $reason,
+            operation: $operation,
+            durationMs: $operation->durationMs,
+        );
+    }
+
+    public static function recoveryRequired(string $reason, MoveOperation $operation): self
+    {
+        return new self(
+            status: OperationStatus::RecoveryRequired,
             message: $reason,
             operation: $operation,
             durationMs: $operation->durationMs,

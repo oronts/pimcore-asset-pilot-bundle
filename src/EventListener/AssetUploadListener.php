@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Oronts\AssetPilotBundle\EventListener;
 
+use Doctrine\DBAL\Connection;
 use Oronts\AssetPilotBundle\Enum\TriggerType;
-use Oronts\AssetPilotBundle\Service\AssetOrganizer;
+use Oronts\AssetPilotBundle\Service\AssetOrganizerInterface;
+use Oronts\AssetPilotBundle\Service\AutomaticOrganizeIntentStoreInterface;
 use Oronts\AssetPilotBundle\Service\LoopGuard;
-use Oronts\AssetPilotBundle\Service\OrganizeDispatcher;
+use Oronts\AssetPilotBundle\Service\OrganizeDispatcherInterface;
 use Pimcore\Event\Model\AssetEvent;
 use Pimcore\Model\Asset;
 use Pimcore\Model\DataObject\Concrete;
@@ -19,10 +21,12 @@ class AssetUploadListener
     private const int DEPENDENCY_PAGE_SIZE = 100;
 
     public function __construct(
-        protected readonly AssetOrganizer $organizer,
-        protected readonly OrganizeDispatcher $dispatcher,
+        protected readonly AssetOrganizerInterface $organizer,
+        protected readonly OrganizeDispatcherInterface $dispatcher,
         protected readonly LoopGuard $loopGuard,
         protected readonly LoggerInterface $logger,
+        protected readonly Connection $connection,
+        protected readonly AutomaticOrganizeIntentStoreInterface $intents,
         protected readonly bool $enabled = true,
         protected readonly bool $asyncEnabled = true,
     ) {}
@@ -129,25 +133,49 @@ class AssetUploadListener
 
         // Check if the object is already being processed (loop prevention)
         if ($this->loopGuard->isProcessingObject($objectId)) {
-            $this->logger->debug('AssetUploadListener: object {id} already being processed, skipping', [
+            // Fold the save into the live automatic intent durably; a bulk/sync run owns no intent, so fall
+            // back to the cache dirty flag that path drains.
+            try {
+                if (!$this->intents->markDirtyIfPresent($objectId)) {
+                    $this->loopGuard->markObjectDirty($objectId);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->error('AssetUploadListener: failed to record a coalesced save for object {id}: {error}', [
+                    'id' => $objectId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+                if ($this->connection->getTransactionNestingLevel() > 0) {
+                    throw $e;
+                }
+            }
+            $this->logger->debug('AssetUploadListener: object {id} already being processed, folding into its run', [
                 'id' => $objectId,
             ]);
             return;
         }
 
         if ($this->asyncEnabled) {
-            // Dispatch deduplication: skip if a message was recently dispatched for this object
-            if ($this->loopGuard->wasObjectRecentlyDispatched($objectId)) {
-                $this->logger->debug('AssetUploadListener: message recently dispatched for object {id}, skipping duplicate', [
+            try {
+                // The durable intent is the single coalescing record: deferObject folds the save into the live
+                // pending run or records a fresh one, so no cache dispatch marker is needed.
+                $this->dispatcher->deferObject($objectId, TriggerType::AssetUpload);
+            } catch (\Throwable $e) {
+                $this->logger->error('AssetUploadListener: failed to record async organize for object {id}: {error}', [
                     'id' => $objectId,
+                    'error' => $e->getMessage(),
+                    'exception' => $e,
                 ]);
+                // A caller-owned transaction has not committed the save yet: surface the failure so it rolls
+                // back together. After commit (nesting 0) it stays best-effort and never fails the save.
+                if ($this->connection->getTransactionNestingLevel() > 0) {
+                    throw $e;
+                }
+
                 return;
             }
 
-            $this->dispatcher->dispatchObject($objectId, TriggerType::AssetUpload);
-            $this->loopGuard->markObjectDispatched($objectId);
-
-            $this->logger->debug('AssetUploadListener: dispatched async organize for object {id}', [
+            $this->logger->debug('AssetUploadListener: recorded pending async organize intent for object {id}', [
                 'id' => $objectId,
             ]);
 

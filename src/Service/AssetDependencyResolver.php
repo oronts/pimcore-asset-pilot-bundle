@@ -12,7 +12,7 @@ use Psr\Log\LoggerInterface;
  * reverse-dependency query is paged (Pimcore applies a LIMIT only when both offset and limit are
  * given) and the result is bounded, so a heavily-referenced asset never triggers an unbounded load.
  */
-class AssetDependencyResolver
+class AssetDependencyResolver implements AssetDependencyResolverInterface
 {
     private const int PAGE_SIZE = 100;
 
