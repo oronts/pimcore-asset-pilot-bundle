@@ -7,7 +7,7 @@
         window.alternativePluginExportPaths = {}
       }
 
-      window.pluginRemotes.oronts_asset_pilot_bundle = "/bundles/orontsassetpilot/studio/build/2.0.0-a5ec7aab-c119-4082-93ae-2377b9a47f94/static/js/remoteEntry.js"
+      window.pluginRemotes.oronts_asset_pilot_bundle = "/bundles/orontsassetpilot/studio/build/2.0.0-c539524b-ecfd-4fa7-8460-472a4c0180e4/static/js/remoteEntry.js"
 
       
     
